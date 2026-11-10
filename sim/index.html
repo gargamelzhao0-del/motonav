@@ -1,0 +1,1546 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>MotoNav 圆屏模拟</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Anton&family=Barlow+Condensed:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: 圆屏设备是主角居左，右侧是工作台式控制面板；窄屏上下堆叠 */
+:root {
+  --bg: #0b0d0e;
+  --panel: #131618;
+  --raised: #1a1e20;
+  --line: #272c2f;
+  --fg: #ebe8df;
+  --muted: #899194;
+  --gta-yellow: #f0c850;
+  --route: #b66dff;
+  --friend: #4fa3ff;
+  --danger: #e5484d;
+  --ok: #5cb85c;
+  --f-display: "Anton", "Impact", "Arial Narrow", sans-serif;
+  --f-ui: "Barlow Condensed", "PingFang SC", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+  --f-mono: "IBM Plex Mono", ui-monospace, Consolas, monospace;
+  color-scheme: dark;
+}
+html, body { background: var(--bg); color: var(--fg); }
+body {
+  font-family: var(--f-ui);
+  font-size: 16px;
+  line-height: 1.4;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 24px 48px;
+}
+.app {
+  max-width: 1120px;
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 360px;
+  gap: 28px 36px;
+  align-items: start;
+}
+@media (max-width: 900px) { .app { grid-template-columns: minmax(0, 1fr); } }
+
+header {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 18px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--line);
+}
+h1 { margin: 0; font-family: var(--f-display); font-weight: 400; font-size: 44px; line-height: 1; letter-spacing: .02em; }
+h1 span { color: var(--gta-yellow); }
+.spec { font-family: var(--f-mono); font-size: 12px; color: var(--muted); letter-spacing: .04em; }
+
+.stage { display: flex; flex-direction: column; align-items: center; gap: 16px; min-width: 0; }
+.bezel {
+  --pad: 20px;
+  position: relative;
+  box-sizing: border-box;
+  width: min(506px, 100%);
+  max-width: 100%;
+  aspect-ratio: 1;
+  padding: var(--pad);
+  border-radius: 50%;
+  background: radial-gradient(circle at 32% 24%, #3b4044, #151719 58%, #050606);
+  box-shadow: 0 30px 70px rgba(0, 0, 0, .65), inset 0 1px 0 rgba(255, 255, 255, .14), inset 0 -2px 6px rgba(0, 0, 0, .8);
+  transition: width .3s ease;
+}
+.stage.real .bezel { --pad: 7px; width: 182px; }
+#screen { display: block; width: 100%; height: 100%; border-radius: 50%; background: #000; touch-action: none; cursor: pointer; }
+.glare {
+  position: absolute;
+  inset: var(--pad);
+  border-radius: 50%;
+  pointer-events: none;
+  background: linear-gradient(140deg, rgba(255, 255, 255, .62), rgba(255, 255, 255, .34) 45%, rgba(255, 255, 255, .46));
+  mix-blend-mode: screen;
+}
+.hint { margin: 0; font-size: 14px; color: var(--muted); text-align: center; text-wrap: balance; }
+.hint kbd { font-family: var(--f-ui); font-weight: 600; color: var(--fg); padding: 1px 6px; border: 1px solid var(--line); border-radius: 3px; background: var(--raised); }
+
+.readout {
+  width: min(506px, 100%);
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1px;
+  background: var(--line);
+  border: 1px solid var(--line);
+}
+.readout div { background: var(--panel); padding: 8px 10px; min-width: 0; }
+.readout dt { font-size: 12px; letter-spacing: .08em; color: var(--muted); }
+.readout dd { margin: 0; font-family: var(--f-mono); font-size: 14px; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+@media (max-width: 440px) { .readout { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+.panel { display: flex; flex-direction: column; gap: 22px; min-width: 0; }
+.group { display: flex; flex-direction: column; gap: 10px; }
+.group h2 { margin: 0; font-size: 13px; font-weight: 600; letter-spacing: .14em; color: var(--muted); }
+.acts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+button { font: inherit; color: inherit; }
+.act {
+  display: grid;
+  grid-template-columns: 12px minmax(0, 1fr);
+  column-gap: 9px;
+  align-items: center;
+  text-align: left;
+  padding: 9px 11px;
+  background: var(--raised);
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  cursor: pointer;
+  transition: border-color .15s, background .15s;
+}
+.act:hover { border-color: #3d4448; background: #1f2427; }
+.act:focus-visible, .seg button:focus-visible, .tool:focus-visible { outline: 2px solid var(--gta-yellow); outline-offset: 2px; }
+.act i { width: 10px; height: 10px; border-radius: 50%; background: var(--c); box-shadow: 0 0 0 2px rgba(255, 255, 255, .85); grid-row: span 2; }
+.act b { font-weight: 600; font-size: 17px; line-height: 1.2; }
+.act small { font-size: 13px; color: var(--muted); line-height: 1.25; }
+.act[aria-pressed="true"] { border-color: var(--friend); background: #172430; }
+
+.row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.seg { display: inline-flex; flex-wrap: wrap; border: 1px solid var(--line); border-radius: 2px; overflow: hidden; }
+.seg button { padding: 7px 12px; background: var(--raised); border: 0; border-right: 1px solid var(--line); cursor: pointer; font-weight: 600; }
+.seg button:last-child { border-right: 0; }
+.seg button[aria-pressed="true"] { background: var(--gta-yellow); color: #111; }
+.tool { padding: 7px 14px; background: var(--raised); border: 1px solid var(--line); border-radius: 2px; font-weight: 600; cursor: pointer; }
+.tool[aria-pressed="true"] { border-color: var(--gta-yellow); color: var(--gta-yellow); }
+.lbl { font-size: 14px; color: var(--muted); min-width: 52px; }
+
+.notes { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 8px; font-size: 15px; color: #c3c6c0; }
+.notes li { padding-left: 14px; position: relative; }
+.notes li::before { content: ""; position: absolute; left: 0; top: .6em; width: 6px; height: 2px; background: var(--gta-yellow); }
+.notes em { font-style: normal; color: var(--fg); font-weight: 600; }
+</style>
+
+<div class="app">
+  <header>
+    <h1>MOTO<span>NAV</span></h1>
+    <span class="spec">1.75″ ROUND AMOLED · 466 × 466 · CO5300 QSPI · 小地图效果模拟</span>
+  </header>
+
+  <section class="stage" id="stage">
+    <div class="bezel">
+      <canvas id="screen" width="466" height="466" aria-label="466×466 圆形屏幕模拟"></canvas>
+      <div class="glare" id="glare" hidden></div>
+    </div>
+    <p class="hint"><kbd>长按屏幕</kbd> 打开快捷轮盘，拖到选项上松手 · <kbd>轻触</kbd> 确认 / 唤醒</p>
+    <dl class="readout" id="readout">
+      <div><dt>场景</dt><dd id="r-scene">导航中</dd></div>
+      <div><dt>车速</dt><dd id="r-speed">0 km/h</dd></div>
+      <div><dt>限速</dt><dd id="r-limit">—</dd></div>
+      <div><dt>视角</dt><dd id="r-view">—</dd></div>
+      <div><dt>倾角</dt><dd id="r-lean">—</dd></div>
+      <div><dt>剩余</dt><dd id="r-remain">—</dd></div>
+    </dl>
+  </section>
+
+  <aside class="panel">
+    <div class="group">
+      <h2>场景触发</h2>
+      <div class="acts">
+        <button class="act" id="a-camera" data-act="camera"><i style="--c: var(--danger)"></i><b>测速提醒</b><small>通缉星级 + 警灯外圈</small></button>
+        <button class="act" id="a-off" data-act="offroute"><i style="--c: #9aa0a3"></i><b>偏航重算</b><small>路线闪断后重新绘出</small></button>
+        <button class="act" id="a-agent" data-act="agent"><i style="--c: var(--gta-yellow)"></i><b>领航员短信</b><small>Agent 推送沿途补给</small></button>
+        <button class="act" id="a-quest" data-act="quest"><i style="--c: var(--gta-yellow)"></i><b>支线任务</b><small>“?” 兴趣点，可接受</small></button>
+        <button class="act" id="a-fleet" data-act="fleet" aria-pressed="false"><i style="--c: var(--friend)"></i><b>车队模式</b><small>队友显示为蓝色标记</small></button>
+        <button class="act" id="a-rain" data-act="rain" aria-pressed="false"><i style="--c: #7fb4d9"></i><b>雨天</b><small>雨幕 + 提前转向提示</small></button>
+        <button class="act" id="a-wheel" data-act="wheel"><i style="--c: #ffffff"></i><b>快捷轮盘</b><small>音乐 / 对讲 / 静音</small></button>
+        <button class="act" id="a-crash" data-act="crash"><i style="--c: #c8323a"></i><b>摔车检测</b><small>WASTED + 求救倒计时</small></button>
+        <button class="act" id="a-arrive" data-act="arrive"><i style="--c: var(--route)"></i><b>到达终点</b><small>MISSION PASSED 结算</small></button>
+        <button class="act" id="a-standby" data-act="standby"><i style="--c: #6b7275"></i><b>熄火待机</b><small>城市航拍式表盘</small></button>
+      </div>
+    </div>
+
+    <div class="group">
+      <h2>视角与配色</h2>
+      <div class="row">
+        <span class="lbl">视角</span>
+        <div class="seg" role="group" aria-label="地图视角">
+          <button id="vw-auto" data-view="auto" aria-pressed="true">自动</button>
+          <button id="vw-top" data-view="top" aria-pressed="false">俯视</button>
+          <button id="vw-tilt" data-view="tilt" aria-pressed="false">倾斜</button>
+          <button id="vw-chase" data-view="chase" aria-pressed="false">追车</button>
+        </div>
+      </div>
+      <div class="row">
+        <span class="lbl">配色</span>
+        <div class="seg" role="group" aria-label="地图配色">
+          <button id="pal-ls" data-pal="ls" aria-pressed="true">洛圣都</button>
+          <button id="pal-vice" data-pal="vice" aria-pressed="false">罪恶都市</button>
+          <button id="pal-night" data-pal="night" aria-pressed="false">夜骑</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="group">
+      <h2>仿真与显示</h2>
+      <div class="row">
+        <button class="tool" id="t-pause" data-act="pause" aria-pressed="false">暂停</button>
+        <div class="seg" role="group" aria-label="仿真倍速">
+          <button id="sp-1" data-speed="1" aria-pressed="false">1×</button>
+          <button id="sp-2" data-speed="2" aria-pressed="true">2×</button>
+          <button id="sp-4" data-speed="4" aria-pressed="false">4×</button>
+        </div>
+        <button class="tool" id="t-restart" data-act="restart">重新出发</button>
+      </div>
+      <div class="row">
+        <div class="seg" role="group" aria-label="预览尺寸">
+          <button id="sz-big" data-size="big" aria-pressed="true">放大</button>
+          <button id="sz-real" data-size="real" aria-pressed="false">实物大小</button>
+        </div>
+        <button class="tool" id="t-glare" data-act="glare" aria-pressed="false">强光模拟</button>
+      </div>
+    </div>
+
+    <div class="group">
+      <h2>设计要点</h2>
+      <ul class="notes">
+        <li><em>自动视角</em>：停车时是俯视地图，起步后镜头像 GTA5 一样压到身后上方，前方道路向远处收拢。</li>
+        <li>倾斜用<em>逐行透视</em>（Mode 7）实现：先画平面地图，再按行缩放贴到屏幕上，ESP32-S3 也算得动。</li>
+        <li><em>压弯倾角</em>显示在箭头下方，过弯漂亮会弹出奖励字幕；结算页记录最大倾角。</li>
+        <li><em>夜骑</em>配色几乎全黑，AMOLED 黑色像素不发光，夜里最省电也最不晃眼。</li>
+        <li>底部两段弧对应 GTA 的血条和护甲：左边车速（白刻度是限速），右边路线进度。</li>
+      </ul>
+    </div>
+  </aside>
+</div>
+
+<script>
+(() => {
+  const W = 466, C = 233, CX = 233, RING = 212, F = 700;
+  const OW = 1200, OH = 1300, OCX = 600, OCY = 1030;
+  const TAU = Math.PI * 2, D2R = Math.PI / 180;
+  const cv = document.getElementById('screen');
+  const ctx = cv.getContext('2d');
+  const off = document.createElement('canvas');
+  off.width = OW; off.height = OH;
+  const octx = off.getContext('2d');
+  const reduceMotion = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  const COL = {
+    yellow: '#f0c850', friend: '#4fa3ff', danger: '#e5484d', police: '#2f6bff',
+    health: '#5cb85c', armor: '#3e9ad6', muted: '#9aa2a5', wasted: '#c8323a',
+  };
+  const THEMES = {
+    ls: {
+      name: '洛圣都', land: '#283033', bld: '#313b3f', minor: '#6c787e', major: '#929ca1',
+      hwyEdge: '#3a4144', hwy: '#c4cacc', water: '#1e4560', park: '#2a4430',
+      route: '#b66dff', routeEdge: '#2a1440', accent: '#f0c850', fog: '14,18,20',
+    },
+    vice: {
+      name: '罪恶都市', land: '#1c1730', bld: '#292146', minor: '#6a5f9c', major: '#9c80d4',
+      hwyEdge: '#2c1f48', hwy: '#ff7ac8', water: '#0d5366', park: '#1b3e3a',
+      route: '#2ee6d6', routeEdge: '#06302d', accent: '#ff5fa2', fog: '24,10,40',
+    },
+    night: {
+      name: '夜骑', land: '#040608', bld: '#0c1015', minor: '#33424f', major: '#506372',
+      hwyEdge: '#0a0e12', hwy: '#788a98', water: '#06182a', park: '#071710',
+      route: '#ff8a3d', routeEdge: '#3a1a05', accent: '#ff8a3d', fog: '0,0,0',
+    },
+  };
+  let T = THEMES.ls;
+
+  const FUI = '"Barlow Condensed","PingFang SC","Microsoft YaHei","Noto Sans SC",sans-serif';
+  const FDISP = '"Anton","Impact",sans-serif';
+  const font = (w, px, f = FUI) => `${w} ${px}px ${f}`;
+  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+  const easeOut = t => 1 - Math.pow(1 - clamp(t, 0, 1), 3);
+  const pad2 = n => String(n).padStart(2, '0');
+
+  // ---------- 世界生成（米，x 向东，y 向北） ----------
+  function mulberry32(a) {
+    return () => {
+      a |= 0; a = a + 0x6D2B79F5 | 0;
+      let t = Math.imul(a ^ a >>> 15, 1 | a);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+  const rnd = mulberry32(20261109);
+  const BLOCK = 150, N = 30, OFF = -(N - 1) * BLOCK / 2;
+
+  const nodes = [];
+  for (let i = 0; i < N; i++) {
+    nodes[i] = [];
+    for (let j = 0; j < N; j++) {
+      const bx = OFF + i * BLOCK, by = OFF + j * BLOCK;
+      nodes[i][j] = [
+        bx + 30 * Math.sin(by * 0.0029 + 1.1) + 16 * Math.sin(bx * 0.0019) + (rnd() - .5) * 16,
+        by + 26 * Math.sin(bx * 0.0024 + .4) + (rnd() - .5) * 16,
+      ];
+    }
+  }
+
+  const WP = [[11, 9], [16, 9], [16, 13], [19, 13], [19, 18], [17, 18], [17, 21]];
+  const LEGS_META = [
+    ['建国路', 60, '建外 · CBD'], ['光华东路', 50, '光华里'], ['东三环北路', 60, '三元桥'],
+    ['朝阳北路', 40, '团结湖'], ['工体东路', 50, '工人体育场'], ['新源南路', 40, '三里屯'],
+  ];
+  const DEST = '三里屯太古里';
+
+  const ek = (a, b, c, d) => (a < c || (a === c && b < d)) ? `${a},${b},${c},${d}` : `${c},${d},${a},${b}`;
+  const routeEdges = new Set();
+  const rIdx = [WP[0].slice()], wpIdx = [0];
+  for (let k = 0; k < WP.length - 1; k++) {
+    let [i, j] = WP[k];
+    const [ti, tj] = WP[k + 1];
+    while (i !== ti || j !== tj) {
+      const ni = i + Math.sign(ti - i), nj = j + Math.sign(tj - j);
+      routeEdges.add(ek(i, j, ni, nj));
+      i = ni; j = nj;
+      rIdx.push([i, j]);
+    }
+    wpIdx.push(rIdx.length - 1);
+  }
+
+  const bbox = pts => {
+    let a = Infinity, b = Infinity, c = -Infinity, d = -Infinity;
+    for (const [x, y] of pts) { a = Math.min(a, x); b = Math.min(b, y); c = Math.max(c, x); d = Math.max(d, y); }
+    return [a, b, c, d];
+  };
+
+  const streets = [];
+  const pushRun = (run, cls) => { if (run.length > 1) streets.push({ pts: run, cls, bb: bbox(run) }); };
+  for (let j = 0; j < N; j++) {
+    const cls = j % 4 === 1 ? 'major' : 'minor';
+    let run = [nodes[0][j]];
+    for (let i = 0; i < N - 1; i++) {
+      const keep = cls === 'major' || routeEdges.has(ek(i, j, i + 1, j)) || rnd() > 0.2;
+      if (keep) run.push(nodes[i + 1][j]); else { pushRun(run, cls); run = [nodes[i + 1][j]]; }
+    }
+    pushRun(run, cls);
+  }
+  for (let i = 0; i < N; i++) {
+    const cls = i % 4 === 1 ? 'major' : 'minor';
+    let run = [nodes[i][0]];
+    for (let j = 0; j < N - 1; j++) {
+      const keep = cls === 'major' || routeEdges.has(ek(i, j, i, j + 1)) || rnd() > 0.2;
+      if (keep) run.push(nodes[i][j + 1]); else { pushRun(run, cls); run = [nodes[i][j + 1]]; }
+    }
+    pushRun(run, cls);
+  }
+  const hwyPts = [];
+  for (let t = 0; t <= 1.0001; t += 0.02) hwyPts.push([-2300 + 4600 * t, -900 + 520 * Math.sin(t * 2.6 + .5) + 700 * t]);
+  streets.push({ pts: hwyPts, cls: 'hwy', bb: bbox(hwyPts) });
+
+  const riverY = x => 0.3 * x + 60 + 110 * Math.sin(x * 0.0021) + 30 * Math.sin(x * 0.007);
+  const LAKE = [-1350, -350];
+  const water = [];
+  {
+    const up = [], dn = [];
+    for (let x = -2500; x <= 2500; x += 50) { const y = riverY(x); up.push([x, y + 58]); dn.unshift([x, y - 58]); }
+    const pts = up.concat(dn);
+    water.push({ pts, bb: bbox(pts) });
+    const lake = [];
+    for (let a = 0; a < 26; a++) {
+      const r = 280 + rnd() * 50;
+      lake.push([LAKE[0] + Math.cos(a / 26 * TAU) * r * 1.2, LAKE[1] + Math.sin(a / 26 * TAU) * r]);
+    }
+    water.push({ pts: lake, bb: bbox(lake) });
+  }
+
+  const parks = [], parkCells = new Set();
+  const shrinkPoly = (pts, m) => {
+    const cx = pts.reduce((s, p) => s + p[0], 0) / pts.length, cy = pts.reduce((s, p) => s + p[1], 0) / pts.length;
+    return pts.map(([x, y]) => { const d = Math.hypot(x - cx, y - cy); return [x - (x - cx) / d * m, y - (y - cy) / d * m]; });
+  };
+  for (let n = 0; n < 46; n++) {
+    const i = Math.floor(rnd() * (N - 1)), j = Math.floor(rnd() * (N - 1));
+    parkCells.add(`${i},${j}`);
+    const pts = shrinkPoly([nodes[i][j], nodes[i + 1][j], nodes[i + 1][j + 1], nodes[i][j + 1]], 14);
+    parks.push({ pts, bb: bbox(pts) });
+  }
+  {
+    for (let i = 12; i < 14; i++) for (let j = 14; j < 17; j++) parkCells.add(`${i},${j}`);
+    const pts = shrinkPoly([nodes[12][14], nodes[14][14], nodes[14][17], nodes[12][17]], 14);
+    parks.push({ pts, bb: bbox(pts) });
+  }
+
+  // 建筑轮廓：每个街区切 2×2 地块，随机留空
+  const blds = [];
+  for (let i = 0; i < N - 1; i++) {
+    for (let j = 0; j < N - 1; j++) {
+      if (parkCells.has(`${i},${j}`)) continue;
+      const a = nodes[i][j], b = nodes[i + 1][j], c = nodes[i + 1][j + 1], d = nodes[i][j + 1];
+      const bil = (u, v) => [
+        a[0] * (1 - u) * (1 - v) + b[0] * u * (1 - v) + c[0] * u * v + d[0] * (1 - u) * v,
+        a[1] * (1 - u) * (1 - v) + b[1] * u * (1 - v) + c[1] * u * v + d[1] * (1 - u) * v,
+      ];
+      const ctr = bil(.5, .5);
+      if (Math.abs(ctr[1] - riverY(ctr[0])) < 115) continue;
+      if (Math.hypot(ctr[0] - LAKE[0], ctr[1] - LAKE[1]) < 430) continue;
+      const polys = [];
+      for (let p = 0; p < 2; p++) for (let q = 0; q < 2; q++) {
+        if (rnd() < 0.18) continue;
+        const u0 = 0.11 + p * 0.41 + rnd() * 0.04, v0 = 0.11 + q * 0.41 + rnd() * 0.04;
+        const u1 = u0 + 0.28 + rnd() * 0.08, v1 = v0 + 0.28 + rnd() * 0.08;
+        polys.push([bil(u0, v0), bil(u1, v0), bil(u1, v1), bil(u0, v1)]);
+      }
+      blds.push({ bb: bbox([a, b, c, d]), polys });
+    }
+  }
+
+  const POI_TYPES = ['fuel', 'food', 'view', 'shop'];
+  const pois = [];
+  for (let n = 0; n < 60; n++) {
+    const i = 1 + Math.floor(rnd() * (N - 3)), j = 1 + Math.floor(rnd() * (N - 3));
+    const a = nodes[i][j], b = nodes[i + 1][j + 1];
+    pois.push({ x: a[0] + (b[0] - a[0]) * (.3 + rnd() * .4), y: a[1] + (b[1] - a[1]) * (.3 + rnd() * .4), type: POI_TYPES[n % 4] });
+  }
+
+  // ---------- 路线 ----------
+  const RP = rIdx.map(([i, j]) => nodes[i][j]);
+  const RS = [0];
+  for (let k = 1; k < RP.length; k++) RS.push(RS[k - 1] + Math.hypot(RP[k][0] - RP[k - 1][0], RP[k][1] - RP[k - 1][1]));
+  const L = RS[RS.length - 1];
+  const wpS = wpIdx.map(i => RS[i]);
+  const legs = LEGS_META.map(([name, limit, area], k) => ({ startS: wpS[k], name, limit, area, k }));
+  const turns = [];
+  for (let k = 1; k < WP.length - 1; k++) {
+    const a = nodes[WP[k - 1][0]][WP[k - 1][1]], b = nodes[WP[k][0]][WP[k][1]], c = nodes[WP[k + 1][0]][WP[k + 1][1]];
+    const cross = (b[0] - a[0]) * (c[1] - b[1]) - (b[1] - a[1]) * (c[0] - b[0]);
+    turns.push({ s: wpS[k], dir: cross > 0 ? 'L' : 'R', k });
+  }
+
+  function P(s) {
+    if (s <= 0) return RP[0];
+    if (s >= L) return RP[RP.length - 1];
+    let lo = 0, hi = RS.length - 1;
+    while (hi - lo > 1) { const m = (lo + hi) >> 1; if (RS[m] <= s) lo = m; else hi = m; }
+    const t = (s - RS[lo]) / (RS[hi] - RS[lo]);
+    return [RP[lo][0] + (RP[hi][0] - RP[lo][0]) * t, RP[lo][1] + (RP[hi][1] - RP[lo][1]) * t];
+  }
+  const heading = s => { const a = P(s - 12), b = P(s + 12); return Math.atan2(b[1] - a[1], b[0] - a[0]); };
+  const legAt = s => { for (let k = legs.length - 1; k >= 0; k--) if (s >= legs[k].startS) return legs[k]; return legs[0]; };
+  const nextTurn = () => turns.find(t => t.s > sim.s - 4);
+  const angDiff = (a, b) => { let d = (a - b) % TAU; if (d > Math.PI) d -= TAU; if (d < -Math.PI) d += TAU; return d; };
+
+  const farRow = nodes.map(col => col[6]);
+  const farS = [0];
+  for (let k = 1; k < farRow.length; k++) farS.push(farS[k - 1] + Math.hypot(farRow[k][0] - farRow[k - 1][0], farRow[k][1] - farRow[k - 1][1]));
+  function farPos(t) {
+    const len = farS[farS.length - 1];
+    let s = (t * 9) % (len * 2); const back = s > len; if (back) s = len * 2 - s;
+    let k = 1; while (k < farS.length - 1 && farS[k] < s) k++;
+    const a = farRow[k - 1], b = farRow[k], f = (s - farS[k - 1]) / (farS[k] - farS[k - 1]);
+    const h = Math.atan2(b[1] - a[1], b[0] - a[0]) + (back ? Math.PI : 0);
+    return { x: a[0] + (b[0] - a[0]) * f, y: a[1] + (b[1] - a[1]) * f, h };
+  }
+
+  // ---------- 状态 ----------
+  const sim = { s: 0, v: 0, t: 0, odo: 0, elapsed: 0, maxV: 0, speedMul: 2, paused: false, totalOdo: 0, lean: 0, lastH: 0, maxLean: 0 };
+  const view = { px: 0, py: 0, h: 0, mpp: 1, tilt: 0, phi: 0, cy: 270 };
+  const VIEW_PRESETS = { tilt: { phi: 50 * D2R, cy: 306 }, chase: { phi: 61 * D2R, cy: 332 } };
+  let viewMode = 'auto';
+  let mode = 'nav';           // nav | arrived | standby | wasted
+  let cam = null, offr = null, msg = null, agentPoi = null, quest = null, wheel = null, sub = null, arrived = null, wasted = null, banner = null;
+  let fleet = false, muted = false, playing = true, rain = false, camOver = 0, songIdx = 0, legIdx = 0;
+  const turnLean = new Map();
+  const SONGS = ['夜骑电台 FM 97.4', '老城环线 · Lo-fi', '高速公路之歌', '凌晨三点的加油站'];
+  const drops = Array.from({ length: 90 }, () => ({ x: Math.random() * W, y: Math.random() * W, l: 10 + Math.random() * 16, v: 520 + Math.random() * 380 }));
+
+  function reset() {
+    Object.assign(sim, { s: 0, v: 0, t: 0, odo: 0, elapsed: 0, maxV: 0, lean: 0, maxLean: 0 });
+    cam = offr = msg = agentPoi = quest = wheel = arrived = wasted = null;
+    camOver = 0; legIdx = 0; mode = 'nav'; turnLean.clear();
+    sim.lastH = view.h = heading(0); view.mpp = 0.9;
+    const p = P(0); view.px = p[0]; view.py = p[1];
+    banner = { name: legs[0].name, area: legs[0].area, t0: performance.now() };
+  }
+  const showSub = (text, dur = 3200) => { sub = { text, t0: performance.now(), dur }; };
+  const showMsg = (title, text) => { msg = { t0: performance.now(), title, text }; };
+  const ensureNav = () => {
+    if (mode === 'standby') mode = 'nav';
+    else if (mode === 'arrived') reset();
+    else if (mode === 'wasted') mode = 'nav', wasted = null;
+  };
+
+  // ---------- 仿真 ----------
+  function targetKmh() {
+    const leg = legAt(sim.s);
+    let tk = leg.limit * 0.9 + 4 * Math.sin(sim.t * 0.23 + leg.startS);
+    if (rain) tk *= 0.85;
+    if (cam && !cam.passT) tk = cam.s - sim.s > 230 ? cam.limit + 16 : cam.limit - 6;
+    const nt = nextTurn();
+    if (nt) { const d = nt.s - sim.s; if (d < 90) tk = Math.min(tk, 19 + Math.max(0, d - 8) * 0.45); }
+    const dEnd = L - sim.s;
+    if (dEnd < 160) tk = Math.min(tk, Math.max(6, dEnd * 0.35));
+    return tk;
+  }
+
+  function update(dt, now) {
+    if (mode === 'nav') {
+      const sdt = sim.paused ? 0 : dt * sim.speedMul * (wheel ? 0.25 : 1);
+      if (sdt > 0) {
+        const dv = targetKmh() / 3.6 - sim.v;
+        sim.v = Math.max(0, sim.v + clamp(dv, -3.4 * sdt, 2.2 * sdt));
+        sim.s += sim.v * sdt; sim.t += sdt; sim.elapsed += sdt;
+        sim.odo += sim.v * sdt; sim.totalOdo += sim.v * sdt;
+        sim.maxV = Math.max(sim.maxV, sim.v);
+
+        // 倾角：侧向加速度换算，乘系数让城市低速弯也看得出来
+        const hNow = heading(sim.s), om = angDiff(hNow, sim.lastH) / sdt;
+        sim.lastH = hNow;
+        const leanT = clamp(Math.atan(sim.v * om / 9.81) * 2.4, -0.8, 0.8);
+        sim.lean += (leanT - sim.lean) * Math.min(1, sdt * 4);
+        const leanDeg = Math.abs(sim.lean) / D2R;
+        sim.maxLean = Math.max(sim.maxLean, leanDeg);
+        for (const t of turns) {
+          const d = sim.s - t.s;
+          if (d > -30 && d < 25) turnLean.set(t.k, Math.max(turnLean.get(t.k) || 0, leanDeg));
+          if (d >= 25 && !turnLean.has(-t.k)) {
+            turnLean.set(-t.k, 1);
+            const best = turnLean.get(t.k) || 0;
+            if (best > 12) showSub(`漂亮过弯 · 倾角 {${Math.round(best)}°}`, 2600);
+          }
+        }
+
+        if (sim.s >= L - 1.5) {
+          sim.s = L; sim.v = 0; mode = 'arrived'; arrived = { t0: now };
+          cam = offr = msg = quest = wheel = null;
+        }
+      }
+      const li = legAt(sim.s).k;
+      if (li !== legIdx) { legIdx = li; banner = { name: legs[li].name, area: legs[li].area, t0: now }; }
+
+      if (cam) {
+        const d = cam.s - sim.s, kmh = sim.v * 3.6;
+        if (!cam.passT) {
+          cam.stars = kmh > cam.limit * 1.2 ? 3 : kmh > cam.limit + 1 ? 2 : 1;
+          if (d <= 0 && cam.atCam == null) cam.atCam = kmh;
+          if (d < -25) {
+            cam.passT = now;
+            if (cam.atCam > cam.limit + 1) { camOver++; showSub(`测速点 {超速 ${Math.round(cam.atCam - cam.limit)} km/h}`); }
+            else showSub('已通过测速点 · {未超速}');
+          }
+        } else if (now - cam.passT > 2600) cam = null;
+      }
+      if (offr && now - offr.t0 > 4200) { offr = null; showSub('路线已更新 · 预计多 {2 分钟}'); }
+      if (msg && now - msg.t0 > 7500) msg = null;
+      if (agentPoi && sim.s > agentPoi.anchorS + 150) agentPoi = null;
+      if (quest) {
+        if (quest.phase === 'ask' && now - quest.t0 > 12000) quest = null;
+        else if (quest.phase === 'accepted' && sim.s > quest.anchorS + 250) quest = null;
+      }
+    }
+    if (sub && now - sub.t0 > sub.dur) sub = null;
+    if (banner && now - banner.t0 > 4500) banner = null;
+
+    const a = P(sim.s - 5), b = P(sim.s + 5);
+    view.px = (a[0] + b[0]) / 2; view.py = (a[1] + b[1]) / 2;
+    view.h += angDiff(heading(sim.s), view.h) * Math.min(1, dt * 5);
+    const kmh = sim.v * 3.6;
+    const mpp = mode === 'wasted' ? 0.6 : 0.85 + clamp((kmh - 12) / 68, 0, 1) * 1.6;
+    view.mpp += (mpp - view.mpp) * Math.min(1, dt * 1.2);
+
+    // GTA5 的做法：停车俯视，开起来镜头压低
+    const tgt = viewMode === 'top' ? 0 : viewMode === 'auto' ? (mode === 'nav' ? clamp((kmh - 6) / 16, 0, 1) : 0) : 1;
+    view.tilt += (tgt - view.tilt) * Math.min(1, dt * 1.6);
+    const pre = viewMode === 'chase' ? VIEW_PRESETS.chase : VIEW_PRESETS.tilt;
+    view.phi = pre.phi * view.tilt;
+    view.cy = 270 + (pre.cy - 270) * view.tilt;
+
+    if (rain) for (const d of drops) {
+      d.y += d.v * dt; d.x -= d.v * dt * 0.18;
+      if (d.y > W + 20) { d.y = -20; d.x = Math.random() * (W + 80); }
+    }
+  }
+
+  // ---------- 投影 ----------
+  // 地面坐标（以玩家为原点，单位为俯视像素）→ 屏幕
+  function groundToScreen(gx, gd, phi = view.phi, cy = view.cy) {
+    const s = Math.sin(phi), c = Math.cos(phi), den = F + gd * s;
+    if (den < 80) return null;
+    const sc = F / den;
+    return [CX + gx * sc, cy - gd * c * sc, sc];
+  }
+  function toGround(x, y) {
+    const dx = x - view.px, dy = y - view.py, a = Math.PI / 2 - view.h, co = Math.cos(a), si = Math.sin(a), k = 1 / view.mpp;
+    return [(dx * co - dy * si) * k, (dx * si + dy * co) * k];
+  }
+  const project = (x, y) => { const [gx, gd] = toGround(x, y); return groundToScreen(gx, gd); };
+  function place(x, y, max = 198) {
+    let p = project(x, y);
+    if (!p) { const [gx, gd] = toGround(x, y); p = [CX + gx, view.cy - gd, 0.8]; }
+    const dx = p[0] - C, dy = p[1] - C, d = Math.hypot(dx, dy);
+    return d > max ? { x: C + dx / d * max, y: C + dy / d * max, edge: true, sc: 0.8 } : { x: p[0], y: p[1], edge: false, sc: clamp(p[2], 0.6, 1.1) };
+  }
+
+  // ---------- 地图（画到离屏平面图上） ----------
+  const linePath = (g, pts) => { g.moveTo(pts[0][0], pts[0][1]); for (let i = 1; i < pts.length; i++) g.lineTo(pts[i][0], pts[i][1]); };
+  const polyPath = (g, pts) => { linePath(g, pts); g.closePath(); };
+
+  function routePath(g, s0, s1) {
+    g.beginPath();
+    const a = P(s0); g.moveTo(a[0], a[1]);
+    for (let k = 0; k < RS.length; k++) if (RS[k] > s0 && RS[k] < s1) g.lineTo(RP[k][0], RP[k][1]);
+    const b = P(s1); g.lineTo(b[0], b[1]);
+  }
+
+  function drawWorld(g, px, py, h, k, withRoute, now) {
+    g.fillStyle = T.land; g.fillRect(0, 0, OW, OH);
+    g.save();
+    g.translate(OCX, OCY); g.scale(k, -k); g.rotate(Math.PI / 2 - h); g.translate(-px, -py);
+    g.lineCap = 'round'; g.lineJoin = 'round';
+    const vr = 1350 / k;
+    const near = bb => bb[0] < px + vr && bb[2] > px - vr && bb[1] < py + vr && bb[3] > py - vr;
+
+    g.fillStyle = T.water; g.beginPath();
+    for (const w of water) if (near(w.bb)) polyPath(g, w.pts);
+    g.fill();
+    g.fillStyle = T.park; g.beginPath();
+    for (const p of parks) if (near(p.bb)) polyPath(g, p.pts);
+    g.fill();
+    g.fillStyle = T.bld; g.beginPath();
+    for (const b of blds) if (near(b.bb)) for (const poly of b.polys) polyPath(g, poly);
+    g.fill();
+
+    const strokeClass = (cls, width, color) => {
+      g.beginPath();
+      for (const st of streets) if (st.cls === cls && near(st.bb)) linePath(g, st.pts);
+      g.lineWidth = width / k; g.strokeStyle = color; g.stroke();
+    };
+    strokeClass('minor', 2.8, T.minor);
+    strokeClass('major', 5, T.major);
+    strokeClass('hwy', 10, T.hwyEdge);
+    strokeClass('hwy', 6.5, T.hwy);
+
+    if (withRoute) drawRoute(g, k, now);
+    g.restore();
+  }
+
+  function drawRoute(g, k, now) {
+    if (quest && quest.phase === 'accepted') {
+      const a = P(quest.anchorS);
+      g.beginPath(); g.moveTo(a[0], a[1]); g.lineTo(quest.poi.x, quest.poi.y);
+      g.setLineDash([9 / k, 7 / k]); g.lineDashOffset = -now / 40 / k;
+      g.lineWidth = 4.5 / k; g.strokeStyle = COL.yellow; g.stroke();
+      g.setLineDash([]);
+    }
+    let s1 = L;
+    if (offr) {
+      const t = (now - offr.t0) / 1000;
+      if (t < 1.8) {
+        routePath(g, sim.s, L);
+        g.setLineDash([10 / k, 9 / k]);
+        g.globalAlpha = 0.45 + 0.45 * Math.sin(t * 14);
+        g.lineWidth = 6.5 / k; g.strokeStyle = '#8a8f92'; g.stroke();
+        g.setLineDash([]); g.globalAlpha = 1;
+        return;
+      }
+      if (t < 3.2) return;
+      s1 = Math.min(L, sim.s + easeOut((t - 3.2) / 1.0) * 1800);
+    }
+    routePath(g, sim.s, s1);
+    g.lineWidth = 13 / k; g.strokeStyle = T.routeEdge; g.stroke();
+    g.lineWidth = 8 / k; g.strokeStyle = T.route; g.stroke();
+    // 路线上向前流动的光点，固定在世界坐标上
+    if (!reduceMotion) {
+      g.setLineDash([5 / k, 30 / k]);
+      g.lineDashOffset = sim.s - now / 1000 * 55;
+      g.lineWidth = 3.2 / k; g.strokeStyle = 'rgba(255,255,255,.55)'; g.stroke();
+      g.setLineDash([]);
+    }
+  }
+
+  // 逐行透视贴图（Mode 7）
+  function blit(phi, cy) {
+    ctx.fillStyle = `rgb(${T.fog})`; ctx.fillRect(0, 0, W, W);
+    if (phi < 0.004) { ctx.drawImage(off, OCX - CX, OCY - cy, W, W, 0, 0, W, W); return; }
+    const c = Math.cos(phi), s = Math.sin(phi);
+    for (let sy = 0; sy < W; sy++) {
+      const u = (cy - sy - 0.5) / F, den = c - u * s;
+      if (den <= 0) continue;
+      const gd = u * F / den;
+      if (gd > OCY - 4) continue;
+      const sc = F / (F + gd * s), srcH = Math.max(1, c / (den * den));
+      ctx.drawImage(off, OCX - CX / sc, OCY - gd - srcH / 2, W / sc, srcH, 0, sy, W, 1);
+    }
+    // 远处雾化
+    const fogEnd = Math.max(40, cy - 210);
+    const fg = ctx.createLinearGradient(0, 0, 0, fogEnd);
+    fg.addColorStop(0, `rgba(${T.fog},${0.95 * Math.min(1, phi / (45 * D2R))})`);
+    fg.addColorStop(1, `rgba(${T.fog},0)`);
+    ctx.fillStyle = fg; ctx.fillRect(0, 0, W, fogEnd);
+  }
+
+  function desaturate(amount) {
+    ctx.save();
+    ctx.globalCompositeOperation = 'saturation';
+    ctx.globalAlpha = amount; ctx.fillStyle = 'hsl(0,0%,50%)'; ctx.fillRect(0, 0, W, W);
+    ctx.restore();
+  }
+
+  // ---------- 标记 ----------
+  function blip(x, y, type, s = 1, dirAng = null) {
+    ctx.save(); ctx.translate(x, y); ctx.scale(s, s);
+    const fills = { dest: T.route, cam: COL.danger, quest: COL.yellow, agent: COL.yellow, friend: COL.friend };
+    const light = type === 'quest' || type === 'agent';
+    ctx.beginPath(); ctx.ellipse(0, 9, 7, 2.5, 0, 0, TAU); ctx.fillStyle = 'rgba(0,0,0,.35)'; ctx.fill();
+    ctx.beginPath(); ctx.arc(0, 0, 8.5, 0, TAU);
+    ctx.fillStyle = fills[type] || '#1b1e1f'; ctx.fill();
+    ctx.lineWidth = 1.8; ctx.strokeStyle = light ? '#111' : '#f2f2f2'; ctx.stroke();
+    const gc = light ? '#111' : '#f2f2f2';
+    ctx.fillStyle = gc; ctx.strokeStyle = gc; ctx.lineWidth = 1.6; ctx.lineCap = 'round';
+    if (type === 'fuel' || type === 'agent') {
+      ctx.fillRect(-4, -4.5, 5, 9);
+      ctx.beginPath(); ctx.moveTo(1, -2.5); ctx.lineTo(3.8, -1); ctx.lineTo(3.8, 3.5); ctx.stroke();
+    } else if (type === 'food') {
+      ctx.beginPath(); ctx.moveTo(-2.5, -4.5); ctx.lineTo(-2.5, 4.5); ctx.moveTo(-4.3, -4.5); ctx.lineTo(-4.3, -1); ctx.lineTo(-0.7, -1); ctx.lineTo(-0.7, -4.5);
+      ctx.moveTo(2.8, -4.5); ctx.lineTo(2.8, 4.5); ctx.stroke();
+    } else if (type === 'view') {
+      ctx.beginPath(); ctx.moveTo(-5.5, 3.5); ctx.lineTo(-1.5, -3.5); ctx.lineTo(0.8, 0); ctx.lineTo(2.8, -2); ctx.lineTo(5.5, 3.5); ctx.closePath(); ctx.fill();
+    } else if (type === 'shop') {
+      ctx.fillRect(-4, -1.5, 8, 6);
+      ctx.beginPath(); ctx.arc(0, -1.5, 2.4, Math.PI, 0); ctx.stroke();
+    } else if (type === 'dest') {
+      ctx.beginPath(); ctx.moveTo(-3, 5); ctx.lineTo(-3, -5); ctx.stroke();
+      ctx.fillRect(-3, -5, 7, 5);
+    } else if (type === 'cam') {
+      ctx.fillRect(-4.5, -3, 9, 6);
+      ctx.beginPath(); ctx.arc(0, 0, 1.8, 0, TAU); ctx.fillStyle = COL.danger; ctx.fill();
+    } else if (type === 'quest') {
+      ctx.font = font(700, 14); ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('?', 0, 1);
+    } else if (type === 'friend' && dirAng != null) {
+      ctx.rotate(dirAng);
+      ctx.beginPath(); ctx.moveTo(4.5, 0); ctx.lineTo(-3, -3.6); ctx.lineTo(-3, 3.6); ctx.closePath(); ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  function pulseRings(x, y, color, now) {
+    for (let i = 0; i < 2; i++) {
+      const t = ((now / 1000) * 0.9 + i * 0.5) % 1;
+      ctx.beginPath(); ctx.ellipse(x, y, 10 + t * 22, (10 + t * 22) * (1 - 0.45 * view.tilt), 0, 0, TAU);
+      ctx.globalAlpha = (1 - t) * 0.8; ctx.lineWidth = 2; ctx.strokeStyle = color; ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  function friendList(now) {
+    const list = [{ name: '阿杰', off: -48, lat: 2.5 }, { name: 'Lily', off: -118, lat: -2.5 }].map(f => {
+      const s = Math.max(0, sim.s + f.off), p = P(s), h = heading(s);
+      return { name: f.name, x: p[0] - Math.sin(h) * f.lat, y: p[1] + Math.cos(h) * f.lat, h };
+    });
+    list.push({ name: '老王', ...farPos(now / 1000) });
+    return list;
+  }
+
+  function drawBlips(now) {
+    const items = [];
+    for (const p of pois) {
+      const q = project(p.x, p.y);
+      if (q && Math.hypot(q[0] - C, q[1] - C) < 196) items.push({ y: q[1], fn: () => blip(q[0], q[1], p.type, clamp(q[2], 0.55, 1) * 0.9) });
+    }
+    items.sort((a, b) => a.y - b.y).forEach(it => it.fn());
+
+    if (cam && !cam.passT) { const cp = P(cam.s), q = place(cp[0], cp[1]); blip(q.x, q.y, 'cam', q.sc); }
+    if (agentPoi) {
+      const q = place(agentPoi.x, agentPoi.y);
+      if (now - agentPoi.t0 < 9000) pulseRings(q.x, q.y, COL.yellow, now);
+      blip(q.x, q.y, 'agent', q.sc * 1.1);
+    }
+    if (quest) {
+      const q = place(quest.poi.x, quest.poi.y);
+      pulseRings(q.x, q.y, COL.yellow, now);
+      blip(q.x, q.y, 'quest', q.sc * 1.15);
+    }
+    if (fleet) {
+      for (const f of friendList(now)) {
+        const q = place(f.x, f.y);
+        const p1 = project(f.x, f.y), p2 = project(f.x + Math.cos(f.h) * 10, f.y + Math.sin(f.h) * 10);
+        const dirAng = p1 && p2 ? Math.atan2(p2[1] - p1[1], p2[0] - p1[0]) : 0;
+        blip(q.x, q.y, 'friend', q.sc, dirAng);
+        ctx.font = font(600, 13); ctx.textBaseline = 'middle';
+        ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(0,0,0,.85)'; ctx.fillStyle = '#dbe9ff';
+        if (q.edge) {
+          const dist = Math.hypot(f.x - view.px, f.y - view.py);
+          const lx = q.x + (C - q.x) * 0.16, ly = q.y + (C - q.y) * 0.16, t = `${f.name} ${(dist / 1000).toFixed(1)}km`;
+          ctx.textAlign = 'center'; ctx.strokeText(t, lx, ly); ctx.fillText(t, lx, ly);
+        } else {
+          ctx.textAlign = 'left'; ctx.strokeText(f.name, q.x + 12, q.y); ctx.fillText(f.name, q.x + 12, q.y);
+        }
+      }
+    }
+    const end = RP[RP.length - 1], q = place(end[0], end[1]);
+    blip(q.x, q.y, 'dest', q.sc * 1.2);
+  }
+
+  function drawPlayer(now) {
+    const sq = 1 - 0.32 * view.tilt;
+    ctx.save(); ctx.translate(CX, view.cy);
+    // 地面光晕
+    const glow = ctx.createRadialGradient(0, 0, 2, 0, 0, 34);
+    glow.addColorStop(0, 'rgba(255,255,255,.18)'); glow.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.save(); ctx.scale(1, sq); ctx.fillStyle = glow; ctx.beginPath(); ctx.arc(0, 0, 34, 0, TAU); ctx.fill(); ctx.restore();
+
+    // 压弯倾角刻度弧
+    const leanDeg = sim.lean / D2R, la = clamp(Math.abs(leanDeg) / 6, 0, 1);
+    if (mode === 'nav' && la > 0) {
+      ctx.save(); ctx.globalAlpha = la;
+      ctx.beginPath(); ctx.arc(0, 0, 30, 40 * D2R, 140 * D2R);
+      ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(255,255,255,.18)'; ctx.stroke();
+      const e = 90 + clamp(leanDeg, -45, 45) * 1.1;
+      ctx.beginPath(); ctx.arc(0, 0, 30, Math.min(90, e) * D2R, Math.max(90, e) * D2R);
+      ctx.lineWidth = 4; ctx.strokeStyle = Math.abs(leanDeg) > 35 ? COL.danger : T.accent; ctx.stroke();
+      if (Math.abs(leanDeg) > 7) {
+        ctx.font = font(700, 13); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(0,0,0,.85)'; ctx.fillStyle = '#fff';
+        const tx = leanDeg > 0 ? -40 : 40, label = `${Math.round(Math.abs(leanDeg))}°`;
+        ctx.strokeText(label, tx, 22); ctx.fillText(label, tx, 22);
+      }
+      ctx.restore();
+    }
+
+    ctx.scale(1, sq);
+    ctx.beginPath(); ctx.moveTo(0, -14); ctx.lineTo(10.5, 11); ctx.lineTo(0, 5); ctx.lineTo(-10.5, 11); ctx.closePath();
+    ctx.lineJoin = 'round'; ctx.lineWidth = 3.5; ctx.strokeStyle = 'rgba(0,0,0,.9)'; ctx.stroke();
+    ctx.fillStyle = '#f3f3f1'; ctx.fill();
+    ctx.restore();
+  }
+
+  // ---------- 外圈信息带 ----------
+  function star(x, y, r, filled) {
+    ctx.beginPath();
+    for (let i = 0; i < 10; i++) {
+      const a = -Math.PI / 2 + i * Math.PI / 5, rr = i % 2 ? r * 0.45 : r;
+      ctx.lineTo(x + Math.cos(a) * rr, y + Math.sin(a) * rr);
+    }
+    ctx.closePath();
+    ctx.lineWidth = 2; ctx.strokeStyle = 'rgba(0,0,0,.9)'; ctx.stroke();
+    ctx.fillStyle = filled ? '#f6f6f4' : 'rgba(255,255,255,.22)'; ctx.fill();
+  }
+
+  function drawRing(now) {
+    const t = now / 1000;
+    const rg = ctx.createRadialGradient(C, C, RING, C, C, C);
+    rg.addColorStop(0, 'rgba(0,0,0,.45)'); rg.addColorStop(1, 'rgba(0,0,0,.8)');
+    ctx.beginPath(); ctx.arc(C, C, C, 0, TAU); ctx.arc(C, C, RING, 0, TAU, true);
+    ctx.fillStyle = rg; ctx.fill();
+    ctx.beginPath(); ctx.arc(C, C, RING, 0, TAU); ctx.lineWidth = 1; ctx.strokeStyle = 'rgba(255,255,255,.14)'; ctx.stroke();
+
+    // 指北用平面方位（罗盘语义），不跟透视走
+    const a0 = Math.PI / 2 - view.h, northAng = Math.atan2(-Math.cos(a0), -Math.sin(a0));
+    ctx.strokeStyle = 'rgba(255,255,255,.22)'; ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (let i = 0; i < 72; i++) {
+      const a = northAng + i * 5 * D2R, r2 = i % 18 === 0 ? 219 : i % 6 === 0 ? 216.5 : 214.5;
+      ctx.moveTo(C + Math.cos(a) * RING, C + Math.sin(a) * RING); ctx.lineTo(C + Math.cos(a) * r2, C + Math.sin(a) * r2);
+    }
+    ctx.stroke();
+
+    if (cam && cam.stars >= 2 && !cam.passT) {
+      const red = reduceMotion ? true : Math.floor(t * 3) % 2 === 0;
+      ctx.save();
+      ctx.beginPath(); ctx.arc(C, C, C, 0, TAU); ctx.arc(C, C, RING, 0, TAU, true);
+      ctx.fillStyle = red ? 'rgba(229,72,77,.55)' : 'rgba(47,107,255,.6)'; ctx.fill();
+      ctx.beginPath(); ctx.arc(C, C, RING - 2, 0, TAU);
+      ctx.lineWidth = 4; ctx.strokeStyle = red ? COL.danger : COL.police;
+      ctx.shadowColor = ctx.strokeStyle; ctx.shadowBlur = 18; ctx.stroke();
+      ctx.restore();
+    }
+
+    for (const [lbl, off, main] of [['N', 0, true], ['E', 90, false], ['S', 180, false], ['W', 270, false]]) {
+      const a = northAng + off * D2R, x = C + Math.cos(a) * 222, y = C + Math.sin(a) * 222;
+      if (main) {
+        ctx.beginPath(); ctx.arc(x, y, 9, 0, TAU); ctx.fillStyle = '#0d0f10'; ctx.fill();
+        ctx.lineWidth = 1.2; ctx.strokeStyle = 'rgba(255,255,255,.6)'; ctx.stroke();
+      }
+      ctx.font = font(700, main ? 13 : 11); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillStyle = main ? '#fff' : 'rgba(255,255,255,.42)';
+      ctx.fillText(lbl, x, y + 0.5);
+    }
+
+    const nt = mode === 'nav' && !offr ? nextTurn() : null;
+    const warnDist = rain ? 230 : 180;
+    if (nt) {
+      const d = nt.s - sim.s;
+      if (d < warnDist) {
+        const I = clamp(1 - d / warnDist, 0, 1), close = d < 35;
+        const pulse = close || reduceMotion ? 1 : 0.5 + 0.5 * Math.sin(t * (5 + 12 * I));
+        const center = (nt.dir === 'R' ? -40 : -140) * D2R, span = (close ? 34 : 22) * D2R;
+        ctx.save();
+        ctx.beginPath(); ctx.arc(C, C, 222, center - span, center + span);
+        ctx.lineWidth = close ? 16 : 12; ctx.lineCap = 'round';
+        ctx.strokeStyle = T.accent; ctx.globalAlpha = 0.25 + 0.75 * I * pulse;
+        ctx.shadowColor = T.accent; ctx.shadowBlur = 20 * I; ctx.stroke();
+        ctx.restore();
+      }
+    }
+
+    if (cam) {
+      const blinkOff = cam.passT && Math.floor(t * 5) % 2 === 0;
+      for (let i = 0; i < 5; i++) {
+        const a = (-90 + (i - 2) * 8.4) * D2R;
+        star(C + Math.cos(a) * 222, C + Math.sin(a) * 222, 7.5, !blinkOff && i < cam.stars);
+      }
+    }
+  }
+
+  function arcBar(a0, a1, frac, color, track) {
+    ctx.lineCap = 'butt'; ctx.lineWidth = 8;
+    ctx.beginPath(); ctx.arc(C, C, 222, Math.min(a0, a1), Math.max(a0, a1)); ctx.strokeStyle = track; ctx.stroke();
+    const e = a0 + (a1 - a0) * clamp(frac, 0, 1);
+    if (Math.abs(e - a0) > 0.001) {
+      ctx.save();
+      ctx.beginPath(); ctx.arc(C, C, 222, Math.min(a0, e), Math.max(a0, e));
+      ctx.strokeStyle = color; ctx.shadowColor = color; ctx.shadowBlur = 8; ctx.stroke();
+      ctx.restore();
+    }
+  }
+
+  const currentLimit = () => (cam && !cam.passT) ? cam.limit : legAt(sim.s).limit;
+
+  function drawBars() {
+    const kmh = sim.v * 3.6, lim = currentLimit(), over = kmh > lim + 0.5;
+    const a0 = 100 * D2R, a1 = 158 * D2R;
+    arcBar(a0, a1, kmh / (lim * 1.3), over ? COL.danger : COL.health, over ? 'rgba(229,72,77,.3)' : 'rgba(92,184,92,.3)');
+    const tick = a0 + (a1 - a0) / 1.3;
+    ctx.beginPath(); ctx.moveTo(C + Math.cos(tick) * 215, C + Math.sin(tick) * 215); ctx.lineTo(C + Math.cos(tick) * 229, C + Math.sin(tick) * 229);
+    ctx.lineWidth = 2; ctx.strokeStyle = '#fff'; ctx.stroke();
+    arcBar(80 * D2R, 22 * D2R, sim.s / L, COL.armor, 'rgba(62,154,214,.3)');
+
+    const status = muted ? '导航静音' : playing ? `♪ ${SONGS[songIdx]}` : '';
+    if (status) {
+      ctx.font = font(600, 11); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillStyle = muted ? COL.danger : COL.muted;
+      ctx.fillText(status.length > 9 ? status.slice(0, 9) + '…' : status, C, 451);
+    }
+  }
+
+  // ---------- HUD ----------
+  function turnGlyph(x, y, dir, color) {
+    ctx.save(); ctx.translate(x, y);
+    if (dir === 'L') ctx.scale(-1, 1);
+    ctx.strokeStyle = color; ctx.fillStyle = color; ctx.lineWidth = 5; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    if (dir === 'F') {
+      ctx.beginPath(); ctx.moveTo(-6, 15); ctx.lineTo(-6, -15); ctx.stroke();
+      ctx.fillRect(-6, -15, 16, 11);
+    } else {
+      ctx.beginPath(); ctx.moveTo(-7, 16); ctx.lineTo(-7, 0); ctx.quadraticCurveTo(-7, -8, 1, -8); ctx.lineTo(5, -8); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(4, -16); ctx.lineTo(14, -8); ctx.lineTo(4, 0); ctx.closePath(); ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  function fmtDist(d) {
+    if (d >= 1000) return [(d / 1000).toFixed(1), '公里'];
+    return [String(Math.max(0, Math.round(d / 10) * 10)), '米'];
+  }
+
+  function spinner(x, y, r, now, color = '#fff') {
+    const a = (now / 1000) * 5;
+    ctx.beginPath(); ctx.arc(x, y, r, a, a + 4.2);
+    ctx.lineWidth = 3.5; ctx.lineCap = 'round'; ctx.strokeStyle = color; ctx.stroke();
+  }
+
+  function hexA(hex, a) {
+    const n = parseInt(hex.slice(1), 16);
+    return `rgba(${n >> 16 & 255},${n >> 8 & 255},${n & 255},${a})`;
+  }
+
+  function drawTurnCard(now) {
+    const g = ctx.createLinearGradient(0, 0, 0, 160);
+    g.addColorStop(0, 'rgba(0,0,0,.6)'); g.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, 160);
+
+    const x = 126, y = 44, w = 214, h = 64;
+    ctx.fillStyle = 'rgba(0,0,0,.8)'; ctx.fillRect(x, y, w, h);
+    ctx.textBaseline = 'alphabetic'; ctx.textAlign = 'left';
+
+    if (offr) {
+      const t = (now - offr.t0) / 1000;
+      if (t < 1.8) {
+        ctx.fillStyle = COL.danger; ctx.fillRect(x, y, 58, h);
+        ctx.font = font(700, 38); ctx.textAlign = 'center'; ctx.fillStyle = '#fff'; ctx.fillText('!', x + 29, y + 46);
+        ctx.textAlign = 'left'; ctx.font = font(700, 26); ctx.fillStyle = COL.danger; ctx.fillText('偏离路线', x + 70, y + 32);
+        ctx.font = font(500, 15); ctx.fillStyle = COL.muted; ctx.fillText('正在确认位置…', x + 70, y + 53);
+      } else {
+        spinner(x + 29, y + 32, 13, now, T.route);
+        ctx.font = font(700, 26); ctx.fillStyle = '#fff'; ctx.fillText('重新规划', x + 70, y + 32);
+        ctx.font = font(500, 15); ctx.fillStyle = COL.muted; ctx.fillText('手机正在计算新路线', x + 70, y + 53);
+      }
+      return;
+    }
+
+    const nt = nextTurn();
+    let dir, d, line2;
+    if (nt) { d = nt.s - sim.s; dir = nt.dir; line2 = `${dir === 'L' ? '左' : '右'}转 · ${legs[nt.k].name}`; }
+    else { d = L - sim.s; dir = 'F'; line2 = `到达 · ${DEST}`; }
+    const nowTurn = nt && d < 30;
+    ctx.fillStyle = nowTurn ? T.accent : hexA(T.accent, 0.15);
+    ctx.fillRect(x, y, 58, h);
+    turnGlyph(x + 27, y + 33, dir, nowTurn ? '#111' : T.accent);
+
+    if (nowTurn) {
+      ctx.font = font(700, 30); ctx.fillStyle = T.accent;
+      ctx.fillText(`现在${dir === 'L' ? '左' : '右'}转`, x + 70, y + 35);
+    } else {
+      const [num, unit] = fmtDist(d);
+      ctx.font = font(700, 36); ctx.fillStyle = '#fff'; ctx.fillText(num, x + 70, y + 36);
+      const nw = ctx.measureText(num).width;
+      ctx.font = font(600, 16); ctx.fillStyle = COL.muted; ctx.fillText(unit, x + 74 + nw, y + 36);
+    }
+    ctx.font = font(500, 15); ctx.fillStyle = '#d6d9d6';
+    let l2 = line2;
+    while (ctx.measureText(l2).width > w - 78 && l2.length > 2) l2 = l2.slice(0, -2) + '…';
+    ctx.fillText(l2, x + 70, y + 56);
+    // 接近路口的进度条
+    if (nt && d < 400) { ctx.fillStyle = T.accent; ctx.fillRect(x + 58, y + h - 3, (w - 58) * clamp(1 - d / 400, 0, 1), 3); }
+
+    if (cam && !cam.passT) {
+      const cd = cam.s - sim.s;
+      if (cd > 0 && cd < 700) {
+        const [n, u] = fmtDist(cd), txt = `测速 ${cam.limit}  ·  ${n}${u}`;
+        ctx.font = font(700, 14);
+        const tw = ctx.measureText(txt).width + 28;
+        ctx.fillStyle = COL.danger; ctx.fillRect(C - tw / 2, y + h + 6, tw, 22);
+        ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.fillText(txt, C, y + h + 22);
+      }
+    }
+  }
+
+  function drawSpeedCluster() {
+    const g = ctx.createLinearGradient(0, 330, 0, W);
+    g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(0.45, 'rgba(0,0,0,.62)'); g.addColorStop(1, 'rgba(0,0,0,.88)');
+    ctx.fillStyle = g; ctx.fillRect(0, 330, W, W - 330);
+
+    const kmh = sim.v * 3.6, lim = currentLimit(), over = kmh > lim + 0.5;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+    ctx.font = font(700, 66); ctx.lineWidth = 5; ctx.strokeStyle = 'rgba(0,0,0,.8)';
+    const sp = String(Math.round(kmh));
+    ctx.strokeText(sp, C, 404); ctx.fillStyle = over ? COL.danger : '#fff'; ctx.fillText(sp, C, 404);
+    ctx.font = font(600, 13); ctx.fillStyle = COL.muted; ctx.fillText('KM/H', C, 421);
+
+    const sx = 318, sy = 382, pulse = over && !reduceMotion ? 1 + 0.08 * Math.sin(performance.now() / 90) : 1;
+    ctx.save(); ctx.translate(sx, sy); ctx.scale(pulse, pulse);
+    ctx.beginPath(); ctx.arc(0, 0, 21, 0, TAU); ctx.fillStyle = '#fff'; ctx.fill();
+    ctx.lineWidth = 5; ctx.strokeStyle = COL.danger; ctx.beginPath(); ctx.arc(0, 0, 18.5, 0, TAU); ctx.stroke();
+    ctx.font = font(700, 19); ctx.fillStyle = '#111'; ctx.textBaseline = 'middle'; ctx.fillText(String(lim), 0, 1);
+    ctx.restore();
+
+    const remain = L - sim.s, eta = new Date(Date.now() + remain / 10.5 * 1000);
+    ctx.textAlign = 'right'; ctx.textBaseline = 'alphabetic';
+    ctx.font = font(700, 22); ctx.fillStyle = '#fff'; ctx.fillText(`${pad2(eta.getHours())}:${pad2(eta.getMinutes())}`, 168, 378);
+    const [n, u] = fmtDist(remain);
+    ctx.font = font(500, 14); ctx.fillStyle = COL.muted; ctx.fillText(`${n} ${u} · 到达`, 168, 397);
+  }
+
+  function drawBanner(now) {
+    if (!banner || mode !== 'nav') return;
+    const t = (now - banner.t0) / 1000;
+    const a = Math.min(clamp(t / 0.4, 0, 1), clamp((4.5 - t) / 0.6, 0, 1));
+    if (!a) return;
+    ctx.save(); ctx.globalAlpha = a;
+    const x = 398 - (1 - easeOut(t / 0.4)) * 16;
+    ctx.textAlign = 'right'; ctx.textBaseline = 'alphabetic';
+    ctx.lineWidth = 4; ctx.lineJoin = 'round'; ctx.strokeStyle = 'rgba(0,0,0,.85)';
+    ctx.font = font(700, 20); ctx.fillStyle = '#fff';
+    ctx.strokeText(banner.name, x, 296); ctx.fillText(banner.name, x, 296);
+    ctx.font = font(600, 13); ctx.fillStyle = COL.muted;
+    ctx.strokeText(banner.area, x, 314); ctx.fillText(banner.area, x, 314);
+    ctx.fillStyle = T.accent; ctx.fillRect(x + 6, 280, 3, 36);
+    ctx.restore();
+  }
+
+  function drawRich(str, x, y, base, hi) {
+    const parts = str.split(/[{}]/);
+    let total = 0; for (const p of parts) total += ctx.measureText(p).width;
+    let cx = x - total / 2;
+    ctx.textAlign = 'left';
+    parts.forEach((p, i) => {
+      ctx.strokeText(p, cx, y);
+      ctx.fillStyle = i % 2 ? hi : base; ctx.fillText(p, cx, y);
+      cx += ctx.measureText(p).width;
+    });
+  }
+
+  function drawSubtitle(now) {
+    if (!sub) return;
+    const t = now - sub.t0;
+    ctx.save();
+    ctx.globalAlpha = clamp(Math.min(t / 200, (sub.dur - t) / 300), 0, 1);
+    ctx.font = font(600, 18); ctx.textBaseline = 'alphabetic';
+    ctx.lineWidth = 4; ctx.lineJoin = 'round'; ctx.strokeStyle = 'rgba(0,0,0,.9)';
+    drawRich(sub.text, C, 172, '#f4f4f2', T.accent);
+    ctx.restore();
+  }
+
+  function wrap(text, maxW) {
+    const lines = []; let cur = '';
+    for (const ch of text) {
+      if (cur && ctx.measureText(cur + ch).width > maxW) { lines.push(cur); cur = ch; } else cur += ch;
+    }
+    if (cur) lines.push(cur);
+    return lines;
+  }
+
+  function drawMsg(now) {
+    if (!msg) return;
+    const t = (now - msg.t0) / 1000;
+    const inP = easeOut(t / 0.4), outP = t > 7 ? easeOut((t - 7) / 0.4) : 0;
+    const y = -110 + 170 * inP - 170 * outP;
+    const x = 90, w = 286, h = 92;
+    ctx.fillStyle = 'rgba(16,18,20,.94)'; ctx.fillRect(x, y, w, h);
+    ctx.fillStyle = COL.yellow; ctx.fillRect(x, y, w, 3);
+    const ag = ctx.createLinearGradient(x + 10, y + 12, x + 54, y + 56);
+    ag.addColorStop(0, '#f6d978'); ag.addColorStop(1, '#c99a2a');
+    ctx.fillStyle = ag; ctx.fillRect(x + 10, y + 14, 44, 44);
+    ctx.font = font(700, 26); ctx.fillStyle = '#111'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText('领', x + 32, y + 37);
+    ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+    ctx.font = font(700, 17); ctx.fillStyle = '#fff'; ctx.fillText(msg.title, x + 64, y + 28);
+    ctx.font = font(600, 12); ctx.fillStyle = COL.muted; ctx.textAlign = 'right'; ctx.fillText('AGENT · 刚刚', x + w - 12, y + 27);
+    ctx.textAlign = 'left'; ctx.font = font(500, 15); ctx.fillStyle = '#dfe2df';
+    wrap(msg.text, w - 78).slice(0, 2).forEach((ln, i) => ctx.fillText(ln, x + 64, y + 50 + i * 19));
+  }
+
+  const QUEST_BOX = { x: 98, y: 128, w: 270, h: 180 };
+  const QBTN = { accept: [112, 268, 116, 30], ignore: [238, 268, 116, 30] };
+  const inRect = (p, r) => p.x >= r[0] && p.x <= r[0] + r[2] && p.y >= r[1] && p.y <= r[1] + r[3];
+
+  function drawQuest(now) {
+    if (!quest || quest.phase !== 'ask') return;
+    const t = (now - quest.t0) / 1000;
+    const a = easeOut(t / 0.3), { x, y, w, h } = QUEST_BOX;
+    ctx.save();
+    ctx.globalAlpha = a;
+    ctx.translate(C, y + h / 2); ctx.scale(0.92 + 0.08 * a, 0.92 + 0.08 * a); ctx.translate(-C, -(y + h / 2));
+    ctx.fillStyle = 'rgba(10,11,12,.92)'; ctx.fillRect(x, y, w, h);
+    ctx.strokeStyle = 'rgba(240,200,80,.6)'; ctx.lineWidth = 1; ctx.strokeRect(x + .5, y + .5, w - 1, h - 1);
+    ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+    ctx.font = font(700, 13); ctx.fillStyle = COL.yellow; ctx.fillText('SIDE JOB · 领航员推荐', C, y + 26);
+    ctx.font = font(700, 30); ctx.fillStyle = '#fff'; ctx.fillText(quest.name, C, y + 64);
+    ctx.font = font(600, 16); ctx.fillStyle = COL.yellow; ctx.fillText(quest.line1, C, y + 90);
+    ctx.font = font(500, 14); ctx.fillStyle = COL.muted; ctx.fillText(quest.line2, C, y + 112);
+    const [ax, ay, aw, ah] = QBTN.accept, [ix, iy, iw, ih] = QBTN.ignore;
+    ctx.fillStyle = COL.yellow; ctx.fillRect(ax, ay, aw, ah);
+    ctx.strokeStyle = 'rgba(255,255,255,.45)'; ctx.strokeRect(ix + .5, iy + .5, iw - 1, ih - 1);
+    ctx.font = font(700, 17); ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#111'; ctx.fillText('接受', ax + aw / 2, ay + ah / 2 + 1);
+    ctx.fillStyle = '#fff'; ctx.fillText('忽略', ix + iw / 2, iy + ih / 2 + 1);
+    ctx.fillStyle = 'rgba(240,200,80,.8)'; ctx.fillRect(x, y + h - 3, w * (1 - clamp((now - quest.t0) / 12000, 0, 1)), 3);
+    ctx.restore();
+  }
+
+  function drawRain(now) {
+    if (!rain) return;
+    ctx.fillStyle = 'rgba(40,70,100,.16)'; ctx.fillRect(0, 0, W, W);
+    ctx.strokeStyle = 'rgba(190,215,240,.38)'; ctx.lineWidth = 1.2; ctx.beginPath();
+    for (const d of drops) { ctx.moveTo(d.x, d.y); ctx.lineTo(d.x + d.l * 0.18, d.y - d.l); }
+    ctx.stroke();
+    // 镜面上的水珠
+    for (let i = 0; i < 9; i++) {
+      const x = C + Math.cos(i * 2.4) * (60 + i * 17), y = C + Math.sin(i * 2.4) * (60 + i * 17);
+      ctx.beginPath(); ctx.arc(x, y, 3 + (i % 3), 0, TAU);
+      ctx.fillStyle = 'rgba(200,225,255,.08)'; ctx.fill();
+      ctx.beginPath(); ctx.arc(x - 1, y - 1, 1, 0, TAU); ctx.fillStyle = 'rgba(255,255,255,.35)'; ctx.fill();
+    }
+  }
+
+  // ---------- 快捷轮盘 ----------
+  const WHEEL = [
+    { id: 'next', label: '下一首', desc: '切到下一首歌' },
+    { id: 'fleet', label: '车队对讲', desc: '和同行车友语音' },
+    { id: 'mute', label: '导航静音', desc: '只保留外圈灯光提示' },
+    { id: 'home', label: '回家', desc: '让手机规划回家路线' },
+    { id: 'fuel', label: '找加油站', desc: '让领航员找最近的' },
+    { id: 'share', label: '发送位置', desc: '把实时位置发给车队' },
+    { id: 'prev', label: '上一首', desc: '回到上一首' },
+    { id: 'play', label: '播放/暂停', desc: '' },
+  ];
+  const W_IN = 88, W_OUT = 212;
+
+  function wheelIndexAt(p) {
+    const dx = p.x - C, dy = p.y - C, r = Math.hypot(dx, dy);
+    if (r < W_IN || r > C) return -1;
+    let a = Math.atan2(dy, dx) / D2R + 90 + 22.5;
+    a = ((a % 360) + 360) % 360;
+    return Math.floor(a / 45);
+  }
+
+  function drawWheel(now) {
+    if (!wheel) return;
+    const t = (now - wheel.t0) / 1000, a = easeOut(t / 0.22);
+    desaturate(0.85 * a);
+    ctx.fillStyle = `rgba(0,0,0,${0.45 * a})`; ctx.fillRect(0, 0, W, W);
+    ctx.save();
+    ctx.globalAlpha = a;
+    ctx.translate(C, C); ctx.scale(0.9 + 0.1 * a, 0.9 + 0.1 * a); ctx.translate(-C, -C);
+    WHEEL.forEach((it, i) => {
+      const mid = (-90 + i * 45) * D2R, a0 = mid - 21 * D2R, a1 = mid + 21 * D2R, hov = wheel.hover === i;
+      ctx.beginPath(); ctx.arc(C, C, W_OUT, a0, a1); ctx.arc(C, C, W_IN + 4, a1, a0, true); ctx.closePath();
+      ctx.fillStyle = hov ? hexA(T.accent, 0.26) : 'rgba(12,13,14,.78)'; ctx.fill();
+      ctx.lineWidth = 1; ctx.strokeStyle = 'rgba(255,255,255,.12)'; ctx.stroke();
+      if (hov) { ctx.beginPath(); ctx.arc(C, C, W_OUT - 2, a0, a1); ctx.lineWidth = 4; ctx.strokeStyle = T.accent; ctx.stroke(); }
+      const lx = C + Math.cos(mid) * 152, ly = C + Math.sin(mid) * 152;
+      let label = it.label;
+      if (it.id === 'mute' && muted) label = '取消静音';
+      if (it.id === 'play') label = playing ? '暂停' : '播放';
+      if (it.id === 'fleet' && fleet) label = '关闭车队';
+      ctx.font = font(700, 18); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillStyle = hov ? T.accent : '#eceae4'; ctx.fillText(label, lx, ly);
+    });
+    ctx.beginPath(); ctx.arc(C, C, W_IN - 4, 0, TAU); ctx.fillStyle = 'rgba(0,0,0,.9)'; ctx.fill();
+    ctx.lineWidth = 1.5; ctx.strokeStyle = 'rgba(255,255,255,.25)'; ctx.stroke();
+    ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+    if (wheel.hover >= 0) {
+      const it = WHEEL[wheel.hover];
+      ctx.font = font(700, 20); ctx.fillStyle = '#fff'; ctx.fillText(it.label, C, C - 4);
+      ctx.font = font(500, 13); ctx.fillStyle = COL.muted;
+      wrap(it.id === 'play' ? SONGS[songIdx] : it.desc, 130).slice(0, 2).forEach((ln, i) => ctx.fillText(ln, C, C + 16 + i * 16));
+    } else {
+      ctx.font = font(600, 12); ctx.fillStyle = T.accent; ctx.fillText(playing ? '正在播放' : '已暂停', C, C - 16);
+      ctx.font = font(700, 16); ctx.fillStyle = '#fff';
+      wrap(SONGS[songIdx], 140).slice(0, 2).forEach((ln, i) => ctx.fillText(ln, C, C + 4 + i * 18));
+    }
+    ctx.restore();
+  }
+
+  function selectWheel(i) {
+    const it = WHEEL[i];
+    wheel = null;
+    switch (it.id) {
+      case 'next': songIdx = (songIdx + 1) % SONGS.length; playing = true; showSub(`正在播放 {${SONGS[songIdx]}}`); break;
+      case 'prev': songIdx = (songIdx + SONGS.length - 1) % SONGS.length; playing = true; showSub(`正在播放 {${SONGS[songIdx]}}`); break;
+      case 'play': playing = !playing; showSub(playing ? `继续播放 {${SONGS[songIdx]}}` : '音乐{已暂停}'); break;
+      case 'fleet': setFleet(!fleet); showSub(fleet ? '车队对讲已开启 · {3 人}在线' : '车队对讲{已关闭}'); break;
+      case 'mute': muted = !muted; showSub(muted ? '导航语音{已静音}' : '导航语音{已恢复}'); break;
+      case 'home': showSub('手机正在规划 {回家} 路线（演示）'); break;
+      case 'fuel': triggerAgent(); break;
+      case 'share': showSub('已把实时位置发给 {车队}'); break;
+    }
+  }
+
+  // ---------- 到达 / 摔车 / 待机 ----------
+  function drawArrived(now) {
+    const t = (now - arrived.t0) / 1000;
+    desaturate(Math.min(1, t * 1.5));
+    ctx.fillStyle = `rgba(0,0,0,${Math.min(0.5, t * 0.8)})`; ctx.fillRect(0, 0, W, W);
+
+    const a = clamp(t / 0.35, 0, 1), sc = 1.5 - 0.5 * easeOut(a);
+    ctx.save();
+    ctx.translate(C, 160); ctx.scale(sc, sc); ctx.globalAlpha = a;
+    ctx.font = `400 46px ${FDISP}`; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+    ctx.lineWidth = 8; ctx.lineJoin = 'round'; ctx.strokeStyle = '#000'; ctx.strokeText('MISSION PASSED', 0, 0);
+    ctx.fillStyle = COL.yellow; ctx.fillText('MISSION PASSED', 0, 0);
+    ctx.restore();
+
+    ctx.globalAlpha = clamp((t - 0.3) / 0.3, 0, 1);
+    ctx.font = font(600, 17); ctx.textAlign = 'center'; ctx.fillStyle = '#fff';
+    ctx.fillText(`到达 · ${DEST}`, C, 190);
+    ctx.globalAlpha = 1;
+
+    if (t > 0.5) {
+      ctx.fillStyle = `rgba(0,0,0,${0.75 * clamp((t - 0.5) / 0.3, 0, 1)})`; ctx.fillRect(0, 206, W, 130);
+      const mins = Math.floor(sim.elapsed / 60), secs = Math.floor(sim.elapsed % 60);
+      const rows = [
+        ['里程', `${(sim.odo / 1000).toFixed(2)} 公里`],
+        ['用时', `${pad2(mins)}:${pad2(secs)}`],
+        ['最高速度', `${Math.round(sim.maxV * 3.6)} km/h`],
+        ['最大倾角', `${Math.round(sim.maxLean)}°`],
+        ['测速点', camOver ? `超速 ${camOver} 次` : '全部未超速'],
+      ];
+      rows.forEach(([k, v], i) => {
+        const ra = clamp((t - 0.7 - i * 0.22) / 0.2, 0, 1);
+        if (!ra) return;
+        ctx.globalAlpha = ra;
+        const y = 230 + i * 23;
+        ctx.font = font(500, 16); ctx.textAlign = 'left'; ctx.fillStyle = COL.muted; ctx.fillText(k, 116, y);
+        ctx.font = font(700, 17); ctx.textAlign = 'right';
+        ctx.fillStyle = k === '测速点' && camOver ? COL.danger : '#fff'; ctx.fillText(v, 350, y);
+      });
+      ctx.globalAlpha = 1;
+    }
+    if (t > 2) {
+      ctx.globalAlpha = reduceMotion ? 0.8 : 0.45 + 0.4 * Math.sin(t * 3);
+      ctx.font = font(600, 14); ctx.textAlign = 'center'; ctx.fillStyle = '#fff';
+      ctx.fillText('轻触屏幕 · 重新出发', C, 372);
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  const SOS_SECS = 10;
+  const OK_BTN = [128, 322, 210, 42];
+
+  function drawWasted(now) {
+    const t = (now - wasted.t0) / 1000;
+    desaturate(Math.min(1, t * 2));
+    ctx.fillStyle = `rgba(0,0,0,${Math.min(0.45, t * 0.9)})`; ctx.fillRect(0, 0, W, W);
+
+    ctx.fillStyle = `rgba(0,0,0,${0.55 * clamp(t / 0.4, 0, 1)})`; ctx.fillRect(0, 168, W, 78);
+    const a = clamp((t - 0.2) / 0.3, 0, 1), sc = 1.35 - 0.35 * easeOut(a);
+    ctx.save();
+    ctx.translate(C, 228); ctx.scale(sc, sc); ctx.globalAlpha = a;
+    ctx.font = `400 62px ${FDISP}`; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+    ctx.lineWidth = 8; ctx.lineJoin = 'round'; ctx.strokeStyle = '#000'; ctx.strokeText('WASTED', 0, 0);
+    ctx.fillStyle = COL.wasted; ctx.fillText('WASTED', 0, 0);
+    ctx.restore();
+
+    if (t < 0.9) return;
+    const left = Math.max(0, SOS_SECS - (t - 0.9));
+    ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+    if (left > 0) {
+      ctx.font = font(700, 19); ctx.fillStyle = '#fff'; ctx.fillText('检测到摔车，你还好吗？', C, 280);
+      ctx.font = font(500, 14); ctx.fillStyle = '#cfd2ce';
+      ctx.fillText(`${Math.ceil(left)} 秒后把位置发给紧急联系人`, C, 302);
+      const [bx, by, bw, bh] = OK_BTN;
+      ctx.fillStyle = '#f2f2ef'; ctx.fillRect(bx, by, bw, bh);
+      ctx.fillStyle = COL.wasted; ctx.fillRect(bx, by + bh - 4, bw * (left / SOS_SECS), 4);
+      ctx.font = font(700, 19); ctx.fillStyle = '#111'; ctx.textBaseline = 'middle';
+      ctx.fillText('我没事', C, by + bh / 2 - 1);
+    } else {
+      ctx.font = font(700, 19); ctx.fillStyle = COL.wasted; ctx.fillText('已发送求救短信和实时位置', C, 284);
+      ctx.font = font(500, 14); ctx.fillStyle = '#cfd2ce'; ctx.fillText('手机同时拨打紧急联系人电话', C, 306);
+      ctx.globalAlpha = reduceMotion ? 0.8 : 0.45 + 0.4 * Math.sin(t * 3);
+      ctx.font = font(600, 14); ctx.fillStyle = '#fff'; ctx.fillText('轻触屏幕 · 返回导航', C, 352);
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  const TIPS = [
+    '提示：雨天路面湿滑，制动距离约为干燥路面的 1.5 倍。',
+    '提示：过弯前减速，弯中保持油门，出弯再加速。',
+    '提示：长途骑行每 2 小时停下来休息 15 分钟。',
+    '提示：夜间骑行把头盔镜片换成透明的。',
+  ];
+
+  function drawStandby(now) {
+    const t = now / 1000;
+    // 城市航拍：慢速平移 + 固定倾斜
+    drawWorld(octx, -200 + Math.cos(t * 0.02) * 500, 100 + Math.sin(t * 0.025) * 380, t * 0.03, 1 / 2.2, false, now);
+    blit(55 * D2R, 330);
+    desaturate(0.75);
+    ctx.fillStyle = 'rgba(0,0,0,.5)'; ctx.fillRect(0, 0, W, W);
+    const g = ctx.createLinearGradient(0, 0, W, W);
+    g.addColorStop(0, 'rgba(240,200,80,.22)'); g.addColorStop(1, hexA(T.route, 0.24));
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, W);
+
+    const d = new Date();
+    ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+    ctx.font = `400 104px ${FDISP}`; ctx.lineWidth = 8; ctx.lineJoin = 'round'; ctx.strokeStyle = 'rgba(0,0,0,.6)';
+    const time = `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+    ctx.strokeText(time, C, 226); ctx.fillStyle = '#f6f4ee'; ctx.fillText(time, C, 226);
+    ctx.font = font(600, 19); ctx.fillStyle = '#fff';
+    ctx.fillText(`${d.getMonth() + 1}月${d.getDate()}日 周${'日一二三四五六'[d.getDay()]} · ${rain ? '小雨 11°C' : '多云 14°C'}`, C, 262);
+    ctx.font = font(500, 16); ctx.fillStyle = '#c9ccc8';
+    ctx.fillText(`今日骑行 ${(23.6 + sim.totalOdo / 1000).toFixed(1)} 公里`, C, 288);
+
+    const tip = TIPS[Math.floor(t / 6) % TIPS.length];
+    ctx.fillStyle = 'rgba(0,0,0,.6)'; ctx.fillRect(0, 330, W, 62);
+    spinner(108, 361, 9, now, COL.yellow);
+    ctx.font = font(500, 14); ctx.fillStyle = '#e4e4df'; ctx.textAlign = 'left';
+    wrap(tip, 228).slice(0, 2).forEach((ln, i) => ctx.fillText(ln, 128, 356 + i * 18));
+    ctx.globalAlpha = reduceMotion ? 0.7 : 0.4 + 0.3 * Math.sin(t * 2.5);
+    ctx.font = font(600, 13); ctx.textAlign = 'center'; ctx.fillStyle = '#fff';
+    ctx.fillText('轻触唤醒', C, 424);
+    ctx.globalAlpha = 1;
+  }
+
+  // ---------- 主渲染 ----------
+  function render(now) {
+    ctx.clearRect(0, 0, W, W);
+    ctx.save();
+    ctx.beginPath(); ctx.arc(C, C, C, 0, TAU); ctx.clip();
+    if (mode === 'standby') { drawStandby(now); ctx.restore(); return; }
+
+    drawWorld(octx, view.px, view.py, view.h, 1 / view.mpp, mode === 'nav', now);
+    blit(view.phi, view.cy);
+    const vg = ctx.createRadialGradient(C, C, 150, C, C, C);
+    vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(0,0,0,.35)');
+    ctx.fillStyle = vg; ctx.fillRect(0, 0, W, W);
+    drawBlips(now);
+    drawPlayer(now);
+    drawRain(now);
+    drawRing(now);
+    drawBars();
+    if (mode === 'nav') {
+      drawBanner(now);
+      drawTurnCard(now);
+      drawSpeedCluster();
+      drawSubtitle(now);
+      drawMsg(now);
+      drawQuest(now);
+      drawWheel(now);
+    } else if (mode === 'arrived') drawArrived(now);
+    else if (mode === 'wasted') drawWasted(now);
+    ctx.restore();
+  }
+
+  // ---------- 场景触发 ----------
+  function triggerAgent() {
+    ensureNav();
+    const as = Math.min(sim.s + 600, L - 80), h = heading(as), p = P(as);
+    agentPoi = { x: p[0] + Math.sin(h) * 75, y: p[1] - Math.cos(h) * 75, anchorS: as, t0: performance.now() };
+    showMsg('领航员', `前方 ${Math.round((as - sim.s) / 10) * 10} 米右侧有加油站，油量剩 18%，建议补给。`);
+  }
+
+  function triggerQuest() {
+    ensureNav();
+    const as = Math.min(sim.s + 520, L - 60), h = heading(as), p = P(as);
+    const poi = { x: p[0] - Math.sin(h) * 170, y: p[1] + Math.cos(h) * 170 };
+    const d = Math.hypot(poi.x - view.px, poi.y - view.py);
+    quest = {
+      phase: 'ask', t0: performance.now(), anchorS: as, poi,
+      name: '老街面馆', line1: `★ 4.8 · 绕行 +4 分钟 · ${(d / 1000).toFixed(1)}km`, line2: '牛肉面，现在排队约 10 分钟',
+    };
+  }
+
+  function setFleet(on) { fleet = on; document.getElementById('a-fleet').setAttribute('aria-pressed', String(on)); }
+  function setRain(on) {
+    rain = on; document.getElementById('a-rain').setAttribute('aria-pressed', String(on));
+    if (on && mode === 'nav') showMsg('领航员', '开始下小雨，路面湿滑。转向提示已提前到 230 米。');
+  }
+
+  function act(name) {
+    const now = performance.now();
+    switch (name) {
+      case 'camera': ensureNav(); if (sim.s < L - 120) cam = { s: Math.min(sim.s + 480, L - 60), limit: legAt(sim.s).limit, stars: 1 }; break;
+      case 'offroute': ensureNav(); offr = { t0: now }; break;
+      case 'agent': triggerAgent(); break;
+      case 'quest': triggerQuest(); break;
+      case 'fleet': ensureNav(); setFleet(!fleet); if (fleet) showSub('车队已连接 · {3 人}同行'); break;
+      case 'rain': ensureNav(); setRain(!rain); break;
+      case 'wheel': ensureNav(); wheel = wheel ? null : { hover: -1, t0: now }; break;
+      case 'crash':
+        ensureNav();
+        if (sim.s < L - 5) { mode = 'wasted'; wasted = { t0: now }; sim.v = 0; sim.lean = 0; wheel = msg = quest = null; }
+        break;
+      case 'arrive': ensureNav(); sim.s = Math.max(sim.s, L - 110); sim.v = Math.min(sim.v, 8); cam = null; break;
+      case 'standby': if (mode === 'standby') mode = 'nav'; else { mode = 'standby'; wheel = null; } break;
+      case 'restart': reset(); break;
+      case 'pause': {
+        sim.paused = !sim.paused;
+        const b = document.getElementById('t-pause');
+        b.textContent = sim.paused ? '继续' : '暂停'; b.setAttribute('aria-pressed', String(sim.paused));
+        break;
+      }
+      case 'glare': {
+        const g = document.getElementById('glare'), b = document.getElementById('t-glare');
+        g.hidden = !g.hidden; b.setAttribute('aria-pressed', String(!g.hidden));
+        break;
+      }
+    }
+  }
+
+  const bindSeg = (attr, fn) => document.querySelectorAll(`[${attr}]`).forEach(b => b.addEventListener('click', () => {
+    fn(b.getAttribute(attr));
+    document.querySelectorAll(`[${attr}]`).forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+  }));
+  document.querySelectorAll('[data-act]').forEach(b => b.addEventListener('click', () => act(b.dataset.act)));
+  bindSeg('data-speed', v => { sim.speedMul = Number(v); });
+  bindSeg('data-size', v => document.getElementById('stage').classList.toggle('real', v === 'real'));
+  bindSeg('data-view', v => { viewMode = v; });
+  bindSeg('data-pal', v => { T = THEMES[v]; });
+
+  // ---------- 触摸 ----------
+  const toLocal = e => {
+    const r = cv.getBoundingClientRect();
+    return { x: (e.clientX - r.left) * W / r.width, y: (e.clientY - r.top) * W / r.height };
+  };
+  let press = null;
+  cv.addEventListener('pointerdown', e => {
+    const p = toLocal(e);
+    try { cv.setPointerCapture(e.pointerId); } catch (_) {}
+    press = { long: false, timer: 0 };
+    const onQuest = quest && quest.phase === 'ask' && (inRect(p, QBTN.accept) || inRect(p, QBTN.ignore));
+    if (mode === 'nav' && !wheel && !onQuest) {
+      press.timer = setTimeout(() => { wheel = { hover: wheelIndexAt(p), t0: performance.now() }; press.long = true; }, 420);
+    }
+  });
+  cv.addEventListener('pointermove', e => { if (wheel) wheel.hover = wheelIndexAt(toLocal(e)); });
+  cv.addEventListener('pointercancel', () => { if (press) clearTimeout(press.timer); press = null; });
+  cv.addEventListener('pointerup', e => {
+    const p = toLocal(e);
+    if (!press) return;
+    clearTimeout(press.timer);
+    const wasLong = press.long;
+    press = null;
+    if (wasLong) { const i = wheelIndexAt(p); if (i >= 0) selectWheel(i); else wheel = null; return; }
+    const now = performance.now();
+    if (mode === 'standby') { mode = 'nav'; return; }
+    if (mode === 'arrived') { if (now - arrived.t0 > 1200) reset(); return; }
+    if (mode === 'wasted') {
+      const t = (now - wasted.t0) / 1000, left = SOS_SECS - (t - 0.9);
+      if (t > 0.9 && left > 0 && inRect(p, OK_BTN)) { mode = 'nav'; wasted = null; showSub('已取消求救 · {注意安全}'); }
+      else if (left <= 0) { mode = 'nav'; wasted = null; }
+      return;
+    }
+    if (wheel) { const i = wheelIndexAt(p); if (i >= 0) selectWheel(i); else wheel = null; return; }
+    if (quest && quest.phase === 'ask') {
+      if (inRect(p, QBTN.accept)) { quest.phase = 'accepted'; showSub(`已添加途经点 {${quest.name}}`); }
+      else if (inRect(p, QBTN.ignore)) quest = null;
+    }
+  });
+  cv.addEventListener('contextmenu', e => e.preventDefault());
+
+  // ---------- 读数 ----------
+  const R = id => document.getElementById(id);
+  const VIEW_NAMES = { auto: '自动', top: '俯视', tilt: '倾斜', chase: '追车' };
+  function readout() {
+    let scene = '导航中';
+    if (mode === 'standby') scene = '熄火待机';
+    else if (mode === 'arrived') scene = '到达结算';
+    else if (mode === 'wasted') scene = '摔车求救';
+    else if (wheel) scene = '快捷轮盘 · 慢动作';
+    else if (offr) scene = '偏航重算';
+    else if (cam) scene = cam.passT ? '脱离测速' : `测速 ${'★'.repeat(cam.stars)}`;
+    else if (quest && quest.phase === 'ask') scene = '支线任务';
+    else if (msg) scene = '领航员短信';
+    if (sim.paused && mode === 'nav') scene += ' · 已暂停';
+    R('r-scene').textContent = scene;
+    R('r-speed').textContent = `${Math.round(sim.v * 3.6)} km/h`;
+    R('r-limit').textContent = `${currentLimit()} km/h`;
+    R('r-view').textContent = `${VIEW_NAMES[viewMode]} · ${Math.round(view.phi / D2R)}°`;
+    const ld = sim.lean / D2R;
+    R('r-lean').textContent = Math.abs(ld) < 1 ? '0°' : `${ld > 0 ? '左' : '右'} ${Math.round(Math.abs(ld))}°`;
+    R('r-remain').textContent = `${((L - sim.s) / 1000).toFixed(2)} km`;
+  }
+
+  // 地址栏 #tilt / #chase / #top 可直接指定视角，#vice / #night 指定配色
+  for (const tok of location.hash.slice(1).split(/[+,]/)) {
+    if (VIEW_NAMES[tok]) document.getElementById(`vw-${tok}`).click();
+    if (THEMES[tok]) document.getElementById(`pal-${tok}`).click();
+  }
+
+  reset();
+  // #ff30 = 先快进 30 秒仿真时间（截图和调试用）
+  const ffTok = location.hash.match(/ff(\d+)/);
+  if (ffTok) { const t0 = performance.now(); for (let i = 0, n = Number(ffTok[1]) * 30; i < n; i++) update(1 / 30, t0); }
+  let last = performance.now(), lastRead = 0;
+  function frame(now) {
+    const dt = Math.min(0.05, (now - last) / 1000); last = now;
+    update(dt, now);
+    render(now);
+    if (now - lastRead > 200) { readout(); lastRead = now; }
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+})();
+</script>
