@@ -22,3 +22,7 @@ java -cp "$build" JourneyStateTests
 
 java -m jdk.compiler/com.sun.tools.javac.Main -source 17 -target 17 -cp "$build" -d "$build" tests/MapFixTests.java
 java -cp "$build" MapFixTests
+
+java -m jdk.compiler/com.sun.tools.javac.Main -source 17 -target 17 -cp "$build" -d "$build" app/src/main/java/com/motonav/companion/UpdatePolicy.java app/src/main/java/com/motonav/companion/UpdateTransport.java tests/UpdateTests.java
+java -cp "$build" UpdateTests
+python3 tests/update_contracts.py

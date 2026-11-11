@@ -6,8 +6,8 @@ android {
         applicationId 'com.motonav.recovery'
         minSdk 26
         targetSdk 35
-        versionCode 4
-        versionName '0.4.0-location-diagnostics'
+        versionCode 5
+        versionName '0.5.0-secure-updates'
         ndk { abiFilters 'arm64-v8a', 'armeabi-v7a' }
     }
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }

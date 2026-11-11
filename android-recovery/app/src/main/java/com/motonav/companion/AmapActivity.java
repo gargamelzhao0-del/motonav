@@ -79,6 +79,7 @@ public final class AmapActivity extends Activity {
         button("高德隐私政策",()->policy(PRIVACY));button("高德服务条款",()->policy(TERMS));
         label("摩托服务需高德另行授权。无语音、后台导航、自动重算保证或ESP32转发。",12);
         label("Android Key绑定包名："+getPackageName()+"\n本安装签名SHA1："+certificateSha1(),12);
+        button("应用更新（手动检查）",()->startActivity(new Intent(this,UpdateActivity.class)));
         button("返回模拟功能（非真实导航）",()->startActivity(new Intent(this,MainActivity.class)));
         LinearLayout page=new LinearLayout(this);page.setOrientation(LinearLayout.VERTICAL);page.setBackgroundColor(0xff101411);page.setPadding(dp(16),dp(12),dp(16),dp(16));
         ScrollView screen=new ScrollView(this);screen.setFillViewport(true);screen.addView(page);
