@@ -20,15 +20,20 @@ final class AmapLocationFeed implements LocationSource {
     private OnLocationChangedListener mapListener;
     private Location shown;
     private long lastCallbackMs = -1;
+    private int generation;
+    private final String owner;
 
     AmapLocationFeed(Context context, AMapLocationListener receiver) {
         this.context = context.getApplicationContext();
+        this.owner = context instanceof android.app.Service ? "navigation" : "map";
         this.receiver = receiver;
     }
 
     boolean maintain() {
         long now = SystemClock.elapsedRealtime();
         if (!MapStartupPolicy.locationNeedsStart(now, lastCallbackMs)) return client != null;
+        Diagnostics.record("location_start", "owner", owner, "generation", ++generation,
+            "reason", client == null ? "initial" : "callback_timeout", "callback_gap_ms", lastCallbackMs < 0 ? -1 : now - lastCallbackMs);
         stopClient();
         lastCallbackMs = now;
         try {
@@ -54,6 +59,7 @@ final class AmapLocationFeed implements LocationSource {
             next.startLocation();
             return true;
         } catch (Exception | LinkageError e) {
+            Diagnostics.record("location_exception", "owner", owner, "error_class", e.getClass().getSimpleName());
             stopClient();
             return false;
         }
@@ -61,7 +67,9 @@ final class AmapLocationFeed implements LocationSource {
 
     private void receive(AMapLocationClient next, AMapLocation location) {
         if (client != next) return;
-        lastCallbackMs = SystemClock.elapsedRealtime();
+        long now = SystemClock.elapsedRealtime();
+        Diagnostics.location(owner, location, lastCallbackMs < 0 ? -1 : now - lastCallbackMs, generation);
+        lastCallbackMs = now;
         receiver.onLocationChanged(location);
     }
 
@@ -75,6 +83,7 @@ final class AmapLocationFeed implements LocationSource {
         AMapLocationClient previous = client;
         client = null;
         if (previous == null) return;
+        Diagnostics.record("location_stop", "owner", owner, "generation", generation);
         try { previous.stopLocation(); } catch (RuntimeException | LinkageError ignored) {}
         try { previous.onDestroy(); } catch (RuntimeException | LinkageError ignored) {}
     }

@@ -123,6 +123,7 @@ final class JourneyController {
         }
         JourneyState.Guidance guidance = state.guidance(SystemClock.elapsedRealtime(),
                 gpsWeak ? 0 : trustedFixTime(), newInstruction);
+        if (newInstruction || frame.mode() == NavigationFrame.LIVE) Diagnostics.record("navigation_state", "state", guidance.name(), "gps_weak", gpsWeak, "fix_age_ms", DiagnosticRecord.age(SystemClock.elapsedRealtimeNanos(), trustedFixTime()));
         if (guidance == JourneyState.Guidance.LIVE) return true;
         frame = NavigationFrame.status(NavigationFrame.WAITING);
         icon(null);
@@ -140,6 +141,7 @@ final class JourneyController {
     private void search(String query){
         if(!active() || activity == null)return;
         if(query.length()<2||query.length()>80){report("请输入2–80字的城市和地点名称。");return;}
+        Diagnostics.record("route_action", "action", "search", "count", query.length());
         final int token=++searchEpoch;
         final boolean[] settled={false};
         try{
@@ -153,6 +155,7 @@ final class JourneyController {
                 public void onPoiSearched(PoiResult result,int code){
                     if(!active()||activity==null||token!=searchEpoch)return;
                     settled[0]=true;
+                    Diagnostics.record("search_result", "error", code, "count", result == null || result.getPois() == null ? 0 : result.getPois().size());
                     if(code!=1000||result==null){report("搜索失败（"+code+"），请检查高德Key、服务权限及网络。未生成目的地。");return;}
                     List<PoiItem> valid=new ArrayList<>();
                     if(result.getPois()!=null)for(PoiItem item:result.getPois())if(item!=null&&item.getLatLonPoint()!=null&&JourneyState.coordinate(item.getLatLonPoint().getLatitude(),item.getLatLonPoint().getLongitude()))valid.add(item);
@@ -174,6 +177,7 @@ final class JourneyController {
     }
     private LatLng destinationPoint(){return new LatLng(destination.getLatLonPoint().getLatitude(),destination.getLatLonPoint().getLongitude());}
     void planDialog(){
+        Diagnostics.record("route_action", "action", "plan_dialog", "phase", state.phase().name(), "destination", destination != null, "eligible", usableFix());
         if(!active() || activity == null)return;
         if(destination==null){report("请先搜索并选择真实目的地。");return;}
         if(!usableFix()){report("算路需要未过期的精确定位（精度≤100米），请检查定位权限、开关和室外信号。");return;}
@@ -189,10 +193,16 @@ final class JourneyController {
             }).create());
     }
     private void plan(String plate,int cc){
-        if(!active()||!usableFix()||destination==null)return;
+        Location origin = host.fix();
+        if(!active() || origin == null || !usableFix() || destination == null) {
+            Diagnostics.record("route_action", "action", "plan_rejected", "reason", origin == null ? "no_trusted_fix" : "state_or_fix_changed", "destination", destination != null);
+            report("提交时定位已失效，尚未发送算路请求。目的地已保留，请等待新定位后重试。");
+            return;
+        }
+        Diagnostics.record("route_action", "action", "plan_submit", "fix_age_ms", DiagnosticRecord.age(SystemClock.elapsedRealtimeNanos(), origin.getElapsedRealtimeNanos()));
         ++searchEpoch;stopEngine();clearRoute();
         final long token=state.begin(true,true);if(token<0)return;
-        plannedStart=new Location(host.fix());final LatLng target=destinationPoint();
+        plannedStart=new Location(origin);final LatLng target=destinationPoint();
         try{
             NaviSetting.updatePrivacyShow(context,true,true);NaviSetting.updatePrivacyAgree(context,true);
             AMapNavi.setApiKey(context,host.key());
@@ -206,12 +216,14 @@ final class JourneyController {
                     AMapCarInfo car=new AMapCarInfo();car.setCarType("11");car.setCarNumber(plate);car.setMotorcycleCC(cc);engine.setCarInfo(car);
                     boolean submitted=engine.calculateDriveRoute(Collections.singletonList(new NaviLatLng(plannedStart.getLatitude(),plannedStart.getLongitude())),
                         Collections.singletonList(new NaviLatLng(target.latitude,target.longitude)),Collections.emptyList(),PathPlanningStrategy.MOTOR_MULTIPLE_DEFAULT);
+                    Diagnostics.record("route_action", "action", "sdk_request", "accepted", submitted);
                     if(!submitted)stop("摩托算路请求未提交，请检查配置后重试。");
                 }
                 @Override public void onInitNaviFailure(){if(validPlan(token,engine))stop("导航SDK初始化失败，未开始导航。");}
-                @Override public void onCalculateRouteFailure(AMapCalcRouteResult result){if(validPlan(token,engine))stop(JourneyState.routeError(result==null?-1:result.getErrorCode()));}
+                @Override public void onCalculateRouteFailure(AMapCalcRouteResult result){if(validPlan(token,engine)){Diagnostics.record("route_result", "state", "failed", "error", result==null?-1:result.getErrorCode());stop(JourneyState.routeError(result==null?-1:result.getErrorCode()));}}
                 @Override public void onCalculateRouteSuccess(AMapCalcRouteResult result){
                     if(!validPlan(token,engine))return;
+                    Diagnostics.record("route_result", "state", "sdk_success");
                     int[] ids=result==null?null:result.getRouteid();Map<Integer,AMapNaviPath> paths=engine.getNaviPaths();
                     if(ids==null||ids.length==0||paths==null||paths.get(ids[0])==null){stop("高德未返回有效摩托路线。");return;}
                     AMapNaviPath path=paths.get(ids[0]);List<NaviLatLng> coords=path.getCoordList();
@@ -254,6 +266,7 @@ final class JourneyController {
                 @Override public void onGpsSignalWeak(boolean weak) {
                     if (!active() || engine != navi || !state.active(token)) return;
                     gpsWeak = weak;
+                    Diagnostics.record("navigation_state", "state", "gps_signal", "gps_weak", weak);
                     if (weak && state.phase() == JourneyState.Phase.NAVIGATING) guidanceReady(false);
                 }
             };
@@ -265,6 +278,7 @@ final class JourneyController {
     private boolean validPlan(long token,AMapNavi engine){return active()&&engine==navi&&state.planning(token);}
     private static String safeName(String name){return name==null||name.trim().isEmpty()?"等待道路信息":name;}
     void startOrStop(){
+        Diagnostics.record("route_action", "action", "start_or_stop", "phase", state.phase().name(), "eligible", usableFix());
         if(!active() || activity == null)return;
         if(state.phase()==JourneyState.Phase.NAVIGATING||state.phase()==JourneyState.Phase.STARTING||state.phase()==JourneyState.Phase.PLANNING){stop("已取消算路/结束导航。");return;}
         if(navi==null||plannedStart==null||state.phase()!=JourneyState.Phase.READY){report("请先完成摩托算路。");return;}
@@ -324,6 +338,7 @@ final class JourneyController {
     }
     private void stop(String message) { stop(message, NavigationFrame.STOPPED); }
     private void stop(String message, int terminalMode) {
+        Diagnostics.record("navigation_state", "state", "stopped", "phase", state.phase().name(), "count", terminalMode);
         stopEngine(); clearRoute(); frame = NavigationFrame.status(terminalMode); report(message);
         host.finished();
     }

@@ -19,12 +19,13 @@
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.BLUETOOTH_SCAN" android:usesPermissionFlags="neverForLocation" tools:targetApi="s" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
-    <application android:usesCleartextTraffic="false" android:label="MotoNav 恢复测试" android:icon="@drawable/ic_motonav" android:dataExtractionRules="@xml/data_extraction_rules" android:theme="@style/AppTheme" android:allowBackup="false" android:fullBackupContent="false" android:supportsRtl="true">
+    <application android:name=".MotoNavApplication" android:usesCleartextTraffic="false" android:label="MotoNav 恢复测试" android:icon="@drawable/ic_motonav" android:dataExtractionRules="@xml/data_extraction_rules" android:theme="@style/AppTheme" android:allowBackup="false" android:fullBackupContent="false" android:supportsRtl="true">
         <service android:name=".NavigationService" android:exported="false" android:foregroundServiceType="location|connectedDevice" />
         <service android:name="com.amap.api.location.APSService" android:exported="false" />
         <service android:name=".UpdateCheckJob" android:permission="android.permission.BIND_JOB_SERVICE" android:exported="true" />
         <meta-data android:name="com.amap.api.v2.apikey" android:value="" />
         <provider android:name=".UpdateApkProvider" android:authorities="${applicationId}.updates" android:exported="false" android:grantUriPermissions="true" />
+        <activity android:name=".DiagnosticsActivity" android:exported="false" />
         <activity android:name=".UpdateActivity" android:exported="false" />
         <activity android:name=".MainActivity" android:exported="false" />
         <activity android:name=".AmapActivity" android:exported="true">

@@ -3,6 +3,9 @@ set -eu
 cd "$(dirname "$0")/.."
 build=$(mktemp -d)
 trap 'rm -rf "$build"' EXIT
+java -m jdk.compiler/com.sun.tools.javac.Main -encoding UTF-8 -source 17 -target 17 -d "$build" app/src/main/java/com/motonav/companion/DiagnosticRecord.java app/src/main/java/com/motonav/companion/DiagnosticEndpoint.java tests/DiagnosticTests.java
+java -cp "$build" DiagnosticTests "$build/diagnostic.frames"
+python3 -B tests/diagnostic_receiver_tests.py "$build/diagnostic.frames"
 # Works with a JDK exposing jdk.compiler even where no javac launcher is installed.
 java -m jdk.compiler/com.sun.tools.javac.Main -encoding UTF-8 -source 17 -target 17 -d "$build" app/src/main/java/com/motonav/companion/Simulation.java app/src/main/java/com/motonav/companion/Protocol.java app/src/main/java/com/motonav/companion/MapProvider.java app/src/main/java/com/motonav/companion/DemoMapProvider.java app/src/main/java/com/motonav/companion/UnavailableMapProvider.java app/src/main/java/com/motonav/companion/LocationFix.java app/src/main/java/com/motonav/companion/LocationQuality.java app/src/main/java/com/motonav/companion/LocalNetwork.java app/src/main/java/com/motonav/companion/NetworkProtocol.java app/src/main/java/com/motonav/companion/AmapAccess.java app/src/main/java/com/motonav/companion/AmapKeySession.java tests/AmapAccessTests.java tests/AmapKeySessionTests.java tests/CoreTests.java tests/ProviderTests.java tests/LocationTests.java tests/NetworkTests.java tests/SimulationNetworkTests.java
 java -cp "$build" CoreTests
