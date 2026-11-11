@@ -32,7 +32,8 @@ public class JourneyStateTests {
 
   check(state.guidance(19_000, 18_900_000_000L, false) == JourneyState.Guidance.WAITING);
   check(state.guidance(63_999, 0, false) == JourneyState.Guidance.WAITING);
-  check(state.guidance(64_000, 63_900_000_000L, true) == JourneyState.Guidance.EXPIRED);
+  check(state.guidance(64_000, 0, false) == JourneyState.Guidance.WAITING);
+  check(state.guidance(120_000, 119_900_000_000L, true) == JourneyState.Guidance.LIVE);
   state.cancel();
   check(!state.active(token));
  }

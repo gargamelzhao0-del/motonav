@@ -3,7 +3,7 @@ package com.motonav.companion;
 /** Single-flight route/navigation state. Epochs invalidate asynchronous results after dismissal. */
 public final class JourneyState {
     public enum Phase { IDLE, PLANNING, READY, STARTING, NAVIGATING }
-    public enum Guidance { LIVE, WAITING, EXPIRED }
+    public enum Guidance { LIVE, WAITING }
     private long epoch, readyAt;
     private long lastInstructionMs, waitingSinceMs = -1;
     private Phase phase=Phase.IDLE;
@@ -30,7 +30,6 @@ public final class JourneyState {
 
     public Guidance guidance(long nowMs, long trustedFixNanos, boolean newInstruction) {
         if (phase != Phase.NAVIGATING) return Guidance.WAITING;
-        if (waitingSinceMs >= 0 && nowMs - waitingSinceMs >= 45_000) return Guidance.EXPIRED;
         if (trustedFixNanos > 0 && newInstruction
                 && (waitingSinceMs < 0 || trustedFixNanos / 1_000_000L > waitingSinceMs)) {
             lastInstructionMs = nowMs;

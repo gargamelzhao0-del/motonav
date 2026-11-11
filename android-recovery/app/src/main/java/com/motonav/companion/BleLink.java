@@ -4,13 +4,18 @@ import android.annotation.SuppressLint;
 import android.bluetooth.*;
 import android.bluetooth.le.*;
 import android.content.Context;
+import android.content.BroadcastReceiver;
+import android.content.Intent;
+import android.content.IntentFilter;
+import android.os.Build;
+import android.os.SystemClock;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.ParcelUuid;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 
-/** Foreground-only BLE, one GATT operation and one application frame in flight. */
+/** One GATT operation and one acknowledged application frame in flight. */
 @SuppressLint("MissingPermission")
 public final class BleLink {
     public static final UUID SERVICE=UUID.fromString("6e400001-b5a3-f393-e0a9-e50e24dcca9e");
@@ -37,6 +42,9 @@ public final class BleLink {
     private final Protocol protocol=new Protocol();
     private final NetworkProtocol networkProtocol=new NetworkProtocol();
     private LocalNetwork network;
+    private NavigationProtocol navigation;
+    private BluetoothDevice bondingDevice;
+    private BroadcastReceiver bondReceiver;
     private List<Protocol.Command> transfer;
     private int transferIndex;
     private final Runnable timeout=()->fail("设备响应超时，已断开。请重新连接。");
@@ -45,9 +53,19 @@ public final class BleLink {
     public BleLink(Context context,Listener listener) { this.context=context;this.listener=listener; }
     public boolean ready(){ return ready; }
     public boolean busy(){ return pending!=null; }
-    public boolean sessionOpen(){return gatt!=null;}
+    public boolean sessionOpen(){return gatt!=null || bondingDevice!=null;}
     public boolean version2(){return network!=null;}
     public boolean configureNetwork(LocalNetwork selected){if(gatt!=null)return false;network=selected;return true;}
+    public void configureNavigation(int session) {
+        if (sessionOpen() || bondingDevice != null) throw new IllegalStateException("Connected");
+        network = null;
+        navigation = new NavigationProtocol(session);
+    }
+    public boolean sendNavigation(NavigationFrame frame, Runnable done) {
+        if (!ready || busy() || navigation == null) return false;
+        send(navigation.snapshot(frame, SystemClock.elapsedRealtime()), done);
+        return true;
+    }
     public void scan(){
         disconnect();
         try {
@@ -73,18 +91,56 @@ public final class BleLink {
     }
     public void connect(BluetoothDevice device){
         disconnect(); listener.status("正在连接设备…");
+        if (navigation != null) {
+            try {
+                if (device.getBondState() != BluetoothDevice.BOND_BONDED) { bond(device); return; }
+            } catch (SecurityException e) { fail("蓝牙权限不可用。"); return; }
+        }
+        openGatt(device);
+    }
+    private void openGatt(BluetoothDevice device) {
         try {gatt=device.connectGatt(context,false,callback,BluetoothDevice.TRANSPORT_LE);handler.postDelayed(timeout,15000);}
         catch(SecurityException|IllegalArgumentException e){fail("连接失败，请检查蓝牙权限。");}
     }
+    private void bond(BluetoothDevice device) {
+        bondingDevice = device;
+        bondReceiver = new BroadcastReceiver() {
+            @Override public void onReceive(Context c, Intent intent) {
+                BluetoothDevice changed = intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE);
+                if (!device.equals(changed) || !device.equals(bondingDevice)) return;
+                try {
+                    int state = device.getBondState();
+                    if (state == BluetoothDevice.BOND_BONDED) { clearBondWait(); openGatt(device); }
+                    else if (state == BluetoothDevice.BOND_NONE) fail("圆屏配对未完成，请重试连接。");
+                } catch (SecurityException e) { fail("蓝牙权限已撤回。"); }
+            }
+        };
+        IntentFilter filter = new IntentFilter(BluetoothDevice.ACTION_BOND_STATE_CHANGED);
+        if (Build.VERSION.SDK_INT >= 33) context.registerReceiver(bondReceiver, filter, Context.RECEIVER_EXPORTED);
+        else context.registerReceiver(bondReceiver, filter);
+        listener.status("请在系统配对窗口输入圆屏上的六位配对码。");
+        handler.postDelayed(timeout, 60000);
+        if (device.getBondState() == BluetoothDevice.BOND_NONE && !device.createBond()) fail("无法启动圆屏配对。");
+    }
+    private void clearBondWait() {
+        handler.removeCallbacks(timeout);
+        bondingDevice = null;
+        if (bondReceiver != null) {
+            try { context.unregisterReceiver(bondReceiver); } catch (IllegalArgumentException ignored) {}
+            bondReceiver = null;
+        }
+    }
     public void disconnect(){
+        clearBondWait();
         stopScan();handler.removeCallbacks(timeout);ready=false;pending=null;completion=null;chunks=null;chunkIndex=0;ackReceived=false;rx=null;writing=false;incoming.setLength(0);protocol.reset();networkProtocol.reset();transfer=null;transferIndex=0;
+        if (navigation != null) navigation.reset();
         BluetoothGatt old=gatt;gatt=null;
         if(old!=null){try{old.disconnect();old.close();}catch(SecurityException ignored){}}
         listener.disconnected();
     }
     private void fail(String message){disconnect();listener.status(message);}
     public boolean sendPosition(Simulation simulation,Runnable done){
-        if(!ready||busy()) return false;
+        if(!ready||busy()||navigation!=null) return false;
         if((network!=null&&(simulation.totalMm()!=network.lengthMm()||!Arrays.deepEquals(simulation.route(),network.points())))||(network==null&&!Arrays.deepEquals(simulation.route(),Simulation.ROUTE))){fail("手机路线与已提交数据不一致，已安全断开。");return false;}
         send(network==null?protocol.position(simulation.distanceMm,Simulation.SPEED_MMPS,!simulation.running):networkProtocol.position(network,simulation.distanceMm,Simulation.SPEED_MMPS,!simulation.running),done);return true;
     }
@@ -96,6 +152,7 @@ public final class BleLink {
         send(transfer.get(transferIndex++),this::sendNextNetworkFrame);
     }
     private void beginProtocol(){
+        if (navigation != null) { send(navigation.hello(), () -> { ready = true; listener.ready(); }); return; }
         if(network==null){send(protocol.hello(),()->send(protocol.route(),()->{ready=true;listener.ready();}));return;}
         send(networkProtocol.hello(),()->{transfer=networkProtocol.transfer(network);transferIndex=0;sendNextNetworkFrame();});
     }
@@ -120,7 +177,9 @@ public final class BleLink {
             if(b=='\n'){
                 String line=incoming.toString();incoming.setLength(0);
                 if(pending==null)continue;
-                if(Protocol.acknowledged(line,pending.sequence())){ackReceived=true;finishIfAcknowledged();}
+                String expected = "A," + pending.sequence() + ",NAV3";
+                boolean navHello = navigation != null && pending.wire().startsWith("H,3,");
+                if(navHello ? line.equals(expected) : Protocol.acknowledged(line,pending.sequence())){ackReceived=true;finishIfAcknowledged();}
                 else {fail("设备拒绝数据或协议不匹配："+line);return;}
             } else if(b>=32&&b<=126&&incoming.length()<32) incoming.append((char)b);
             else {fail("设备返回无效数据。");return;}
@@ -129,7 +188,7 @@ public final class BleLink {
     private final BluetoothGattCallback callback=new BluetoothGattCallback(){
         @Override public void onConnectionStateChange(BluetoothGatt g,int status,int state){handler.post(()->{
             if(g!=gatt)return;
-            if(status!=BluetoothGatt.GATT_SUCCESS||state==BluetoothProfile.STATE_DISCONNECTED){fail("设备已断开（"+status+"）。模拟已暂停。");return;}
+            if(status!=BluetoothGatt.GATT_SUCCESS||state==BluetoothProfile.STATE_DISCONNECTED){fail("设备已断开（"+status+"）。");return;}
             if(state==BluetoothProfile.STATE_CONNECTED){listener.status("连接成功，正在验证服务…");try{if(!g.discoverServices())fail("服务发现失败。");}catch(SecurityException e){fail("蓝牙权限不可用。");}}
         });}
         @Override public void onServicesDiscovered(BluetoothGatt g,int status){handler.post(()->{
