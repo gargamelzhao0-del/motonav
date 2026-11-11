@@ -10,8 +10,11 @@ public final class MapStartupPolicy {
         if(!asked||(retry&&rationale))return Action.REQUEST;
         return Action.SHOW_SETTINGS;
     }
+    public static boolean usableSnapshot(boolean permission,boolean systemEnabled,long now,long fix){
+        return permission&&systemEnabled&&fresh(now,fix);
+    }
     public static boolean validFix(double latitude,double longitude,float accuracy,boolean mock){
-        return !mock&&Double.isFinite(latitude)&&Double.isFinite(longitude)&&latitude>=-90&&latitude<=90&&longitude>=-180&&longitude<=180&&!(latitude==0&&longitude==0)&&Float.isFinite(accuracy)&&accuracy>=0;
+        return !mock&&Double.isFinite(latitude)&&Double.isFinite(longitude)&&latitude>=-90&&latitude<=90&&longitude>=-180&&longitude<=180&&!(latitude==0&&longitude==0)&&Float.isFinite(accuracy)&&accuracy>0;
     }
     public static String locationError(int code){
         if(code==7||code==32)return "定位鉴权失败（错误"+code+"）：请核对Android Key、新包名和本安装签名SHA1；不要发送Key。";

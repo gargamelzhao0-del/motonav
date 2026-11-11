@@ -154,7 +154,11 @@ public final class AmapActivity extends Activity {
             journey=new JourneyController(this,map.getMap(),new JourneyController.Host(){
                 public boolean active(){return foreground&&consent&&map!=null;}
                 public String key(){return keys.sdkValue();}
-                public android.location.Location fix(){return currentFix==null?null:new android.location.Location(currentFix);}
+                public android.location.Location fix(){
+                    boolean allowed=checkSelfPermission(android.Manifest.permission.ACCESS_FINE_LOCATION)==PackageManager.PERMISSION_GRANTED;
+                    if(currentFix==null||!MapStartupPolicy.usableSnapshot(allowed,systemLocationEnabled(),android.os.SystemClock.elapsedRealtimeNanos(),lastFixNanos))return null;
+                    return new android.location.Location(currentFix);
+                }
                 public long fixNanos(){return lastFixNanos;}
                 public void report(String text){journeyStatus.setText(text);}
                 public void overview(){dial.setRound(false);placeLogo();}
@@ -195,6 +199,9 @@ public final class AmapActivity extends Activity {
     }
     private void handleLocation(android.location.Location location){
         if(!locationRequested)return;
+        boolean allowed=checkSelfPermission(android.Manifest.permission.ACCESS_FINE_LOCATION)==PackageManager.PERMISSION_GRANTED||checkSelfPermission(android.Manifest.permission.ACCESS_COARSE_LOCATION)==PackageManager.PERMISSION_GRANTED;
+        if(!allowed){invalidateFix("定位权限已被撤销，请检查系统设置。");return;}
+        if(!systemLocationEnabled()){invalidateFix("系统定位开关已关闭；请打开后点定位重试。");return;}
         if(location==null){invalidateFix("定位未返回结果，请点定位重试。");return;}
         Bundle extra=location.getExtras();
         int error=location instanceof com.amap.api.location.AMapLocation?((com.amap.api.location.AMapLocation)location).getErrorCode():extra==null?0:extra.getInt(com.amap.api.maps.model.MyLocationStyle.ERROR_CODE,0);
@@ -217,6 +224,7 @@ public final class AmapActivity extends Activity {
         if(action==MapStartupPolicy.Action.LOCATE){
             try{
                 locationRequested=true;
+                if(!systemLocationEnabled()){invalidateFix("系统定位开关已关闭；请打开后点定位重试。");map.getMap().setMyLocationEnabled(false);return;}
                 if(userRetry){
                     locationProblem=null;recenterPending=true;
                     map.getMap().setMyLocationStyle(new com.amap.api.maps.model.MyLocationStyle().myLocationType(com.amap.api.maps.model.MyLocationStyle.LOCATION_TYPE_FOLLOW).interval(2000));
