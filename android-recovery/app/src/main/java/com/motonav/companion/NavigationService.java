@@ -55,7 +55,7 @@ public final class NavigationService extends Service implements JourneyControlle
     private String notificationText = "";
     private final Runnable reconnect = () -> {
         reconnecting = false;
-        if (navigating && !stopping && selectedDevice != null && bluetoothAllowed() && !link.sessionOpen()) link.connect(selectedDevice);
+        if (navigating && !stopping && canReconnect() && !link.sessionOpen()) link.connect(selectedDevice);
     };
     private final Runnable stopDeadline = this::shutdownForeground;
     private final Runnable tick = new Runnable() {
@@ -128,6 +128,13 @@ public final class NavigationService extends Service implements JourneyControlle
     private boolean bluetoothAllowed() {
         return Build.VERSION.SDK_INT < 31 || (checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED
                 && checkSelfPermission(Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED);
+    }
+
+    @SuppressLint("MissingPermission")
+    private boolean canReconnect() {
+        if (selectedDevice == null || !bluetoothAllowed()) return false;
+        try { return selectedDevice.getBondState() == BluetoothDevice.BOND_BONDED; }
+        catch (SecurityException e) { return false; }
     }
 
     @Override public boolean active() { return !destroyed && saved.consent() && keys.configured(); }
@@ -260,7 +267,7 @@ public final class NavigationService extends Service implements JourneyControlle
     @Override public void disconnected() {
         if (destroyed) return;
         status("圆屏已断开");
-        if (!navigating || stopping || selectedDevice == null || !bluetoothAllowed() || reconnecting) return;
+        if (!navigating || stopping || !canReconnect() || reconnecting) return;
         reconnecting = true;
         handler.postDelayed(reconnect, Math.min(15000, 2000L << Math.min(retries++, 3)));
     }
