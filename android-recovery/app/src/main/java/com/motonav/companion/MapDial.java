@@ -22,7 +22,8 @@ final class MapDial extends FrameLayout {
             if(round)outline.setOval(0,0,v.getWidth(),v.getHeight());else outline.setRoundRect(0,0,v.getWidth(),v.getHeight(),12*density);
         }});mapFrame.setClipToOutline(true);addView(mapFrame);
     }
-    void toggleShape(){round=!round;mapFrame.invalidateOutline();invalidate();}
+    void toggleShape(){setRound(!round);}
+    void setRound(boolean value){round=value;mapFrame.invalidateOutline();invalidate();}
     @Override protected void onMeasure(int width,int height){
         int w=MeasureSpec.getSize(width),h=MeasureSpec.getSize(height);
         int size=Math.max(0,Math.min(w,h)-(int)(24*density));
@@ -40,7 +41,13 @@ final class MapDial extends FrameLayout {
     }
     @Override public boolean dispatchTouchEvent(MotionEvent e){
         // Let the SDK handle pan/zoom rather than letting the surrounding page steal the gesture.
-        int action=e.getActionMasked();if(getParent()!=null)getParent().requestDisallowInterceptTouchEvent(action!=MotionEvent.ACTION_UP&&action!=MotionEvent.ACTION_CANCEL);
+        int action=e.getActionMasked();
+        if(action==MotionEvent.ACTION_DOWN){
+            float x=e.getX()-getWidth()/2f,y=e.getY()-getHeight()/2f,r=mapFrame.getMeasuredWidth()/2f;
+            if(round&&x*x+y*y>r*r)return false;
+            if(!round&&(Math.abs(x)>r||Math.abs(y)>r))return false;
+        }
+        if(getParent()!=null)getParent().requestDisallowInterceptTouchEvent(action!=MotionEvent.ACTION_UP&&action!=MotionEvent.ACTION_CANCEL);
         return super.dispatchTouchEvent(e);
     }
 }

@@ -144,6 +144,7 @@ public final class AmapActivity extends Activity {
                 public android.location.Location fix(){return currentFix==null?null:new android.location.Location(currentFix);}
                 public long fixNanos(){return lastFixNanos;}
                 public void report(String text){journeyStatus.setText(text);}
+                public void overview(){dial.setRound(false);placeLogo();}
                 public void icon(android.graphics.Bitmap bitmap){turnIcon.setImageBitmap(bitmap);}
             });
             map.getMap().setOnMapLoadedListener(()->{if(map==activeMap&&foreground&&lastFixNanos==0)status.setText("底图加载完成，正在等待定位；加载回调不代表鉴权成功");});
@@ -195,5 +196,4 @@ public final class AmapActivity extends Activity {
     @Override protected void onResume(){super.onResume();foreground=true;handler.removeCallbacks(freshness);handler.postDelayed(freshness,15000);if(map==null)initialize();else{map.onResume();locationPermission(false);}}
     @Override protected void onPause(){foreground=false;currentFix=null;lastFixNanos=0;handler.removeCallbacks(freshness);if(journey!=null)journey.pause();if(consentDialog!=null){consentDialog.dismiss();consentDialog=null;}if(map!=null){map.getMap().setMyLocationEnabled(false);map.onPause();}super.onPause();}
     @Override protected void onDestroy(){dispose();keys.clear();super.onDestroy();}
-    @Override public void onLowMemory(){super.onLowMemory();if(map!=null)map.onLowMemory();}
 }

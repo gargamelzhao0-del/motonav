@@ -42,7 +42,7 @@ import java.util.Map;
 /** Phone-only, explicit-start GPS navigation experiment. Never feeds fictional data or BLE. */
 final class JourneyController {
     interface Host {
-        boolean active(); String key(); Location fix(); long fixNanos(); void report(String message); void icon(android.graphics.Bitmap bitmap);
+        boolean active(); String key(); Location fix(); long fixNanos(); void report(String message); void overview(); void icon(android.graphics.Bitmap bitmap);
     }
     private final Activity activity;
     private final AMap map;
@@ -164,7 +164,7 @@ final class JourneyController {
                     try{
                         if(!engine.selectRouteId(ids[0])){stop("高德路线选择失败。");return;}PolylineOptions shape=new PolylineOptions().width(15).color(0xffb4ff65);LatLngBounds.Builder bounds=new LatLngBounds.Builder();
                         for(NaviLatLng point:coords){if(point==null||!JourneyState.coordinate(point.getLatitude(),point.getLongitude())){stop("路线坐标无效。");return;}LatLng at=new LatLng(point.getLatitude(),point.getLongitude());shape.add(at);bounds.include(at);}
-                        line=map.addPolyline(shape);cameraFollow(false);map.animateCamera(CameraUpdateFactory.newLatLngBounds(bounds.build(),80));
+                        line=map.addPolyline(shape);host.overview();cameraFollow(false);map.animateCamera(CameraUpdateFactory.newLatLngBounds(bounds.build(),80));
                         if(state.ready(token,SystemClock.elapsedRealtime()))host.report("摩托路线已返回："+path.getAllLength()+"米 / 约"+Math.max(1,path.getAllTime()/60)+"分钟。请核对路线，再点开始；不是实机安全验收。");
                     }catch(RuntimeException e){stop("路线显示失败，未开始导航。");}
                 }
