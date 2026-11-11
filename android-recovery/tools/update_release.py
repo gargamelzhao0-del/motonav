@@ -24,6 +24,20 @@ def run_tool(executable, *arguments):
                           stdout=subprocess.PIPE, encoding="utf-8").stdout
 
 
+def signer_fingerprint(certificate):
+    counts = re.findall(r"^Number of signers:[ \t]+([0-9]+)[ \t]*$", certificate, re.M)
+    fingerprints = {
+        digest.lower()
+        for digest in re.findall(
+            r"^(?:Signer #[0-9]+|V[0-9]+(?:\.[0-9]+)? Signer(?: #[0-9]+)?):?"
+            r" certificate SHA-256 digest:[ \t]+([0-9a-fA-F]{64})[ \t]*$",
+            certificate, re.M)
+    }
+    if counts != ["1"] or len(fingerprints) != 1:
+        raise ValueError("Expected a verified APK with one signer")
+    return fingerprints.pop()
+
+
 def prepare(args):
     apk = args.apk
     size = apk.stat().st_size
@@ -46,10 +60,7 @@ def prepare(args):
         raise ValueError(f"Release tag must be {tag} for this APK")
 
     certificate = run_tool(args.build_tools / "apksigner", "verify", "--verbose", "--print-certs", apk)
-    signers = re.findall(r"^Signer #[0-9]+ certificate SHA-256 digest: ([0-9a-fA-F]{64})$",
-                         certificate, re.M)
-    if len(signers) != 1:
-        raise ValueError("Expected a verified APK with one signer")
+    signer = signer_fingerprint(certificate)
 
     asset = f"MotoNav-{version_name}.apk"
     with apk.open("rb") as source:
@@ -67,7 +78,7 @@ def prepare(args):
     args.output.mkdir(parents=True)
     shutil.copyfile(apk, args.output / asset)
     (args.output / MANIFEST).write_text(json.dumps(release, indent=2) + "\n", encoding="utf-8")
-    (args.output / SIGNER).write_text(signers[0].lower() + "\n", encoding="ascii")
+    (args.output / SIGNER).write_text(signer + "\n", encoding="ascii")
     (args.output / "certificate.txt").write_text(certificate, encoding="utf-8")
     (args.output / "SHA256SUMS.txt").write_text(f"{sha256}  {asset}\n", encoding="ascii")
     print(f"Verified {APPLICATION_ID} {version_name} ({version_code}), {size} bytes")

@@ -33,6 +33,24 @@ def check(output, previous, expected_error=None):
                 raise AssertionError("Expected release to be rejected: " + expected_error)
 
 
+legacy_certificate = f"Number of signers: 1\nSigner #1 certificate SHA-256 digest: {SIGNER}\n"
+scheme_certificate = f"Number of signers: 1\nV2 Signer: certificate SHA-256 digest: {SIGNER}\n"
+assert update_release.signer_fingerprint(legacy_certificate) == SIGNER
+assert update_release.signer_fingerprint(scheme_certificate) == SIGNER
+assert update_release.signer_fingerprint(
+    scheme_certificate + f"V3 Signer: certificate SHA-256 digest: {SIGNER}\n") == SIGNER
+for invalid in (
+    scheme_certificate.replace("signers: 1", "signers: 2"),
+    scheme_certificate + f"V3 Signer: certificate SHA-256 digest: {'2' * 64}\n",
+):
+    try:
+        update_release.signer_fingerprint(invalid)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("Ambiguous signing output accepted")
+
+
 with TemporaryDirectory(prefix="motonav-release-test-") as folder:
     output = Path(folder)
     (output / update_release.MANIFEST).write_text(json.dumps({"versionCode": 7}), encoding="utf-8")
@@ -49,4 +67,4 @@ with TemporaryDirectory(prefix="motonav-release-test-") as folder:
     check(output, [invalid_tag], "Cannot verify")
     check(output, [HTTPError("https://api.github.com", 404, "Not found", {}, None)])
 
-print("PASS: initial release, version progression, signer continuity and unsafe release metadata")
+print("PASS: APK signer formats, first release, version progression and signing continuity")
