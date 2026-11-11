@@ -62,6 +62,7 @@ public final class AmapActivity extends Activity {
     }};
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
+        UpdateCheckJob.restoreSchedule(this);
         saved=new SavedMapConfig(this);
         try{keys.replace(saved.load());consent=saved.consent();}catch(Exception e){consent=false;}
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);
@@ -79,13 +80,13 @@ public final class AmapActivity extends Activity {
         button("高德隐私政策",()->policy(PRIVACY));button("高德服务条款",()->policy(TERMS));
         label("摩托服务需高德另行授权。无语音、后台导航、自动重算保证或ESP32转发。",12);
         label("Android Key绑定包名："+getPackageName()+"\n本安装签名SHA1："+certificateSha1(),12);
-        button("应用更新（手动检查）",()->startActivity(new Intent(this,UpdateActivity.class)));
+        button("应用更新",()->startActivity(new Intent(this,UpdateActivity.class)));
         button("返回模拟功能（非真实导航）",()->startActivity(new Intent(this,MainActivity.class)));
         LinearLayout page=new LinearLayout(this);page.setOrientation(LinearLayout.VERTICAL);page.setBackgroundColor(0xff101411);page.setPadding(dp(16),dp(12),dp(16),dp(16));
         ScrollView screen=new ScrollView(this);screen.setFillViewport(true);screen.addView(page);
         if(Build.VERSION.SDK_INT>=30)screen.setOnApplyWindowInsetsListener((v,insets)->{Insets bars=insets.getInsets(WindowInsets.Type.systemBars());v.setPadding(bars.left,bars.top,bars.right,bars.bottom);return insets;});
         TextView brand=new TextView(this);brand.setText("MOTO / NAV");brand.setTextSize(21);brand.setLetterSpacing(0.14f);brand.setTextColor(0xffe9eddf);brand.setTypeface(null,android.graphics.Typeface.BOLD);page.addView(brand);
-        TextView warning=new TextView(this);warning.setText("RECOVERY 05  ·  仅停车测试，不用于骑行");warning.setTextSize(12);warning.setTextColor(0xffc6a988);warning.setPadding(0,dp(4),0,dp(12));page.addView(warning);
+        TextView warning=new TextView(this);warning.setText("RECOVERY " + BuildConfig.VERSION_NAME + " ·  仅停车测试，不用于骑行");warning.setTextSize(12);warning.setTextColor(0xffc6a988);warning.setPadding(0,dp(4),0,dp(12));page.addView(warning);
         root.removeView(status);status.setTextSize(13);status.setPadding(dp(12),dp(10),dp(12),dp(10));status.setBackground(panel(0xff1a211c));page.addView(status);
         dial=new MapDial(this);frame=dial.mapFrame;page.addView(dial,new LinearLayout.LayoutParams(-1,dp(380)));
         TextView waiting=new TextView(this);waiting.setText("MOTO / NAV\n等待地图配置");waiting.setGravity(android.view.Gravity.CENTER);waiting.setTextSize(18);waiting.setTextColor(0xff9da69a);frame.addView(waiting,new FrameLayout.LayoutParams(-1,-1));

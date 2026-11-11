@@ -1,0 +1,67 @@
+name: Publish MotoNav Android update
+
+on:
+  push:
+    tags: ['android-v*']
+
+concurrency:
+  group: motonav-android-update-channel
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    if: github.repository == 'gargamelzhao0-del/motonav'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: write
+    defaults:
+      run:
+        working-directory: android-recovery
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Test and build release
+        run: |
+          sh tests/run.sh
+          gradle --no-daemon assembleRelease lintRelease
+      - name: Sign APK and generate verified update manifest
+        env:
+          MOTONAV_KEYSTORE_BASE64: ${{ secrets.MOTONAV_RELEASE_KEYSTORE_BASE64 }}
+          MOTONAV_KEYSTORE_PASSWORD: ${{ secrets.MOTONAV_RELEASE_KEYSTORE_PASSWORD }}
+          MOTONAV_KEY_ALIAS: ${{ secrets.MOTONAV_RELEASE_KEY_ALIAS }}
+          MOTONAV_KEY_PASSWORD: ${{ secrets.MOTONAV_RELEASE_KEY_PASSWORD }}
+        run: |
+          set -eu
+          : "${MOTONAV_KEYSTORE_BASE64:?Configure the stable MotoNav release keystore}"
+          umask 077
+          MOTONAV_KEYSTORE=$(mktemp "$RUNNER_TEMP/motonav-signing.XXXXXX")
+          export MOTONAV_KEYSTORE
+          trap 'rm -f "$MOTONAV_KEYSTORE"' EXIT
+          printf '%s' "$MOTONAV_KEYSTORE_BASE64" | base64 --decode > "$MOTONAV_KEYSTORE"
+          unset MOTONAV_KEYSTORE_BASE64
+          sh tools/package-update.sh app/build/outputs/apk/release/app-release-unsigned.apk \
+            "$RUNNER_TEMP/motonav-update" "$GITHUB_REF_NAME"
+      - name: Check upgrade continuity and publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          out="$RUNNER_TEMP/motonav-update"
+          python3 tools/update_release.py check-channel --output "$out"
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --verify-tag --latest \
+            --title "MotoNav Android ${GITHUB_REF_NAME#android-v}" \
+            --notes "MotoNav Android APK and its verified update manifest. Installation requires the existing release signature." \
+            "$out"/*.apk "$out/motonav-update.json" "$out/motonav-signer.sha256" \
+            "$out/SHA256SUMS.txt" "$out/certificate.txt"
