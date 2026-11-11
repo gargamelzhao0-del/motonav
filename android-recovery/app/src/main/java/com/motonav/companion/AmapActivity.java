@@ -85,7 +85,7 @@ public final class AmapActivity extends Activity {
         ScrollView screen=new ScrollView(this);screen.setFillViewport(true);screen.addView(page);
         if(Build.VERSION.SDK_INT>=30)screen.setOnApplyWindowInsetsListener((v,insets)->{Insets bars=insets.getInsets(WindowInsets.Type.systemBars());v.setPadding(bars.left,bars.top,bars.right,bars.bottom);return insets;});
         TextView brand=new TextView(this);brand.setText("MOTO / NAV");brand.setTextSize(21);brand.setLetterSpacing(0.14f);brand.setTextColor(0xffe9eddf);brand.setTypeface(null,android.graphics.Typeface.BOLD);page.addView(brand);
-        TextView warning=new TextView(this);warning.setText("RECOVERY 04  ·  仅停车测试，不用于骑行");warning.setTextSize(12);warning.setTextColor(0xffc6a988);warning.setPadding(0,dp(4),0,dp(12));page.addView(warning);
+        TextView warning=new TextView(this);warning.setText("RECOVERY 05  ·  仅停车测试，不用于骑行");warning.setTextSize(12);warning.setTextColor(0xffc6a988);warning.setPadding(0,dp(4),0,dp(12));page.addView(warning);
         root.removeView(status);status.setTextSize(13);status.setPadding(dp(12),dp(10),dp(12),dp(10));status.setBackground(panel(0xff1a211c));page.addView(status);
         dial=new MapDial(this);frame=dial.mapFrame;page.addView(dial,new LinearLayout.LayoutParams(-1,dp(380)));
         TextView waiting=new TextView(this);waiting.setText("MOTO / NAV\n等待地图配置");waiting.setGravity(android.view.Gravity.CENTER);waiting.setTextSize(18);waiting.setTextColor(0xff9da69a);frame.addView(waiting,new FrameLayout.LayoutParams(-1,-1));
