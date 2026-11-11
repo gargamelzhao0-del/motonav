@@ -271,7 +271,7 @@ public final class AmapActivity extends Activity {
         } else if (location.getErrorCode() != 0) {
             locationProblem = MapStartupPolicy.locationError(location.getErrorCode());
         } else if (!MapStartupPolicy.validFix(location.getLatitude(), location.getLongitude(),
-                location.hasAccuracy() ? location.getAccuracy() : Float.NaN, location.isFromMockProvider())) {
+                location.getAccuracy(), location.isFromMockProvider())) {
             locationProblem = "收到无效或模拟位置，正在等待新定位。";
         } else {
             long time = MapStartupPolicy.fixTime(SystemClock.elapsedRealtimeNanos(), System.currentTimeMillis(),
@@ -279,11 +279,24 @@ public final class AmapActivity extends Activity {
             int source = location.getLocationType();
             if (time == 0 || !MapFixTracker.isLiveSource(source)) {
                 locationProblem = "收到缓存、过期或无法确认来源的位置，正在等待新定位。";
-            } else if (fixes.offer(new Location(location), time, location.getAccuracy(), source, precise)) {
+            } else if (fixes.offer(snapshot(location, time), time, location.getAccuracy(), source, precise)) {
                 locationProblem = null;
             }
         }
         renderLocation(precise);
+    }
+
+    private static Location snapshot(AMapLocation source, long timeNanos) {
+        // AMapLocation overrides the coordinate accessors. Copy the reported values explicitly.
+        Location fix = new Location(source.getProvider());
+        fix.setLatitude(source.getLatitude());
+        fix.setLongitude(source.getLongitude());
+        fix.setAccuracy(source.getAccuracy());
+        fix.setTime(source.getTime());
+        fix.setElapsedRealtimeNanos(timeNanos);
+        if (source.hasBearing()) fix.setBearing(source.getBearing());
+        if (source.hasSpeed()) fix.setSpeed(source.getSpeed());
+        return fix;
     }
 
     private void renderLocation(boolean precise) {

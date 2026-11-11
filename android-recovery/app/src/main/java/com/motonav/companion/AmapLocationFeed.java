@@ -5,6 +5,7 @@ import android.location.Location;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.SystemClock;
+import com.amap.api.location.AMapLocation;
 import com.amap.api.location.AMapLocationClient;
 import com.amap.api.location.AMapLocationClientOption;
 import com.amap.api.location.AMapLocationListener;
@@ -41,17 +42,26 @@ final class AmapLocationFeed implements LocationSource {
             options.setNeedAddress(false);
             options.setMockEnable(false);
             next.setLocationOption(options);
-            next.setLocationListener(location -> main.post(() -> {
-                if (client != next) return;
-                lastCallbackMs = SystemClock.elapsedRealtime();
-                receiver.onLocationChanged(location);
-            }));
+            next.setLocationListener(location -> {
+                if (Looper.myLooper() == main.getLooper()) {
+                    receive(next, location);
+                } else {
+                    AMapLocation copy = location == null ? null : location.clone();
+                    main.post(() -> receive(next, copy));
+                }
+            });
             next.startLocation();
             return true;
         } catch (Exception | LinkageError e) {
             stopClient();
             return false;
         }
+    }
+
+    private void receive(AMapLocationClient next, AMapLocation location) {
+        if (client != next) return;
+        lastCallbackMs = SystemClock.elapsedRealtime();
+        receiver.onLocationChanged(location);
     }
 
     void stop() {
