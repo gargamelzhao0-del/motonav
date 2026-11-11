@@ -39,6 +39,7 @@ final class AmapLocationFeed implements LocationSource {
             options.setOnceLocation(false);
             options.setInterval(1000);
             options.setLocationCacheEnable(false);
+            options.setWifiScan(true);
             options.setNeedAddress(false);
             options.setMockEnable(false);
             next.setLocationOption(options);
