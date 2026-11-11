@@ -6,10 +6,11 @@ android {
         applicationId 'com.motonav.recovery'
         minSdk 26
         targetSdk 35
-        versionCode 5
-        versionName '0.5.0-secure-updates'
+        versionCode 6
+        versionName '0.6.0'
         ndk { abiFilters 'arm64-v8a', 'armeabi-v7a' }
     }
+    buildFeatures { buildConfig true }
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
     buildTypes { release { minifyEnabled false } }
     packaging { jniLibs { useLegacyPackaging = true } }

@@ -1,11 +1,14 @@
 package com.motonav.companion;
 
+import android.Manifest;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.ActivityNotFoundException;
 import android.content.ClipData;
 import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -21,6 +24,7 @@ import java.util.concurrent.Executors;
 
 /** Foreground, explicit check -> download -> verify -> Android installer. Never auto-installs. */
 public final class UpdateActivity extends Activity {
+    private static final int NOTIFICATION_PERMISSION_REQUEST = 6083;
     private final Handler main = new Handler(Looper.getMainLooper());
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
     private UpdateRepository repository;
@@ -28,14 +32,15 @@ public final class UpdateActivity extends Activity {
     private UpdatePolicy.Release release;
     private File ready;
     private TextView status;
-    private Button check, download, install, cancel;
-    private boolean foreground, destroyed, returningFromSettings;
+    private Button check, download, install, cancel, reminders;
+    private boolean foreground, destroyed, returningFromSettings, checkFromNotification;
     private AlertDialog permissionDialog;
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);
         repository = new UpdateRepository(this);
+        checkFromNotification = state == null && getIntent().getBooleanExtra(UpdateCheckJob.CHECK_FROM_NOTIFICATION, false);
         LinearLayout page = new LinearLayout(this);
         page.setOrientation(LinearLayout.VERTICAL);
         int pad = Math.round(20 * getResources().getDisplayMetrics().density);
@@ -49,11 +54,12 @@ public final class UpdateActivity extends Activity {
             return insets;
         });
         text(page, "应用更新", 24);
-        text(page, "只在停车时操作。仅连接官方仓库 gargamelzhao0-del/motonav 的 GitHub Releases；检查会向 GitHub/CDN 发送网络请求，对方可见 IP。不发送地图 Key、位置或导航数据。", 15);
-        text(page, "必须由你主动检查、下载，再交给 Android 系统确认安装。只接受包名相同、版本更高、SHA-256 正确且实际当前签名完全相同的 APK。不会自动安装、卸载或清除数据。", 15);
-        text(page, "临时 CI 测试签名通常每次构建不同，不能互相覆盖。正式发布源及稳定签名尚需单独配置；此入口不代表已有可用更新。", 15);
+        text(page, "当前版本 " + BuildConfig.VERSION_NAME, 16);
+        text(page, "可手动检查，或开启新版提醒。开启后，Android 会在联网时定期查看 MotoNav 的 GitHub 发布，发现新版会发送通知。下载和安装需由你确认。", 15);
+        text(page, "检查只访问更新发布源。临时签名测试包与正式签名不同时，无法覆盖安装。", 15);
         status = text(page, "尚未联网检查。", 16);
         check = button(page, "检查更新", this::checkForUpdate);
+        reminders = button(page, "开启新版提醒", this::toggleReminders);
         download = button(page, "下载并验证", this::downloadUpdate);
         install = button(page, "交给系统安装", this::requestInstall);
         cancel = button(page, "取消当前操作", () -> cancelOperation("已取消。未安装任何更新。"));
@@ -77,7 +83,51 @@ public final class UpdateActivity extends Activity {
         download.setEnabled(idle && release != null && ready == null);
         install.setEnabled(idle && ready != null);
         cancel.setEnabled(foreground && operation != null);
+        reminders.setEnabled(idle);
+        boolean enabled = UpdateCheckJob.enabled(this);
+        reminders.setText(enabled ? "关闭新版提醒" : "开启新版提醒");
+        reminders.setContentDescription(enabled && !UpdateCheckJob.canNotify(this)
+                ? "新版提醒已开启，系统通知权限已关闭" : reminders.getText());
     }
+
+    private void toggleReminders() {
+        if (UpdateCheckJob.enabled(this)) {
+            UpdateCheckJob.disable(this);
+            status.setText("已关闭新版提醒。仍可手动检查。");
+        } else if (Build.VERSION.SDK_INT >= 33
+                && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, NOTIFICATION_PERMISSION_REQUEST);
+        } else {
+            enableReminders();
+        }
+        refreshButtons();
+    }
+
+    private void enableReminders() {
+        status.setText(UpdateCheckJob.enable(this)
+                ? "新版提醒已开启。系统约每小时检查一次，实际时间由 Android 调度。"
+                : "无法开启新版提醒。请检查系统通知设置，或使用手动检查。");
+    }
+
+    @Override public void onRequestPermissionsResult(int request, String[] permissions, int[] results) {
+        super.onRequestPermissionsResult(request, permissions, results);
+        if (request != NOTIFICATION_PERMISSION_REQUEST || destroyed) return;
+        if (results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED) {
+            enableReminders();
+        } else {
+            status.setText("未开启新版提醒。仍可手动检查。");
+        }
+        refreshButtons();
+    }
+
+    @Override protected void onPostResume() {
+        super.onPostResume();
+        if (checkFromNotification) {
+            checkFromNotification = false;
+            checkForUpdate();
+        }
+    }
+
     private void checkForUpdate() {
         if (!foreground || operation != null) return;
         discardReady(); release = null;
@@ -189,6 +239,7 @@ public final class UpdateActivity extends Activity {
     private void discardReady() { if (ready != null) { ready.delete(); ready = null; } }
     @Override protected void onResume() {
         super.onResume(); foreground = true;
+        UpdateCheckJob.restoreSchedule(this);
         if (returningFromSettings) {
             returningFromSettings = false;
             status.setText(getPackageManager().canRequestPackageInstalls()

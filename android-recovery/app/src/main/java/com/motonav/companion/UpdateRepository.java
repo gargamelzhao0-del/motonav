@@ -16,13 +16,17 @@ import java.security.DigestOutputStream;
 import java.security.MessageDigest;
 import java.util.UUID;
 
-/** Runs only on the update screen's worker. No access to map config or navigation state. */
+/** Update operations for background workers. No access to map config or navigation state. */
 final class UpdateRepository {
     private final Context context;
     UpdateRepository(Context context) { this.context = context.getApplicationContext(); }
 
     UpdatePolicy.Release check(UpdateTransport.Cancellation cancellation) throws Exception {
         cleanupExpired();
+        return fetchRelease(cancellation);
+    }
+
+    UpdatePolicy.Release fetchRelease(UpdateTransport.Cancellation cancellation) throws Exception {
         ByteArrayOutputStream bytes = new ByteArrayOutputStream();
         UpdateTransport.fetch(UpdatePolicy.MANIFEST_URL, true, bytes, -1, cancellation);
         cancellation.check();

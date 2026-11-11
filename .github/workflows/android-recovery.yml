@@ -1,7 +1,7 @@
 name: Android recovery checks
 on:
   push:
-    branches: ['recovery/**']
+    branches: ['recovery/**', 'codex/android-remote-updates']
   workflow_dispatch:
 permissions:
   contents: read
@@ -24,15 +24,21 @@ jobs:
       - name: Pure Java checks
         run: sh tests/run.sh
       - name: Android compile and lint
-        run: gradle --no-daemon assembleDebug lintDebug
-      - name: Verify temporary test APK
+        run: gradle --no-daemon assembleDebug lintDebug assembleRelease
+      - name: Verify temporary APK and exercise update packaging
+        env:
+          MOTONAV_KEY_ALIAS: ci-preview
+          MOTONAV_KEYSTORE_PASSWORD: android
+          MOTONAV_KEY_PASSWORD: android
         run: |
-          mkdir -p test-delivery
-          cp app/build/outputs/apk/debug/app-debug.apk test-delivery/MotoNav-Recovery-0.5-parking-test.apk
-          signer=$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -n 1)
-          "$signer" verify --verbose --print-certs test-delivery/MotoNav-Recovery-0.5-parking-test.apk > test-delivery/certificate.txt
-          sha256sum test-delivery/MotoNav-Recovery-0.5-parking-test.apk > test-delivery/SHA256SUMS.txt
-          printf 'Commit: %s\nPackage: com.motonav.recovery\nTemporary CI debug signature, not stable for future upgrades. Parking-only test; no riding use. No user API key bundled.\n' "$GITHUB_SHA" > test-delivery/BUILD.txt
+          set -eu
+          export MOTONAV_KEYSTORE="$RUNNER_TEMP/motonav-ci-preview.p12"
+          keytool -genkeypair -storetype PKCS12 -keystore "$MOTONAV_KEYSTORE" \
+            -storepass "$MOTONAV_KEYSTORE_PASSWORD" -keypass "$MOTONAV_KEY_PASSWORD" \
+            -alias "$MOTONAV_KEY_ALIAS" -keyalg RSA -keysize 2048 -validity 30 \
+            -dname "CN=MotoNav CI Preview" -noprompt
+          sh tools/package-update.sh app/build/outputs/apk/release/app-release-unsigned.apk test-delivery
+          printf 'Commit: %s\nPackage: com.motonav.recovery\nTemporary CI signature. Parking-only test. The manifest is a packaging preview and has not been published.\n' "$GITHUB_SHA" > test-delivery/BUILD.txt
           cat test-delivery/certificate.txt test-delivery/SHA256SUMS.txt test-delivery/BUILD.txt
       - uses: actions/upload-artifact@v4
         with:

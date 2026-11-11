@@ -1,10 +1,11 @@
 # MotoNav 独立恢复测试工程
 
 从可恢复的0.6源码建立，**不是0.10原源码或完整功能恢复，不用于实际骑行**。
-包名 `com.motonav.recovery`，版本 `2 / 0.2.0-recovery-moto`。
+包名 `com.motonav.recovery`，当前版本 `6 / 0.6.0`。
 与旧MotoNav并存，不读取旧App私有数据，不要求卸载旧版；原仓库sim目录保持不变。
 
 ## 本次实现
+- 地图设置中的「应用更新」支持手动检查和可选的后台新版提醒。发布工作流生成同签名 APK 和校验清单，下载与安装由使用者确认。详见 [应用更新与发布](docs/SECURE-UPDATES.zh-CN.md)。
 - 桌面启动直接进入真实地图页；首次设置后自动隐藏配置面板。
 - Android Keystore保护AES-GCM加密保存Android Key；禁用备份，不写Key日志、Intent或Bundle。
 - 保存版本化隐私同意。支持撤回同意、删除加密配置和设备密钥；停止地图不依赖写盘成功。
@@ -29,7 +30,7 @@ https://github.com/gargamelzhao0-del/motonav/actions/runs/42979339851
 SDK自动偏航/拥堵重算关闭接口未获验证；本App收到重算事件即停止，不声称阻止了SDK内部所有重算请求。无自动重算成功保证。
 
 ## 尚未恢复
-与原0.10完全一致的地图视觉和交互、0.9完整定位恢复、0.10远程更新流程及相应测试。
+与原0.10完全一致的地图视觉和交互、0.9完整定位恢复。
 没有语音、后台导航、自动偏航重算保证或真实数据到ESP32。
 错误16仍需高德服务授权；本工程不绕过权限，也不以汽车路线冒充摩托路线。
 
@@ -38,7 +39,7 @@ SDK自动偏航/拥堵重算关闭接口未获验证；本App收到重算事件�
 - `sh tests/run.sh`
 - `gradle --no-daemon assembleDebug lintDebug`
 
-本仓库只含文本源码和配置，不含二进制Gradle wrapper、APK、Key或签名私钥。GitHub Actions执行测试、编译和lint，并输出保留7天的临时签名停车测试APK artifact；没有使用用户Key或生产签名。
+本仓库只含文本源码和配置，不含二进制Gradle wrapper、APK、Key或签名私钥。GitHub Actions执行测试、编译和lint，并输出保留7天的临时签名停车测试APK、清单及签名指纹。正式发布使用独立的稳定签名流程。
 
 ## 首次安装前仍需完成
 - 固定并安全保管新测试签名，不能把每次CI新生成的debug证书当作可持续升级签名。

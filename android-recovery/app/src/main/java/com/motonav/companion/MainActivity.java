@@ -158,7 +158,7 @@ public final class MainActivity extends Activity implements BleLink.Listener {
         body.addView(text("隐私与运行",18,WHITE));
         copy("联网权限仅供用户主动同意后打开的独立高德地图模块使用；真实定位默认关闭，仅在你主动开启后前台读取，离开App立即停止并清除坐标。不保存搜索历史、设备地址或真实位置，仅保存地图朝向、质量阈值及协议数据版本计数。离开App即暂停并断开设备，不后台跟踪、不自动重连。\n\n旧版Android的BLE扫描可能要求定位权限；扫描本身不会启动真实定位。外部地图App有自己的权限与隐私政策。");
         body.addView(button("清除本机显示与质量偏好",false,()->new AlertDialog.Builder(this).setTitle("清除显示与质量阈值偏好？").setMessage("恢复地图朝向、定位时效和精度阈值，不删除其他App数据。").setNegativeButton("取消",null).setPositiveButton("清除",(d,w)->{getPreferences(MODE_PRIVATE).edit().clear().apply();headingUp=false;maximumLocationAgeMs=15000;maximumLocationAccuracy=50;showPage(4);}).show()));
-        copy("MOTONAV 0.5.0 / AMAP FOUNDATION\n独立设计的街机都市风格。不是 Rockstar / GTA 官方应用，不含其地图、商标或游戏素材。\n尚未完成手机与开发板实机验收，不可用于真实骑行。");
+        copy("MOTONAV " + BuildConfig.VERSION_NAME + " / AMAP FOUNDATION\n独立设计的街机都市风格。不是 Rockstar / GTA 官方应用，不含其地图、商标或游戏素材。\n尚未完成手机与开发板实机验收，不可用于真实骑行。");
     }
     private void locationPage(){
         heading("04 / REAL LOCATION","真实位置，独立看清。");
