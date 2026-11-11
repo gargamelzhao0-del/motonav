@@ -2,6 +2,8 @@
 
 从 0.6.0（versionCode 6）起，在地图设置的「应用更新」中可手动检查，也可开启「新版提醒」。发布渠道使用 GitHub Releases 和 Android 系统安装器。
 
+0.7.1（versionCode 9）建立固定签名的安装基线。已安装临时签名 0.6.1 的手机需要先完成一次迁移，不能仅靠发布新清单覆盖旧签名。安装和高德绑定见 [0.7.1 发布说明](releases/0.7.1.zh-CN.md)。固定证书 SHA256 为 `af9e2f4cb0997fe77ae884e9d7797a7c6b933c1bfdebc3993386ae418aeacde1`，公开指纹保存在 `release/signing-certificate.sha256`；私钥与口令在仓库之外保管，构建从 Actions Secrets 读取。
+
 ## 用户流程
 
 1. 点击「检查更新」会请求固定发布源。开启新版提醒后，Android 在联网时约每小时调度一次清单检查，同一个更高版本只通知一次。点击通知会打开更新页并重新检查。
@@ -60,8 +62,8 @@ schemaVersion 1 恰好包含以下八个字段。示例仅用于说明，SHA/大
 
 1. 在 `app/build.gradle` 增大 `versionCode`，设置新的 `versionName`，并确认目标提交的 Android CI 通过。
 2. 对审核通过的提交创建与版本名对应的标签，例如 `android-v0.6.0`，然后执行 `git push origin refs/tags/android-v0.6.0`。推送标签会触发正式发布。
-3. 工作流构建 release APK，以稳定密钥签名，从最终 APK 读取版本与包名并生成清单。已有更新版本时，会比对公开的签名指纹，并要求 `versionCode` 递增。
-4. 工作流将 APK、清单和签名指纹一起上传到 GitHub Release，并设为 latest。其他用途的发布请避免替换该 latest 入口。CI 的停车测试产物带临时签名，其中的清单仅供验证发布格式。
+3. 为此版本提供 `docs/releases/X.Y.Z.zh-CN.md` 发布说明。工作流构建 release APK，以稳定密钥签名，从最终 APK 读取版本与包名并生成清单，并核对仓库内固定签名指纹。已有更新版本时，还会比对上一发布的签名指纹，并要求 `versionCode` 递增。
+4. 工作流先创建草稿 Release，上传 APK、清单、签名指纹、证书、哈希及构建提交信息，上传完成后才公开并设为 latest。其他用途的发布请避免替换该 latest 入口。CI 的停车测试产物带临时签名，其中的清单仅供验证发布格式。
 
 首次使用这个渠道的设备需要安装稳定签名的基线 APK。启用提醒后，设备会在下一次后台检查时看到同签名的更高版本。原先的临时 CI 签名无法覆盖安装稳定签名包；需由使用者决定如何迁移并核对高德绑定。
 
