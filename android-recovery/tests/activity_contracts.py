@@ -32,3 +32,15 @@ assert receive.index('systemLocationEnabled()') < receive.index('fixes.offer(')
 assert 'location.getErrorCode()' in receive
 assert 'hasPrecisePermission(), systemLocationEnabled()' in source
 print('PASS: static map, location lifecycle, and privacy guards (not runtime validation)')
+
+assert 'journey.pause(' not in pause and 'journey.close(' not in pause
+assert 'navigationService.detach(navigationView)' in pause
+service = (Path('app/src/main/java/com/motonav/companion/NavigationService.java')).read_text()
+assert 'startForeground(' in service and 'START_NOT_STICKY' in service
+assert 'new AmapLocationFeed(this, this::receiveLocation)' in service
+assert 'if (!navigationAllowed())' in service
+assert 'setElapsedRealtimeNanos(time)' in service
+assert 'feed.stop(); fixes.clear();' in service
+assert 'new JourneyController(this, this)' in service
+assert 'navigationService.revoke()' in source
+print('PASS: service ownership, background location and explicit-revocation wiring')

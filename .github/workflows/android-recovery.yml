@@ -2,7 +2,7 @@ name: Android recovery checks
 on:
   push:
     branches: ['recovery/**', 'codex/**']
-    paths: ['android-recovery/**', '.github/workflows/android-recovery.yml', '.github/workflows/android-update-release.yml']
+    paths: ['android-recovery/**', 'moto_esp32/**', '.github/workflows/android-recovery.yml', '.github/workflows/android-update-release.yml']
   workflow_dispatch:
 permissions:
   contents: read
@@ -45,5 +45,30 @@ jobs:
         with:
           name: motonav-recovery-parking-test
           path: android-recovery/test-delivery/
+          if-no-files-found: error
+          retention-days: 7
+
+
+  firmware:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build 1.75C navigation receiver
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.5.1
+          target: esp32s3
+          path: moto_esp32
+          command: idf.py build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: motonav-175c-navigation-test
+          path: |
+            moto_esp32/build/motonav.bin
+            moto_esp32/build/bootloader/bootloader.bin
+            moto_esp32/build/partition_table/partition-table.bin
+            moto_esp32/build/flash_args
+            moto_esp32/build/flasher_args.json
           if-no-files-found: error
           retention-days: 7

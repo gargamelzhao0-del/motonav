@@ -27,7 +27,7 @@ import com.amap.api.maps.TextureMapView;
 import com.amap.api.maps.MapsInitializer;
 import com.amap.apis.utils.core.api.AMapUtilCoreApi;
 
-/** Recovery preview: foreground motorcycle navigation experiment; no BLE export. */
+/** Map view attached to a foreground navigation service. */
 public final class AmapActivity extends Activity {
     private static final String PRIVACY="https://lbs.amap.com/pages/privacy/";
     private static final String TERMS="https://lbs.amap.com/pages/terms/";
@@ -37,6 +37,25 @@ public final class AmapActivity extends Activity {
     private TextView status, journeyStatus;
     private ImageView turnIcon;
     private JourneyController journey;
+    private NavigationService navigationService;
+    private NavigationService.View navigationView;
+    private boolean serviceBound, scanAfterPermission;
+    private TextView screenStatus;
+    private AlertDialog screenDialog;
+    private android.widget.ArrayAdapter<String> screenAdapter;
+    private final java.util.List<android.bluetooth.BluetoothDevice> screens = new java.util.ArrayList<>();
+    private final android.content.ServiceConnection navigationConnection = new android.content.ServiceConnection() {
+        @Override public void onServiceConnected(android.content.ComponentName name, android.os.IBinder binder) {
+            if (!serviceBound) return;
+            navigationService = ((NavigationService.LocalBinder) binder).service();
+            journey = navigationService.journey();
+            attachNavigation();
+        }
+        @Override public void onServiceDisconnected(android.content.ComponentName name) {
+            navigationService = null; journey = null;
+            if (journeyStatus != null) journeyStatus.setText("导航服务已停止，请重新规划路线。");
+        }
+    };
     private final MapFixTracker<Location> fixes = new MapFixTracker<>();
     private AmapLocationFeed locationFeed;
     private Button open;
@@ -65,8 +84,8 @@ public final class AmapActivity extends Activity {
         try{keys.replace(saved.load());consent=saved.consent();}catch(Exception e){consent=false;}
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);
         root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);root.setBackgroundColor(0xff101411);root.setPadding(20,16,20,16);
-        label("MOTO / NAV · 独立恢复测试",22);label("前台摩托导航恢复测试 · 非0.10完整恢复 · 不用于骑行",13);
-        status=label("首次填写Android Key并阅读政策。保存后在本机加密存储，重启后自动载入；仅前台定位。新包名须单独绑定，不会读取旧App数据。",14);
+        label("MOTO / NAV · 独立恢复测试",22);label("摩托导航与圆屏连接测试",13);
+        status=label("首次填写Android Key并阅读政策。保存后在本机加密存储，重启后自动载入；开始导航后可锁屏继续定位。新包名须单独绑定，不会读取旧App数据。",14);
         keyInput=new EditText(this);keyInput.setHint("Android Key · 32位字符");keyInput.setTextColor(0xffeef3e6);keyInput.setHintTextColor(0xffaab3a7);
         keyInput.setInputType(InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_VARIATION_PASSWORD);keyInput.setSingleLine(true);
         keyInput.setImeOptions(EditorInfo.IME_ACTION_DONE|EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING);
@@ -76,10 +95,13 @@ public final class AmapActivity extends Activity {
         root.addView(keyInput);button("加密保存Key / 修改Key",this::applyKey);button("删除已存Key并撤回同意",this::clearKey);
         open=button("阅读并同意后打开地图",this::askConsent);open.setEnabled(keys.configured());
         button("高德隐私政策",()->policy(PRIVACY));button("高德服务条款",()->policy(TERMS));
-        label("摩托服务需高德另行授权。无语音、后台导航、自动重算保证或ESP32转发。",12);
+        label("摩托服务需高德授权。导航期间支持锁屏定位和已配对圆屏。",12);
         label("Android Key绑定包名："+getPackageName()+"\n本安装签名SHA1："+certificateSha1(),12);
         button("应用更新",()->startActivity(new Intent(this,UpdateActivity.class)));
-        button("返回模拟功能（非真实导航）",()->startActivity(new Intent(this,MainActivity.class)));
+        button("返回模拟功能（非真实导航）", () -> {
+            if (NavigationService.navigating) { status.setText("请先结束当前导航，再进入模拟功能。"); return; }
+            startActivity(new Intent(this, MainActivity.class));
+        });
         LinearLayout page=new LinearLayout(this);page.setOrientation(LinearLayout.VERTICAL);page.setBackgroundColor(0xff101411);page.setPadding(dp(16),dp(12),dp(16),dp(16));
         ScrollView screen=new ScrollView(this);screen.setFillViewport(true);screen.addView(page);
         if(Build.VERSION.SDK_INT>=30)screen.setOnApplyWindowInsetsListener((v,insets)->{Insets bars=insets.getInsets(WindowInsets.Type.systemBars());v.setPadding(bars.left,bars.top,bars.right,bars.bottom);return insets;});
@@ -99,10 +121,54 @@ public final class AmapActivity extends Activity {
         tools.addView(action("定位/权限",()->locationPermission(true)),new LinearLayout.LayoutParams(0,-2,1));
         tools.addView(action("圆形/完整图",()->{dial.toggleShape();placeLogo();}),new LinearLayout.LayoutParams(0,-2,1));
         tools.addView(action("地图设置",()->controls.setVisibility(controls.getVisibility()==View.VISIBLE?View.GONE:View.VISIBLE)),new LinearLayout.LayoutParams(0,-2,1));page.addView(tools);
+        screenStatus = new TextView(this); screenStatus.setText("圆屏尚未连接");
+        screenStatus.setTextColor(0xffaab3a7); screenStatus.setPadding(dp(12), dp(8), dp(12), dp(4)); page.addView(screenStatus);
+        page.addView(action("连接圆屏", this::chooseScreen));
         controls=new ScrollView(this);controls.addView(root);page.addView(controls,new LinearLayout.LayoutParams(-1,-2));
         frame.addOnLayoutChangeListener((v,l,t,r,b,ol,ot,or,ob)->placeLogo());setContentView(screen);
         if(keys.configured()&&consent)controls.setVisibility(View.GONE);
     }
+    private void attachNavigation() {
+        if (foreground && consent && map != null && navigationService != null && navigationView != null)
+            navigationService.attach(this, map.getMap(), navigationView);
+    }
+
+    private boolean blePermissions() {
+        if (Build.VERSION.SDK_INT < 31) return hasPrecisePermission();
+        return checkSelfPermission(android.Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED
+                && checkSelfPermission(android.Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED;
+    }
+
+    private void chooseScreen() {
+        if (navigationService == null) { screenStatus.setText("请先打开地图，等待导航服务就绪。"); return; }
+        if (!blePermissions()) {
+            if (Build.VERSION.SDK_INT >= 31) requestPermissions(new String[]{android.Manifest.permission.BLUETOOTH_SCAN,
+                    android.Manifest.permission.BLUETOOTH_CONNECT}, 72);
+            else locationPermission(true);
+            return;
+        }
+        screens.clear();
+        screenAdapter = new ArrayAdapter<>(this, android.R.layout.simple_list_item_1);
+        screenDialog = new AlertDialog.Builder(this).setTitle("选择你的 MotoNav 圆屏")
+                .setAdapter(screenAdapter, (dialog, which) -> {
+                    if (navigationService != null && which < screens.size()) navigationService.connect(screens.get(which));
+                }).setNeutralButton("断开圆屏", (dialog, which) -> {
+                    if (navigationService != null) navigationService.disconnectScreen();
+                }).setNegativeButton("取消", null).create();
+        screenDialog.setOnDismissListener(dialog -> screenDialog = null);
+        screenDialog.show();
+        navigationService.scan();
+    }
+
+    private void addScreen(android.bluetooth.BluetoothDevice device) {
+        if (screenDialog == null || screens.contains(device)) return;
+        try {
+            String name = device.getName();
+            screens.add(device);
+            screenAdapter.add((name == null ? "MotoNav 圆屏" : name) + " · " + device.getAddress());
+        } catch (SecurityException e) { screenStatus.setText("蓝牙权限已撤回。"); }
+    }
+
     private int dp(int value){return Math.round(value*getResources().getDisplayMetrics().density);}
     private android.graphics.drawable.GradientDrawable panel(int color){android.graphics.drawable.GradientDrawable d=new android.graphics.drawable.GradientDrawable();d.setColor(color);d.setCornerRadius(dp(12));return d;}
     private Button action(String text,Runnable run){Button b=new Button(this);b.setText(text);b.setTextSize(13);b.setAllCaps(false);b.setMinHeight(dp(48));b.setTextColor(0xffdce5d2);b.setBackgroundTintList(android.content.res.ColorStateList.valueOf(0xff293228));b.setOnClickListener(v->run.run());return b;}
@@ -126,7 +192,7 @@ public final class AmapActivity extends Activity {
     private void policy(String url){try{startActivity(new Intent(Intent.ACTION_VIEW,Uri.parse(url)));}catch(ActivityNotFoundException e){status.setText(getString(R.string.amap_no_browser,url));}}
     private void askConsent(){
         if(map!=null||!keys.configured()||!foreground||consentDialog!=null)return;
-        consentDialog=new AlertDialog.Builder(this).setTitle("启用高德联网地图？").setMessage("本应用使用高德地图、定位、搜索及导航SDK，联网时向高德提交Android Key、包信息及服务必需的网络、设备和位置信息，服务端可见IP。定位仅在本页面前台且已获系统权限时启动，用于展示当前位置。主动搜索或规划路线时会把搜索词、起终点、车牌和排量提交高德；显式开始后提供前台GPS摩托导航测试，不传给ESP32。本次版本扩展了数据用途，因此需要重新同意一次。请先阅读页面中的隐私政策和条款。\n\nKey将用Android Keystore保护的AES-GCM加密保存于本应用私有存储，应用备份关闭。此次同意会保存，今后打开自动加载地图及定位；可在设置中删除Key并撤回同意。SDK自身缓存无法保证彻底清除。系统首次定位授权仍需本人操作。")
+        consentDialog=new AlertDialog.Builder(this).setTitle("启用高德联网地图？").setMessage("本应用使用高德地图、定位、搜索及导航SDK，联网时向高德提交Android Key、包信息及服务必需的网络、设备和位置信息，服务端可见IP。浏览地图时在前台定位。主动开始导航后，通过持续通知在锁屏或切换应用时继续定位，直到结束导航。主动搜索或规划路线时会把搜索词、起终点、车牌和排量提交高德；显式开始后提供GPS摩托导航，并向你选择并配对的ESP32发送转向、距离、车速和数据有效状态。圆屏连接通过系统蓝牙授权和配对。本次版本扩展了数据用途，因此需要重新同意一次。请先阅读页面中的隐私政策和条款。\n\nKey将用Android Keystore保护的AES-GCM加密保存于本应用私有存储，应用备份关闭。此次同意会保存，今后打开自动加载地图及定位；可在设置中删除Key并撤回同意。SDK自身缓存无法保证彻底清除。系统首次定位授权仍需本人操作。")
             .setNegativeButton("不同意并关闭",(d,w)->{consent=false;dispose();boolean recorded=saved.consent(false);if(!recorded){saved.clear();keys.clear();open.setEnabled(false);}status.setText(recorded?"已撤回同意，不会自动联网定位":"已停止地图，但无法确认撤回记录已保存。请在系统中清除本测试应用数据后再使用。");})
             .setPositiveButton("同意并联网打开",(d,w)->{if(!foreground||isFinishing())return;if(!saved.consent(true)){status.setText("无法保存同意，请重试");return;}consent=true;initialize();}).create();
         consentDialog.setOnDismissListener(d->consentDialog=null);consentDialog.show();
@@ -151,10 +217,7 @@ public final class AmapActivity extends Activity {
             map.getMap().getUiSettings().setCompassEnabled(false);
             map.getMap().getUiSettings().setScaleControlsEnabled(false);
             placeLogo();
-            journey=new JourneyController(this,map.getMap(),new JourneyController.Host(){
-                public boolean active(){return foreground&&consent&&map!=null;}
-                public String key(){return keys.sdkValue();}
-                public boolean navigationAllowed() { return AmapActivity.this.navigationAllowed(); }
+            navigationView = new NavigationService.View() {
                 public Location fix() {
                     MapFixTracker.Fix<Location> fix = navigationFix();
                     return fix == null ? null : new Location(fix.point());
@@ -163,10 +226,14 @@ public final class AmapActivity extends Activity {
                     MapFixTracker.Fix<Location> fix = navigationFix();
                     return fix == null ? 0 : fix.timeNanos();
                 }
-                public void report(String text){journeyStatus.setText(text);}
+                public void report(String text) { journeyStatus.setText(text); }
                 public void overview(){dial.setRound(false);placeLogo();}
-                public void icon(android.graphics.Bitmap bitmap){turnIcon.setImageBitmap(bitmap);}
-            });
+                public void icon(android.graphics.Bitmap bitmap) { turnIcon.setImageBitmap(bitmap); }
+                public void bleStatus(String text) { screenStatus.setText(text); }
+                public void found(android.bluetooth.BluetoothDevice device) { addScreen(device); }
+            };
+            serviceBound = bindService(new Intent(this, NavigationService.class), navigationConnection, BIND_AUTO_CREATE);
+            if (!serviceBound) journeyStatus.setText("导航服务启动失败，请重新打开地图。");
             final TextureMapView activeMap = map;
             map.getMap().setOnMapLoadedListener(() -> {
                 if (map != activeMap) return;
@@ -179,14 +246,21 @@ public final class AmapActivity extends Activity {
             checkLocationNow();
         }catch(RuntimeException|LinkageError e){dispose();status.setText(R.string.amap_failed);}
     }
-    private void dispose(){
+    private void dispose() {
+        if (navigationService != null) navigationService.revoke();
+        releaseMap();
+    }
+    private void releaseMap(){
         handler.removeCallbacks(freshness);
         stopLocation();
         locationFeed = null;
         mapLoaded = false;
-        if(journey!=null){journey.close();journey=null;}
+        if (navigationService != null) navigationService.detach(navigationView);
+        if (serviceBound) { unbindService(navigationConnection); serviceBound = false; }
+        navigationService = null; journey = null; navigationView = null;
+        if (screenDialog != null) { screenDialog.dismiss(); screenDialog = null; }
         if(map!=null){TextureMapView old=map;map=null;try{old.getMap().setOnMapLoadedListener(null);old.getMap().setLocationSource(null);}catch(RuntimeException|LinkageError ignored){}try{old.onPause();}catch(RuntimeException|LinkageError ignored){}try{old.onDestroy();}catch(RuntimeException|LinkageError ignored){}frame.removeAllViews();}
-        if(sdkTouched){sdkTouched=false;try{MapsInitializer.updatePrivacyAgree(this,false);com.amap.api.location.AMapLocationClient.updatePrivacyAgree(this,false);}catch(RuntimeException|LinkageError ignored){}try{MapsInitializer.setApiKey("");}catch(RuntimeException|LinkageError ignored){}}
+        if(sdkTouched && !NavigationService.navigating){sdkTouched=false;try{MapsInitializer.updatePrivacyAgree(this,false);com.amap.api.location.AMapLocationClient.updatePrivacyAgree(this,false);}catch(RuntimeException|LinkageError ignored){}try{MapsInitializer.setApiKey("");}catch(RuntimeException|LinkageError ignored){}}
         if(open!=null)open.setEnabled(keys.configured());
     }
     private void applyKey(){
@@ -383,6 +457,7 @@ public final class AmapActivity extends Activity {
     @Override public void onRequestPermissionsResult(int request,String[] permissions,int[] results){
         super.onRequestPermissionsResult(request,permissions,results);
         if(request==71){permissionPending=false;if(foreground)locationPermission(false);}
+        if (request == 72) { scanAfterPermission = true; if (foreground) { scanAfterPermission = false; if (blePermissions()) chooseScreen(); } }
     }
     @Override protected void onResume() {
         super.onResume();
@@ -392,13 +467,16 @@ public final class AmapActivity extends Activity {
             map.onResume();
             checkLocationNow();
         }
+        attachNavigation();
+        if (scanAfterPermission) { scanAfterPermission = false; if (blePermissions()) chooseScreen(); }
     }
 
     @Override protected void onPause() {
         foreground = false;
         handler.removeCallbacks(freshness);
         stopLocation();
-        if (journey != null) journey.pause();
+        if (navigationService != null) navigationService.detach(navigationView);
+        if (screenDialog != null) { screenDialog.dismiss(); screenDialog = null; }
         if (consentDialog != null) {
             consentDialog.dismiss();
             consentDialog = null;
@@ -406,5 +484,5 @@ public final class AmapActivity extends Activity {
         if (map != null) map.onPause();
         super.onPause();
     }
-    @Override protected void onDestroy(){dispose();keys.clear();super.onDestroy();}
+    @Override protected void onDestroy(){releaseMap();keys.clear();super.onDestroy();}
 }
