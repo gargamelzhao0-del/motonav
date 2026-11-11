@@ -6,7 +6,8 @@ public class MapStartupPolicyTests {
  boolean f=(bits&1)!=0,m=(bits&2)!=0,c=(bits&4)!=0,p=(bits&8)!=0,fine=(bits&16)!=0,coarse=(bits&32)!=0,asked=(bits&64)!=0,retry=(bits&128)!=0,rationale=(bits&256)!=0;
  MapStartupPolicy.Action result=MapStartupPolicy.location(f,m,c,p,fine,coarse,asked,retry,rationale);
  if(!f||!m||!c||p)check(result==MapStartupPolicy.Action.WAIT);
- else if(fine||coarse)check(result==MapStartupPolicy.Action.LOCATE);
+ else if(fine)check(result==MapStartupPolicy.Action.LOCATE);
+ else if(coarse)check(result==(!retry?MapStartupPolicy.Action.LOCATE:(rationale?MapStartupPolicy.Action.REQUEST:MapStartupPolicy.Action.SHOW_SETTINGS)));
  else if(!asked||retry&&rationale)check(result==MapStartupPolicy.Action.REQUEST);
  else check(result==MapStartupPolicy.Action.SHOW_SETTINGS);
  }

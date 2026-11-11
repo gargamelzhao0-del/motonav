@@ -5,7 +5,8 @@ public final class MapStartupPolicy {
     public static Action location(boolean foreground,boolean mapReady,boolean consent,boolean pending,
         boolean fine,boolean coarse,boolean asked,boolean retry,boolean rationale){
         if(!foreground||!mapReady||!consent||pending)return Action.WAIT;
-        if(fine||coarse)return Action.LOCATE;
+        if(fine)return Action.LOCATE;
+        if(coarse)return !retry?Action.LOCATE:(rationale?Action.REQUEST:Action.SHOW_SETTINGS);
         if(!asked||(retry&&rationale))return Action.REQUEST;
         return Action.SHOW_SETTINGS;
     }

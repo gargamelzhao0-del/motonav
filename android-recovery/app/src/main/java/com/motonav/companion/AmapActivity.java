@@ -24,13 +24,16 @@ import com.amap.api.maps.MapView;
 import com.amap.api.maps.MapsInitializer;
 import com.amap.apis.utils.core.api.AMapUtilCoreApi;
 
-/** Recovery preview: foreground map and location only, no navigation or BLE export. */
+/** Recovery preview: foreground motorcycle navigation experiment; no BLE export. */
 public final class AmapActivity extends Activity {
     private static final String PRIVACY="https://lbs.amap.com/pages/privacy/";
     private static final String TERMS="https://lbs.amap.com/pages/terms/";
     private LinearLayout root;
     private FrameLayout frame;
-    private TextView status;
+    private TextView status, journeyStatus;
+    private ImageView turnIcon;
+    private JourneyController journey;
+    private android.location.Location currentFix;
     private Button open;
     private MapView map;
     private AlertDialog consentDialog;
@@ -49,7 +52,7 @@ public final class AmapActivity extends Activity {
         try{keys.replace(saved.load());consent=saved.consent();}catch(Exception e){consent=false;}
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);
         root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);root.setBackgroundColor(0xff101411);root.setPadding(20,16,20,16);
-        label("MOTO / NAV · 独立恢复测试",22);label("前台地图与定位 · 非0.10完整恢复 · 非导航",13);
+        label("MOTO / NAV · 独立恢复测试",22);label("前台摩托导航恢复测试 · 非0.10完整恢复 · 不用于骑行",13);
         status=label("首次填写Android Key并阅读政策。保存后在本机加密存储，重启后自动载入；仅前台定位。新包名须单独绑定，不会读取旧App数据。",14);
         keyInput=new EditText(this);keyInput.setHint("Android Key · 32位字符");keyInput.setTextColor(0xffeef3e6);keyInput.setHintTextColor(0xffaab3a7);
         keyInput.setInputType(InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_VARIATION_PASSWORD);keyInput.setSingleLine(true);
@@ -60,7 +63,7 @@ public final class AmapActivity extends Activity {
         root.addView(keyInput);button("加密保存Key / 修改Key",this::applyKey);button("删除已存Key并撤回同意",this::clearKey);
         open=button("阅读并同意后打开地图",this::askConsent);open.setEnabled(keys.configured());
         button("高德隐私政策",()->policy(PRIVACY));button("高德服务条款",()->policy(TERMS));
-        label(AmapAccess.navigationStatus(),12);
+        label("摩托服务需高德另行授权。无语音、后台导航、自动重算保证或ESP32转发。",12);
         label("Android Key绑定包名："+getPackageName()+"\n本安装签名SHA1："+certificateSha1(),12);
         button("返回模拟功能（非真实导航）",()->startActivity(new Intent(this,MainActivity.class)));
         LinearLayout page=new LinearLayout(this);page.setOrientation(LinearLayout.VERTICAL);page.setBackgroundColor(0xff101411);
@@ -68,6 +71,12 @@ public final class AmapActivity extends Activity {
         root.removeView(status);page.addView(status);
         Button settings=new Button(this);settings.setText("地图设置 / Key / 隐私");settings.setOnClickListener(v->controls.setVisibility(controls.getVisibility()==View.VISIBLE?View.GONE:View.VISIBLE));page.addView(settings);
         Button locate=new Button(this);locate.setText("定位重试 / 权限设置");locate.setOnClickListener(v->locationPermission(true));page.addView(locate);
+        LinearLayout actions=new LinearLayout(this);
+        Button search=new Button(this);search.setText("目的地");search.setOnClickListener(v->{if(journey!=null)journey.searchDialog();else status.setText("请先完成地图Key与隐私设置。");});actions.addView(search,new LinearLayout.LayoutParams(0,-2,1));
+        Button route=new Button(this);route.setText("摩托算路");route.setOnClickListener(v->{if(journey!=null)journey.planDialog();else status.setText("请先完成地图设置。");});actions.addView(route,new LinearLayout.LayoutParams(0,-2,1));
+        Button start=new Button(this);start.setText("开始/结束");start.setOnClickListener(v->{if(journey!=null)journey.startOrStop();else status.setText("请先完成地图设置。");});actions.addView(start,new LinearLayout.LayoutParams(0,-2,1));page.addView(actions);
+        LinearLayout guidance=new LinearLayout(this);turnIcon=new ImageView(this);guidance.addView(turnIcon,new LinearLayout.LayoutParams(80,80));
+        journeyStatus=new TextView(this);journeyStatus.setTextColor(0xffb4ff65);journeyStatus.setText("真实搜索/摩托导航实验。仅停车及受控环境测试。");guidance.addView(journeyStatus,new LinearLayout.LayoutParams(0,-2,1));page.addView(guidance);
         controls=new ScrollView(this);controls.addView(root);page.addView(controls,new LinearLayout.LayoutParams(-1,0,1));
         frame=new FrameLayout(this);page.addView(frame,new LinearLayout.LayoutParams(-1,0,1));setContentView(page);
         if(keys.configured()&&consent)controls.setVisibility(View.GONE);
@@ -86,7 +95,7 @@ public final class AmapActivity extends Activity {
     private void policy(String url){try{startActivity(new Intent(Intent.ACTION_VIEW,Uri.parse(url)));}catch(ActivityNotFoundException e){status.setText(getString(R.string.amap_no_browser,url));}}
     private void askConsent(){
         if(map!=null||!keys.configured()||!foreground||consentDialog!=null)return;
-        consentDialog=new AlertDialog.Builder(this).setTitle("启用高德联网地图？").setMessage("本应用使用高德地图及定位SDK，联网时向高德提交Android Key、包信息及服务必需的网络、设备和位置信息，服务端可见IP。定位仅在本页面前台且已获系统权限时启动，用于展示当前位置；不传给ESP32，不提供导航。请先阅读页面中的隐私政策和条款。\n\nKey将用Android Keystore保护的AES-GCM加密保存于本应用私有存储，应用备份关闭。此次同意会保存，今后打开自动加载地图及定位；可在设置中删除Key并撤回同意。SDK自身缓存无法保证彻底清除。系统首次定位授权仍需本人操作。")
+        consentDialog=new AlertDialog.Builder(this).setTitle("启用高德联网地图？").setMessage("本应用使用高德地图、定位、搜索及导航SDK，联网时向高德提交Android Key、包信息及服务必需的网络、设备和位置信息，服务端可见IP。定位仅在本页面前台且已获系统权限时启动，用于展示当前位置。主动搜索或规划路线时会把搜索词、起终点、车牌和排量提交高德；显式开始后提供前台GPS摩托导航测试，不传给ESP32。本次版本扩展了数据用途，因此需要重新同意一次。请先阅读页面中的隐私政策和条款。\n\nKey将用Android Keystore保护的AES-GCM加密保存于本应用私有存储，应用备份关闭。此次同意会保存，今后打开自动加载地图及定位；可在设置中删除Key并撤回同意。SDK自身缓存无法保证彻底清除。系统首次定位授权仍需本人操作。")
             .setNegativeButton("不同意并关闭",(d,w)->{consent=false;dispose();boolean recorded=saved.consent(false);if(!recorded){saved.clear();keys.clear();open.setEnabled(false);}status.setText(recorded?"已撤回同意，不会自动联网定位":"已停止地图，但无法确认撤回记录已保存。请在系统中清除本测试应用数据后再使用。");})
             .setPositiveButton("同意并联网打开",(d,w)->{if(!foreground||isFinishing())return;if(!saved.consent(true)){status.setText("无法保存同意，请重试");return;}consent=true;initialize();}).create();
         consentDialog.setOnDismissListener(d->consentDialog=null);consentDialog.show();
@@ -104,15 +113,24 @@ public final class AmapActivity extends Activity {
             com.amap.api.location.AMapLocationClient.setApiKey(keys.sdkValue());
             map.getMap().setMyLocationStyle(new com.amap.api.maps.model.MyLocationStyle().myLocationType(com.amap.api.maps.model.MyLocationStyle.LOCATION_TYPE_FOLLOW).interval(2000));
             map.getMap().setMyLocationEnabled(false);map.getMap().getUiSettings().setMyLocationButtonEnabled(false);
-            map.getMap().setOnMyLocationChangeListener(location->{if(!foreground||map==null)return;lastFixNanos=MapStartupPolicy.fixTime(android.os.SystemClock.elapsedRealtimeNanos(),System.currentTimeMillis(),location.getElapsedRealtimeNanos(),location.getTime());if(MapStartupPolicy.fresh(android.os.SystemClock.elapsedRealtimeNanos(),lastFixNanos))status.setText("当前位置 · 精度约"+Math.round(location.getAccuracy())+"米 · 非导航测试");});
             final MapView activeMap=map;
+            map.getMap().setOnMyLocationChangeListener(location->{if(!foreground||map!=activeMap||location==null)return;currentFix=new android.location.Location(location);lastFixNanos=MapStartupPolicy.fixTime(android.os.SystemClock.elapsedRealtimeNanos(),System.currentTimeMillis(),location.getElapsedRealtimeNanos(),location.getTime());if(MapStartupPolicy.fresh(android.os.SystemClock.elapsedRealtimeNanos(),lastFixNanos))status.setText("当前位置 · 精度约"+Math.round(location.getAccuracy())+"米 · 定位状态");});
+            journey=new JourneyController(this,map.getMap(),new JourneyController.Host(){
+                public boolean active(){return foreground&&consent&&map!=null;}
+                public String key(){return keys.sdkValue();}
+                public android.location.Location fix(){return currentFix==null?null:new android.location.Location(currentFix);}
+                public long fixNanos(){return lastFixNanos;}
+                public void report(String text){journeyStatus.setText(text);}
+                public void icon(android.graphics.Bitmap bitmap){turnIcon.setImageBitmap(bitmap);}
+            });
             map.getMap().setOnMapLoadedListener(()->{if(map==activeMap&&foreground&&lastFixNanos==0)status.setText("底图加载完成，正在等待定位；加载回调不代表鉴权成功");});
             map.onResume();open.setEnabled(false);status.setText("地图加载中，底图回调不代表鉴权成功");controls.setVisibility(View.GONE);locationPermission(false);handler.removeCallbacks(freshness);handler.postDelayed(freshness,15000);
         }catch(RuntimeException|LinkageError e){dispose();status.setText(R.string.amap_failed);}
     }
     private void dispose(){
-        handler.removeCallbacks(freshness);lastFixNanos=0;
-        if(map!=null){MapView old=map;map=null;try{old.onPause();}catch(RuntimeException|LinkageError ignored){}try{old.onDestroy();}catch(RuntimeException|LinkageError ignored){}frame.removeAllViews();}
+        handler.removeCallbacks(freshness);lastFixNanos=0;currentFix=null;
+        if(journey!=null){journey.close();journey=null;}
+        if(map!=null){MapView old=map;map=null;try{old.getMap().setOnMyLocationChangeListener(null);old.getMap().setOnMapLoadedListener(null);}catch(RuntimeException|LinkageError ignored){}try{old.onPause();}catch(RuntimeException|LinkageError ignored){}try{old.onDestroy();}catch(RuntimeException|LinkageError ignored){}frame.removeAllViews();}
         if(sdkTouched){sdkTouched=false;try{MapsInitializer.updatePrivacyAgree(this,false);com.amap.api.location.AMapLocationClient.updatePrivacyAgree(this,false);}catch(RuntimeException|LinkageError ignored){}try{MapsInitializer.setApiKey("");}catch(RuntimeException|LinkageError ignored){}}
         if(open!=null)open.setEnabled(keys.configured());
     }
@@ -143,7 +161,7 @@ public final class AmapActivity extends Activity {
             saved.asked(true);permissionPending=true;
             requestPermissions(new String[]{android.Manifest.permission.ACCESS_COARSE_LOCATION,android.Manifest.permission.ACCESS_FINE_LOCATION},71);
         }else{
-            status.setText("定位未授权或已被撤销。地图仍可浏览；请点定位重试进入系统设置。");
+            status.setText(approximate?"目前只有大致定位；请在系统设置开启精确定位后返回，才能请求摩托路线。":"定位未授权或已被撤销。地图仍可浏览；请点定位重试进入系统设置。");
             if(userRetry)startActivity(new Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,Uri.parse("package:"+getPackageName())));
         }
     }
@@ -152,7 +170,7 @@ public final class AmapActivity extends Activity {
         if(request==71){permissionPending=false;if(foreground)locationPermission(false);}
     }
     @Override protected void onResume(){super.onResume();foreground=true;handler.removeCallbacks(freshness);handler.postDelayed(freshness,15000);if(map==null)initialize();else{map.onResume();locationPermission(false);}}
-    @Override protected void onPause(){foreground=false;handler.removeCallbacks(freshness);if(consentDialog!=null){consentDialog.dismiss();consentDialog=null;}if(map!=null){map.getMap().setMyLocationEnabled(false);map.onPause();}super.onPause();}
+    @Override protected void onPause(){foreground=false;currentFix=null;lastFixNanos=0;handler.removeCallbacks(freshness);if(journey!=null)journey.pause();if(consentDialog!=null){consentDialog.dismiss();consentDialog=null;}if(map!=null){map.getMap().setMyLocationEnabled(false);map.onPause();}super.onPause();}
     @Override protected void onDestroy(){dispose();keys.clear();super.onDestroy();}
     @Override public void onLowMemory(){super.onLowMemory();if(map!=null)map.onLowMemory();}
 }

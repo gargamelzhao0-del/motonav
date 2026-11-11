@@ -9,7 +9,7 @@
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.BLUETOOTH_SCAN" android:usesPermissionFlags="neverForLocation" tools:targetApi="s" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
-    <application android:label="MotoNav 恢复测试" android:icon="@drawable/ic_motonav" android:dataExtractionRules="@xml/data_extraction_rules" android:theme="@style/AppTheme" android:allowBackup="false" android:fullBackupContent="false" android:supportsRtl="true">
+    <application android:usesCleartextTraffic="false" android:label="MotoNav 恢复测试" android:icon="@drawable/ic_motonav" android:dataExtractionRules="@xml/data_extraction_rules" android:theme="@style/AppTheme" android:allowBackup="false" android:fullBackupContent="false" android:supportsRtl="true">
         <service android:name="com.amap.api.location.APSService" android:exported="false" />
         <meta-data android:name="com.amap.api.v2.apikey" android:value="" />
         <activity android:name=".MainActivity" android:exported="false" />

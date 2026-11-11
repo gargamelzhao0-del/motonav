@@ -17,3 +17,5 @@ java -cp "$build" AmapKeySessionTests
 java -m jdk.compiler/com.sun.tools.javac.Main -source 17 -target 17 -d "$build" app/src/main/java/com/motonav/companion/MapStartupPolicy.java tests/MapStartupPolicyTests.java
 java -cp "$build" MapStartupPolicyTests
 python3 tests/activity_contracts.py
+java -m jdk.compiler/com.sun.tools.javac.Main -source 17 -target 17 -cp "$build" -d "$build" app/src/main/java/com/motonav/companion/JourneyState.java tests/JourneyStateTests.java
+java -cp "$build" JourneyStateTests

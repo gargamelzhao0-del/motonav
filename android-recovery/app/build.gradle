@@ -6,8 +6,8 @@ android {
         applicationId 'com.motonav.recovery'
         minSdk 26
         targetSdk 35
-        versionCode 1
-        versionName '0.1.0-recovery-preview'
+        versionCode 2
+        versionName '0.2.0-recovery-moto'
         ndk { abiFilters 'arm64-v8a', 'armeabi-v7a' }
     }
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
@@ -15,5 +15,5 @@ android {
     packaging { jniLibs { useLegacyPackaging = true } }
 }
 
-// Official map bundle includes location and search; no navigation workflow is enabled.
-dependencies { implementation 'com.amap.api:3dmap-location-search:11.3.100_loc11.3.101_sea9.8.1' }
+// Official combined navigation/map/location/search SDK: do not add overlapping standalone SDK jars.
+dependencies { implementation 'com.amap.api:navi-3dmap-location-search:11.3.100_3dmap11.3.100_loc11.3.000_sea9.8.1' }
