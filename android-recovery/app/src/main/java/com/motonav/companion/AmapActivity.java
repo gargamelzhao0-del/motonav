@@ -20,7 +20,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.view.WindowInsets;
 import android.widget.*;
-import com.amap.api.maps.MapView;
+import com.amap.api.maps.TextureMapView;
 import com.amap.api.maps.MapsInitializer;
 import com.amap.apis.utils.core.api.AMapUtilCoreApi;
 
@@ -30,12 +30,13 @@ public final class AmapActivity extends Activity {
     private static final String TERMS="https://lbs.amap.com/pages/terms/";
     private LinearLayout root;
     private FrameLayout frame;
+    private MapDial dial;
     private TextView status, journeyStatus;
     private ImageView turnIcon;
     private JourneyController journey;
     private android.location.Location currentFix;
     private Button open;
-    private MapView map;
+    private TextureMapView map;
     private AlertDialog consentDialog;
     private boolean foreground, consent, sdkTouched;
     private final AmapKeySession keys=new AmapKeySession();
@@ -66,20 +67,37 @@ public final class AmapActivity extends Activity {
         label("摩托服务需高德另行授权。无语音、后台导航、自动重算保证或ESP32转发。",12);
         label("Android Key绑定包名："+getPackageName()+"\n本安装签名SHA1："+certificateSha1(),12);
         button("返回模拟功能（非真实导航）",()->startActivity(new Intent(this,MainActivity.class)));
-        LinearLayout page=new LinearLayout(this);page.setOrientation(LinearLayout.VERTICAL);page.setBackgroundColor(0xff101411);
-        if(Build.VERSION.SDK_INT>=30)page.setOnApplyWindowInsetsListener((v,insets)->{Insets bars=insets.getInsets(WindowInsets.Type.systemBars());v.setPadding(0,bars.top,0,bars.bottom);return insets;});
-        root.removeView(status);page.addView(status);
-        Button settings=new Button(this);settings.setText("地图设置 / Key / 隐私");settings.setOnClickListener(v->controls.setVisibility(controls.getVisibility()==View.VISIBLE?View.GONE:View.VISIBLE));page.addView(settings);
-        Button locate=new Button(this);locate.setText("定位重试 / 权限设置");locate.setOnClickListener(v->locationPermission(true));page.addView(locate);
+        LinearLayout page=new LinearLayout(this);page.setOrientation(LinearLayout.VERTICAL);page.setBackgroundColor(0xff101411);page.setPadding(dp(16),dp(12),dp(16),dp(16));
+        ScrollView screen=new ScrollView(this);screen.setFillViewport(true);screen.addView(page);
+        if(Build.VERSION.SDK_INT>=30)screen.setOnApplyWindowInsetsListener((v,insets)->{Insets bars=insets.getInsets(WindowInsets.Type.systemBars());v.setPadding(bars.left,bars.top,bars.right,bars.bottom);return insets;});
+        TextView brand=new TextView(this);brand.setText("MOTO / NAV");brand.setTextSize(21);brand.setLetterSpacing(0.14f);brand.setTextColor(0xffe9eddf);brand.setTypeface(null,android.graphics.Typeface.BOLD);page.addView(brand);
+        TextView warning=new TextView(this);warning.setText("RECOVERY 03  ·  仅停车测试，不用于骑行");warning.setTextSize(12);warning.setTextColor(0xffc6a988);warning.setPadding(0,dp(4),0,dp(12));page.addView(warning);
+        root.removeView(status);status.setTextSize(13);status.setPadding(dp(12),dp(10),dp(12),dp(10));status.setBackground(panel(0xff1a211c));page.addView(status);
+        dial=new MapDial(this);frame=dial.mapFrame;page.addView(dial,new LinearLayout.LayoutParams(-1,dp(380)));
+        TextView waiting=new TextView(this);waiting.setText("MOTO / NAV\n等待地图配置");waiting.setGravity(android.view.Gravity.CENTER);waiting.setTextSize(18);waiting.setTextColor(0xff9da69a);frame.addView(waiting,new FrameLayout.LayoutParams(-1,-1));
+        LinearLayout guidance=new LinearLayout(this);guidance.setGravity(android.view.Gravity.CENTER_VERTICAL);guidance.setPadding(dp(12),dp(12),dp(12),dp(12));guidance.setBackground(panel(0xff20271f));
+        turnIcon=new ImageView(this);turnIcon.setContentDescription("SDK转向图标；文字指令见右侧");guidance.addView(turnIcon,new LinearLayout.LayoutParams(dp(56),dp(56)));
+        journeyStatus=new TextView(this);journeyStatus.setTextColor(0xffd4e2ba);journeyStatus.setTextSize(18);journeyStatus.setPadding(dp(12),0,0,0);journeyStatus.setText("选择目的地\n路线与导航信息只显示真实SDK结果");guidance.addView(journeyStatus,new LinearLayout.LayoutParams(0,-2,1));page.addView(guidance);
         LinearLayout actions=new LinearLayout(this);
-        Button search=new Button(this);search.setText("目的地");search.setOnClickListener(v->{if(journey!=null)journey.searchDialog();else status.setText("请先完成地图Key与隐私设置。");});actions.addView(search,new LinearLayout.LayoutParams(0,-2,1));
-        Button route=new Button(this);route.setText("摩托算路");route.setOnClickListener(v->{if(journey!=null)journey.planDialog();else status.setText("请先完成地图设置。");});actions.addView(route,new LinearLayout.LayoutParams(0,-2,1));
-        Button start=new Button(this);start.setText("开始/结束");start.setOnClickListener(v->{if(journey!=null)journey.startOrStop();else status.setText("请先完成地图设置。");});actions.addView(start,new LinearLayout.LayoutParams(0,-2,1));page.addView(actions);
-        LinearLayout guidance=new LinearLayout(this);turnIcon=new ImageView(this);guidance.addView(turnIcon,new LinearLayout.LayoutParams(80,80));
-        journeyStatus=new TextView(this);journeyStatus.setTextColor(0xffb4ff65);journeyStatus.setText("真实搜索/摩托导航实验。仅停车及受控环境测试。");guidance.addView(journeyStatus,new LinearLayout.LayoutParams(0,-2,1));page.addView(guidance);
-        controls=new ScrollView(this);controls.addView(root);page.addView(controls,new LinearLayout.LayoutParams(-1,0,1));
-        frame=new FrameLayout(this);page.addView(frame,new LinearLayout.LayoutParams(-1,0,1));setContentView(page);
+        actions.addView(action("目的地",()->{if(journey!=null)journey.searchDialog();else status.setText("请先完成地图Key与隐私设置。");}),new LinearLayout.LayoutParams(0,-2,1));
+        actions.addView(action("摩托算路",()->{if(journey!=null)journey.planDialog();else status.setText("请先完成地图设置。");}),new LinearLayout.LayoutParams(0,-2,1));
+        actions.addView(action("开始/结束",()->{if(journey!=null)journey.startOrStop();else status.setText("请先完成地图设置。");}),new LinearLayout.LayoutParams(0,-2,1));page.addView(actions);
+        LinearLayout tools=new LinearLayout(this);
+        tools.addView(action("定位/权限",()->locationPermission(true)),new LinearLayout.LayoutParams(0,-2,1));
+        tools.addView(action("圆形/完整图",()->{dial.toggleShape();placeLogo();}),new LinearLayout.LayoutParams(0,-2,1));
+        tools.addView(action("地图设置",()->controls.setVisibility(controls.getVisibility()==View.VISIBLE?View.GONE:View.VISIBLE)),new LinearLayout.LayoutParams(0,-2,1));page.addView(tools);
+        controls=new ScrollView(this);controls.addView(root);page.addView(controls,new LinearLayout.LayoutParams(-1,-2));
+        frame.addOnLayoutChangeListener((v,l,t,r,b,ol,ot,or,ob)->placeLogo());setContentView(screen);
         if(keys.configured()&&consent)controls.setVisibility(View.GONE);
+    }
+    private int dp(int value){return Math.round(value*getResources().getDisplayMetrics().density);}
+    private android.graphics.drawable.GradientDrawable panel(int color){android.graphics.drawable.GradientDrawable d=new android.graphics.drawable.GradientDrawable();d.setColor(color);d.setCornerRadius(dp(12));return d;}
+    private Button action(String text,Runnable run){Button b=new Button(this);b.setText(text);b.setTextSize(13);b.setAllCaps(false);b.setMinHeight(dp(48));b.setTextColor(0xffdce5d2);b.setBackgroundTintList(android.content.res.ColorStateList.valueOf(0xff293228));b.setOnClickListener(v->run.run());return b;}
+    private void placeLogo(){
+        if(map==null)return;
+        // Keep the SDK's unscaled attribution inside the circular viewport, never draw over it.
+        map.getMap().getUiSettings().setLogoPosition(com.amap.api.maps.AMapOptions.LOGO_POSITION_BOTTOM_CENTER);
+        map.getMap().getUiSettings().setLogoBottomMargin(dial.round?Math.max(dp(32),frame.getHeight()/8):dp(12));
     }
     private String certificateSha1(){
         try{
@@ -107,13 +125,18 @@ public final class AmapActivity extends Activity {
             AMapUtilCoreApi.setCollectInfoEnable(false);AMapUtilCoreApi.setCollectIPEnable(false);
             MapsInitializer.updatePrivacyShow(this,true,true);MapsInitializer.updatePrivacyAgree(this,true);
             MapsInitializer.setProtocol(MapsInitializer.HTTPS);MapsInitializer.setApiKey(keys.sdkValue());
-            map=new MapView(this);map.onCreate(null);frame.addView(map,new FrameLayout.LayoutParams(-1,-1));
+            frame.removeAllViews();map=new TextureMapView(this);map.onCreate(null);frame.addView(map,new FrameLayout.LayoutParams(-1,-1));
             com.amap.api.location.AMapLocationClient.updatePrivacyShow(this,true,true);
             com.amap.api.location.AMapLocationClient.updatePrivacyAgree(this,true);
             com.amap.api.location.AMapLocationClient.setApiKey(keys.sdkValue());
             map.getMap().setMyLocationStyle(new com.amap.api.maps.model.MyLocationStyle().myLocationType(com.amap.api.maps.model.MyLocationStyle.LOCATION_TYPE_FOLLOW).interval(2000));
             map.getMap().setMyLocationEnabled(false);map.getMap().getUiSettings().setMyLocationButtonEnabled(false);
-            final MapView activeMap=map;
+            map.getMap().setMapType(com.amap.api.maps.AMap.MAP_TYPE_NIGHT);
+            map.getMap().getUiSettings().setZoomControlsEnabled(false);
+            map.getMap().getUiSettings().setCompassEnabled(false);
+            map.getMap().getUiSettings().setScaleControlsEnabled(false);
+            placeLogo();
+            final TextureMapView activeMap=map;
             map.getMap().setOnMyLocationChangeListener(location->{if(!foreground||map!=activeMap||location==null)return;currentFix=new android.location.Location(location);lastFixNanos=MapStartupPolicy.fixTime(android.os.SystemClock.elapsedRealtimeNanos(),System.currentTimeMillis(),location.getElapsedRealtimeNanos(),location.getTime());if(MapStartupPolicy.fresh(android.os.SystemClock.elapsedRealtimeNanos(),lastFixNanos))status.setText("当前位置 · 精度约"+Math.round(location.getAccuracy())+"米 · 定位状态");});
             journey=new JourneyController(this,map.getMap(),new JourneyController.Host(){
                 public boolean active(){return foreground&&consent&&map!=null;}
@@ -130,7 +153,7 @@ public final class AmapActivity extends Activity {
     private void dispose(){
         handler.removeCallbacks(freshness);lastFixNanos=0;currentFix=null;
         if(journey!=null){journey.close();journey=null;}
-        if(map!=null){MapView old=map;map=null;try{old.getMap().setOnMyLocationChangeListener(null);old.getMap().setOnMapLoadedListener(null);}catch(RuntimeException|LinkageError ignored){}try{old.onPause();}catch(RuntimeException|LinkageError ignored){}try{old.onDestroy();}catch(RuntimeException|LinkageError ignored){}frame.removeAllViews();}
+        if(map!=null){TextureMapView old=map;map=null;try{old.getMap().setOnMyLocationChangeListener(null);old.getMap().setOnMapLoadedListener(null);}catch(RuntimeException|LinkageError ignored){}try{old.onPause();}catch(RuntimeException|LinkageError ignored){}try{old.onDestroy();}catch(RuntimeException|LinkageError ignored){}frame.removeAllViews();}
         if(sdkTouched){sdkTouched=false;try{MapsInitializer.updatePrivacyAgree(this,false);com.amap.api.location.AMapLocationClient.updatePrivacyAgree(this,false);}catch(RuntimeException|LinkageError ignored){}try{MapsInitializer.setApiKey("");}catch(RuntimeException|LinkageError ignored){}}
         if(open!=null)open.setEnabled(keys.configured());
     }

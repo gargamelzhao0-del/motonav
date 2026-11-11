@@ -29,7 +29,7 @@ https://github.com/gargamelzhao0-del/motonav/actions/runs/42979339851
 SDK自动偏航/拥堵重算关闭接口未获验证；本App收到重算事件即停止，不声称阻止了SDK内部所有重算请求。无自动重算成功保证。
 
 ## 尚未恢复
-完整GTA圆形地图外观、0.9完整定位恢复、0.10远程更新流程及相应测试。
+与原0.10完全一致的地图视觉和交互、0.9完整定位恢复、0.10远程更新流程及相应测试。
 没有语音、后台导航、自动偏航重算保证或真实数据到ESP32。
 错误16仍需高德服务授权；本工程不绕过权限，也不以汽车路线冒充摩托路线。
 
@@ -49,3 +49,9 @@ SDK自动偏航/拥堵重算关闭接口未获验证；本App收到重算事件�
 参考：
 https://lbs.amap.com/api/android-sdk/guide/create-map/mylocation
 https://a.amap.com/lbs/static/unzip/Android_Location_Doc/com/amap/api/location/AMapLocationClient.html
+
+## 0.3 圆形地图视觉（未实机验收）
+使用 TextureMapView 实现圆形小地图、哑光表圈、夜间底图及紧凑的真实导航信息卡。无虚构速度、限速、朝向或路况。页面可滚动以容纳横屏和较大字体，地图手势不应被外层滚动截获。
+高德原标识保持默认大小，移动到圆内底部中央；没有重绘或隐藏标识。提供“圆形/完整图”切换以查看角落路线和排查设备裁剪问题。需真机确认 logo 完整可见、TextureView裁剪、地图手势、窄屏/横屏/大字体、按键和导航文本。编译或静态检查不等同这些验证。
+稳定签名尚未生成或上传。建议用户持有离线加密备份，在确认保管方案后再授权受控构建使用；公开仓库不得保存私钥或密码。当前 CI 的临时 debug 密钥不保证跨次构建一致，暂不发布可持续升级安装包。
+官方 TextureMapView 文档：https://a.amap.com/lbs/static/unzip/Android_Map_Doc/3D/com/amap/api/maps/TextureMapView.html
