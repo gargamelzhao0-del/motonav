@@ -1,0 +1,42 @@
+name: Android recovery checks
+on:
+  push:
+    branches: ['recovery/**']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: android-recovery
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Pure Java checks
+        run: sh tests/run.sh
+      - name: Android compile and lint
+        run: gradle --no-daemon assembleDebug lintDebug
+      - name: Verify temporary test APK
+        run: |
+          mkdir -p test-delivery
+          cp app/build/outputs/apk/debug/app-debug.apk test-delivery/MotoNav-Recovery-0.5-parking-test.apk
+          signer=$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -n 1)
+          "$signer" verify --verbose --print-certs test-delivery/MotoNav-Recovery-0.5-parking-test.apk > test-delivery/certificate.txt
+          sha256sum test-delivery/MotoNav-Recovery-0.5-parking-test.apk > test-delivery/SHA256SUMS.txt
+          printf 'Commit: %s\nPackage: com.motonav.recovery\nTemporary CI debug signature, not stable for future upgrades. Parking-only test; no riding use. No user API key bundled.\n' "$GITHUB_SHA" > test-delivery/BUILD.txt
+          cat test-delivery/certificate.txt test-delivery/SHA256SUMS.txt test-delivery/BUILD.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: motonav-recovery-parking-test
+          path: android-recovery/test-delivery/
+          if-no-files-found: error
+          retention-days: 7
