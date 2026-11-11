@@ -110,20 +110,20 @@ static void advertise() {
     fields.uuids128 = const_cast<ble_uuid128_t *>(&service_uuid);
     fields.num_uuids128 = 1;
     fields.uuids128_is_complete = 1;
-    assert(ble_gap_adv_set_fields(&fields) == 0);
+    ESP_ERROR_CHECK(ble_gap_adv_set_fields(&fields));
     ble_hs_adv_fields scan{};
     scan.name = reinterpret_cast<const uint8_t *>(device_name);
     scan.name_len = std::strlen(device_name);
     scan.name_is_complete = 1;
-    assert(ble_gap_adv_rsp_set_fields(&scan) == 0);
+    ESP_ERROR_CHECK(ble_gap_adv_rsp_set_fields(&scan));
     ble_gap_adv_params params{};
     params.conn_mode = BLE_GAP_CONN_MODE_UND;
     params.disc_mode = BLE_GAP_DISC_MODE_GEN;
-    assert(ble_gap_adv_start(address_type, nullptr, BLE_HS_FOREVER, &params, gap_event, nullptr) == 0);
+    ESP_ERROR_CHECK(ble_gap_adv_start(address_type, nullptr, BLE_HS_FOREVER, &params, gap_event, nullptr));
 }
 
 static void ble_synced() {
-    assert(ble_hs_id_infer_auto(0, &address_type) == 0);
+    ESP_ERROR_CHECK(ble_hs_id_infer_auto(0, &address_type));
     advertise();
 }
 
@@ -228,7 +228,8 @@ extern "C" void app_main() {
     uint8_t mac[6];
     ESP_ERROR_CHECK(esp_read_mac(mac, ESP_MAC_BT));
     std::snprintf(device_name, sizeof(device_name), "MotoNav-%02X%02X", mac[4], mac[5]);
-    assert(bsp_display_start());
+    lv_display_t *display = bsp_display_start();
+    ESP_ERROR_CHECK(display ? ESP_OK : ESP_FAIL);
     ESP_ERROR_CHECK(bsp_display_brightness_set(70));
     ESP_ERROR_CHECK(bsp_display_lock(portMAX_DELAY));
     lv_obj_t *screen = lv_screen_active();
@@ -256,9 +257,9 @@ extern "C" void app_main() {
     ble_hs_cfg.sm_their_key_dist = BLE_SM_PAIR_KEY_DIST_ENC | BLE_SM_PAIR_KEY_DIST_ID;
     ble_hs_cfg.store_status_cb = ble_store_util_status_rr;
     ble_svc_gap_init(); ble_svc_gatt_init();
-    assert(ble_svc_gap_device_name_set(device_name) == 0);
-    assert(ble_gatts_count_cfg(services) == 0);
-    assert(ble_gatts_add_svcs(services) == 0);
+    ESP_ERROR_CHECK(ble_svc_gap_device_name_set(device_name));
+    ESP_ERROR_CHECK(ble_gatts_count_cfg(services));
+    ESP_ERROR_CHECK(ble_gatts_add_svcs(services));
     ble_store_config_init();
     nimble_port_freertos_init(ble_task);
 }

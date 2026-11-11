@@ -39,7 +39,7 @@ public final class AmapActivity extends Activity {
     private JourneyController journey;
     private NavigationService navigationService;
     private NavigationService.View navigationView;
-    private boolean serviceBound, scanAfterPermission;
+    private boolean serviceBound, scanAfterPermission, startAfterPermission;
     private TextView screenStatus;
     private AlertDialog screenDialog;
     private android.widget.ArrayAdapter<String> screenAdapter;
@@ -100,6 +100,7 @@ public final class AmapActivity extends Activity {
         button("应用更新",()->startActivity(new Intent(this,UpdateActivity.class)));
         button("返回模拟功能（非真实导航）", () -> {
             if (NavigationService.navigating) { status.setText("请先结束当前导航，再进入模拟功能。"); return; }
+            if (navigationService != null) navigationService.disconnectScreen();
             startActivity(new Intent(this, MainActivity.class));
         });
         LinearLayout page=new LinearLayout(this);page.setOrientation(LinearLayout.VERTICAL);page.setBackgroundColor(0xff101411);page.setPadding(dp(16),dp(12),dp(16),dp(16));
@@ -116,7 +117,7 @@ public final class AmapActivity extends Activity {
         LinearLayout actions=new LinearLayout(this);
         actions.addView(action("目的地",()->{if(journey!=null)journey.searchDialog();else status.setText("请先完成地图Key与隐私设置。");}),new LinearLayout.LayoutParams(0,-2,1));
         actions.addView(action("摩托算路",()->{if(journey!=null)journey.planDialog();else status.setText("请先完成地图设置。");}),new LinearLayout.LayoutParams(0,-2,1));
-        actions.addView(action("开始/结束",()->{if(journey!=null)journey.startOrStop();else status.setText("请先完成地图设置。");}),new LinearLayout.LayoutParams(0,-2,1));page.addView(actions);
+        actions.addView(action("开始/结束",this::toggleNavigation),new LinearLayout.LayoutParams(0,-2,1));page.addView(actions);
         LinearLayout tools=new LinearLayout(this);
         tools.addView(action("定位/权限",()->locationPermission(true)),new LinearLayout.LayoutParams(0,-2,1));
         tools.addView(action("圆形/完整图",()->{dial.toggleShape();placeLogo();}),new LinearLayout.LayoutParams(0,-2,1));
@@ -128,6 +129,19 @@ public final class AmapActivity extends Activity {
         frame.addOnLayoutChangeListener((v,l,t,r,b,ol,ot,or,ob)->placeLogo());setContentView(screen);
         if(keys.configured()&&consent)controls.setVisibility(View.GONE);
     }
+    private void toggleNavigation() {
+        if (journey == null) { status.setText("请先完成地图设置。"); return; }
+        android.content.SharedPreferences prefs = getSharedPreferences("navigation_ui", MODE_PRIVATE);
+        if (journey.readyToStart() && Build.VERSION.SDK_INT >= 33
+                && checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+                && !prefs.getBoolean("notification_asked", false)) {
+            prefs.edit().putBoolean("notification_asked", true).apply();
+            requestPermissions(new String[]{android.Manifest.permission.POST_NOTIFICATIONS}, 73);
+            return;
+        }
+        journey.startOrStop();
+    }
+
     private void attachNavigation() {
         if (foreground && consent && map != null && navigationService != null && navigationView != null)
             navigationService.attach(this, map.getMap(), navigationView);
@@ -458,6 +472,7 @@ public final class AmapActivity extends Activity {
         super.onRequestPermissionsResult(request,permissions,results);
         if(request==71){permissionPending=false;if(foreground)locationPermission(false);}
         if (request == 72) { scanAfterPermission = true; if (foreground) { scanAfterPermission = false; if (blePermissions()) chooseScreen(); } }
+        if (request == 73) { startAfterPermission = true; if (foreground) { startAfterPermission = false; toggleNavigation(); } }
     }
     @Override protected void onResume() {
         super.onResume();
@@ -469,6 +484,7 @@ public final class AmapActivity extends Activity {
         }
         attachNavigation();
         if (scanAfterPermission) { scanAfterPermission = false; if (blePermissions()) chooseScreen(); }
+        if (startAfterPermission) { startAfterPermission = false; toggleNavigation(); }
     }
 
     @Override protected void onPause() {

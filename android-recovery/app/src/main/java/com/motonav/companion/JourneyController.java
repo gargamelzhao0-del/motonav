@@ -96,6 +96,7 @@ final class JourneyController {
         ui = null; map = null; activity = null;
     }
     NavigationFrame frame() { return frame.at(SystemClock.elapsedRealtime()); }
+    boolean readyToStart() { return state.phase() == JourneyState.Phase.READY; }
     void refreshGuidance() {
         if (state.phase() == JourneyState.Phase.NAVIGATING) guidanceReady(false);
     }
