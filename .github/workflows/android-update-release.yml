@@ -53,15 +53,21 @@ jobs:
           unset MOTONAV_KEYSTORE_BASE64
           sh tools/package-update.sh app/build/outputs/apk/release/app-release-unsigned.apk \
             "$RUNNER_TEMP/motonav-update" "$GITHUB_REF_NAME"
+          cmp "$RUNNER_TEMP/motonav-update/motonav-signer.sha256" release/signing-certificate.sha256
+          printf 'Commit: %s\nPackage: com.motonav.recovery\nChannel: stable signing\nTag: %s\n' \
+            "$GITHUB_SHA" "$GITHUB_REF_NAME" > "$RUNNER_TEMP/motonav-update/BUILD.txt"
       - name: Check upgrade continuity and publish
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -eu
           out="$RUNNER_TEMP/motonav-update"
+          notes="docs/releases/${GITHUB_REF_NAME#android-v}.zh-CN.md"
+          test -f "$notes"
           python3 tools/update_release.py check-channel --output "$out"
-          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --verify-tag --latest \
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --verify-tag --draft \
             --title "MotoNav Android ${GITHUB_REF_NAME#android-v}" \
-            --notes "MotoNav Android APK and its verified update manifest. Installation requires the existing release signature." \
+            --notes-file "$notes" \
             "$out"/*.apk "$out/motonav-update.json" "$out/motonav-signer.sha256" \
-            "$out/SHA256SUMS.txt" "$out/certificate.txt"
+            "$out/SHA256SUMS.txt" "$out/certificate.txt" "$out/BUILD.txt"
+          gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft=false --latest
