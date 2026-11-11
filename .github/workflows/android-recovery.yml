@@ -1,7 +1,8 @@
 name: Android recovery checks
 on:
   push:
-    branches: ['recovery/**', 'codex/android-remote-updates']
+    branches: ['recovery/**', 'codex/**']
+    paths: ['android-recovery/**', '.github/workflows/android-recovery.yml', '.github/workflows/android-update-release.yml']
   workflow_dispatch:
 permissions:
   contents: read
