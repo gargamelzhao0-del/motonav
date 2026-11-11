@@ -1,4 +1,9 @@
 build/
+build-host/
+dist/
+backups/
+__pycache__/
+*.log
 managed_components/
 sdkconfig
 sdkconfig.old

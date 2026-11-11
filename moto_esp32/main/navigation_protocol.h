@@ -20,6 +20,10 @@ struct Guidance {
     int speed_kmh = -1;
 };
 
+struct ReceiverStats {
+    uint32_t accepted = 0, duplicates = 0, rejected = 0;
+};
+
 // No allocation or graphics dependencies. Used by both the firmware and host tests.
 class NavigationReceiver {
 public:
@@ -45,7 +49,7 @@ public:
         }
         buffer_[used_] = '\0';
         bool ok = !dropping_ && parse(now_ms, reply);
-        if (!ok) std::snprintf(reply, sizeof(reply), "E,NAV3\n");
+        if (!ok) { ++stats_.rejected; std::snprintf(reply, sizeof(reply), "E,NAV3\n"); }
         used_ = 0;
         dropping_ = false;
         return true;
@@ -61,6 +65,13 @@ public:
         return handshaken_ && now_ms >= received_at_ && now_ms - received_at_ <= LinkTimeoutMs;
     }
 
+    bool handshaken() const { return handshaken_; }
+    bool has_guidance() const { return guidance_received_; }
+    bool source_expired(uint64_t now_ms) const {
+        return guidance_.mode == Live && (now_ms < received_at_ || now_ms - received_at_ > validity_ms_);
+    }
+    ReceiverStats stats() const { return stats_; }
+
     Guidance guidance(uint64_t now_ms) const {
         if (guidance_.mode == Live && (!connected(now_ms) || now_ms - received_at_ > validity_ms_)) return Guidance{};
         return guidance_;
@@ -69,12 +80,13 @@ public:
 private:
     char buffer_[95]{};
     size_t used_ = 0;
-    bool dropping_ = false, handshaken_ = false;
+    bool dropping_ = false, handshaken_ = false, guidance_received_ = false;
     int sequence_ = 0, session_ = 0;
     uint32_t last_crc_ = 0;
     uint64_t received_at_ = 0;
     unsigned validity_ms_ = 0;
     Guidance guidance_{};
+    ReceiverStats stats_{};
 
     static bool number(const char *text, int min, int max, int &value) {
         if (!text || !*text) return false;
@@ -115,6 +127,7 @@ private:
         int seq, session;
         if (std::strcmp(fields[1], "3") || !number(fields[2], 1, INT_MAX, seq) || !number(fields[3], 1, INT_MAX, session)) return false;
         if (handshaken_ && seq == sequence_ && session == session_ && supplied == last_crc_) {
+            ++stats_.duplicates;
             std::snprintf(reply, sizeof(reply), "A,%d,%s\n", seq, hello ? "NAV3" : "OK");
             return true;
         }
@@ -122,6 +135,7 @@ private:
             if (handshaken_ || seq != 1) return false;
             session_ = session;
             guidance_ = Guidance{};
+            guidance_received_ = false;
             handshaken_ = true;
         } else {
             if (!handshaken_ || session != session_ || seq <= sequence_) return false;
@@ -138,7 +152,9 @@ private:
                 if (icon != 0 || turn != -1 || distance != -1 || seconds != -1 || speed != -1 || fix_age != 0 || instruction_age != 0) return false;
                 guidance_ = Guidance{}; guidance_.mode = static_cast<Mode>(mode);
             }
+            guidance_received_ = true;
         }
+        ++stats_.accepted;
         sequence_ = seq; last_crc_ = supplied; received_at_ = now_ms;
         std::snprintf(reply, sizeof(reply), "A,%d,%s\n", seq, hello ? "NAV3" : "OK");
         return true;
