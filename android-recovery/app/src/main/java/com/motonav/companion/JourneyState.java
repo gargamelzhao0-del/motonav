@@ -3,11 +3,13 @@ package com.motonav.companion;
 /** Single-flight route/navigation state. Epochs invalidate asynchronous results after dismissal. */
 public final class JourneyState {
     public enum Phase { IDLE, PLANNING, READY, STARTING, NAVIGATING }
+    public enum Guidance { LIVE, WAITING, EXPIRED }
     private long epoch, readyAt;
+    private long lastInstructionMs, waitingSinceMs = -1;
     private Phase phase=Phase.IDLE;
     public Phase phase(){return phase;}
     public long epoch(){return epoch;}
-    public long cancel(){phase=Phase.IDLE;readyAt=0;return ++epoch;}
+    public long cancel(){phase=Phase.IDLE;readyAt=0;waitingSinceMs=-1;return ++epoch;}
     public long begin(boolean goodFix,boolean destination){
         if(!goodFix||!destination||phase==Phase.PLANNING||phase==Phase.STARTING||phase==Phase.NAVIGATING)return -1;
         cancel();phase=Phase.PLANNING;return epoch;
@@ -21,8 +23,29 @@ public final class JourneyState {
     }
     public boolean started(long token){if(token!=epoch||phase!=Phase.STARTING)return false;phase=Phase.NAVIGATING;return true;}
     public boolean active(long token){return token==epoch&&(phase==Phase.STARTING||phase==Phase.NAVIGATING);}
+    public void startGuidance(long nowMs) {
+        lastInstructionMs = nowMs;
+        waitingSinceMs = -1;
+    }
+
+    public Guidance guidance(long nowMs, long trustedFixNanos, boolean newInstruction) {
+        if (phase != Phase.NAVIGATING) return Guidance.WAITING;
+        if (waitingSinceMs >= 0 && nowMs - waitingSinceMs >= 45_000) return Guidance.EXPIRED;
+        if (trustedFixNanos > 0 && newInstruction
+                && (waitingSinceMs < 0 || trustedFixNanos / 1_000_000L > waitingSinceMs)) {
+            lastInstructionMs = nowMs;
+            waitingSinceMs = -1;
+            return Guidance.LIVE;
+        }
+        if (trustedFixNanos > 0 && waitingSinceMs < 0 && nowMs - lastInstructionMs <= 15_000) {
+            return Guidance.LIVE;
+        }
+        if (waitingSinceMs < 0) waitingSinceMs = nowMs;
+        return Guidance.WAITING;
+    }
+
     public static boolean coordinate(double latitude,double longitude){return Double.isFinite(latitude)&&Double.isFinite(longitude)&&Math.abs(latitude)<=90&&Math.abs(longitude)<=180;}
-    public static boolean usableFix(boolean fine,boolean mock,float accuracy,long now,long fix){return fine&&!mock&&Float.isFinite(accuracy)&&accuracy>0&&accuracy<=100&&MapStartupPolicy.fresh(now,fix);}
+    public static boolean usableFix(boolean fine,boolean mock,float accuracy,long now,long fix){return fine&&!mock&&MapStartupPolicy.navigationAccuracy(accuracy)&&MapStartupPolicy.fresh(now,fix);}
     public static int displacement(String text){try{int cc=Integer.parseInt(text.trim());return cc>=1&&cc<=10000?cc:0;}catch(RuntimeException e){return 0;}}
     /** Official AMap IconType values; unknown is never interpreted as straight. */
     public static String maneuver(int type){

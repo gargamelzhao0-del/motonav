@@ -20,12 +20,15 @@ assert 'requestDisallowInterceptTouchEvent' in dial
 assert 'map.onLowMemory()' not in source
 assert 'public void overview(){dial.setRound(false);placeLogo();}' in source
 assert 'x*x+y*y>r*r' in dial
-assert 'MyLocationStyle.ERROR_CODE' in source
-assert 'if(error!=0)' in source
-assert 'if(userRetry)' in source and 'centerOnFix(currentFix)' in source
-assert 'else if(locationProblem!=null)' in source
-receive = source.split('private void handleLocation(',1)[1].split('private void locationPermission(',1)[0]
-assert receive.index('if(!allowed)') < receive.index('currentFix=new')
-assert receive.index('if(!systemLocationEnabled())') < receive.index('currentFix=new')
-assert 'MapStartupPolicy.usableSnapshot(allowed,systemLocationEnabled()' in source
-print('PASS: 23 static activity/visual wiring guards (not runtime validation)')
+feed = Path('app/src/main/java/com/motonav/companion/AmapLocationFeed.java').read_text()
+assert 'setLocationSource(locationFeed)' in source
+assert 'AMapLocationMode.Hight_Accuracy' in feed and 'setOnceLocation(false)' in feed
+assert 'setLocationCacheEnable(false)' in feed
+assert 'if (client != next) return;' in feed
+pause = source.split('@Override protected void onPause()', 1)[1].split('@Override protected void onDestroy()', 1)[0]
+assert 'stopLocation();' in pause
+receive = source.split('private void handleLocation(', 1)[1].split('private void renderLocation(', 1)[0]
+assert receive.index('systemLocationEnabled()') < receive.index('fixes.offer(')
+assert 'location.getErrorCode()' in receive
+assert 'hasPrecisePermission(), systemLocationEnabled()' in source
+print('PASS: static map, location lifecycle, and privacy guards (not runtime validation)')

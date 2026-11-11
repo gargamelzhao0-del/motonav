@@ -16,9 +16,15 @@ public final class MapStartupPolicy {
     public static boolean validFix(double latitude,double longitude,float accuracy,boolean mock){
         return !mock&&Double.isFinite(latitude)&&Double.isFinite(longitude)&&latitude>=-90&&latitude<=90&&longitude>=-180&&longitude<=180&&!(latitude==0&&longitude==0)&&Float.isFinite(accuracy)&&accuracy>0;
     }
+    public static boolean navigationAccuracy(float meters) {
+        return Float.isFinite(meters) && meters > 0 && meters <= 100;
+    }
+    public static boolean locationNeedsStart(long nowMs, long lastCallbackMs) {
+        return lastCallbackMs < 0 || nowMs - lastCallbackMs >= 30000;
+    }
     public static String locationError(int code){
         if(code==7||code==32)return "定位鉴权失败（错误"+code+"）：请核对Android Key、新包名和本安装签名SHA1；不要发送Key。";
-        if(code==4)return "定位网络请求失败（错误4）：请检查网络后点定位重试。";
+        if(code==4)return "定位网络请求失败（错误4）。请检查网络，App 会继续获取位置。";
         return "高德定位失败（错误"+code+"），请记录错误码并检查定位权限、系统开关及网络。";
     }
     public static long fixTime(long nowNanos,long wallNowMillis,long elapsedNanos,long wallFixMillis){

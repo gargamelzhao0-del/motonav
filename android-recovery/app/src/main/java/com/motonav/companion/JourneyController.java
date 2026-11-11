@@ -42,7 +42,7 @@ import java.util.Map;
 /** Phone-only, explicit-start GPS navigation experiment. Never feeds fictional data or BLE. */
 final class JourneyController {
     interface Host {
-        boolean active(); String key(); Location fix(); long fixNanos(); void report(String message); void overview(); void icon(android.graphics.Bitmap bitmap);
+        boolean active(); boolean navigationAllowed(); String key(); Location fix(); long fixNanos(); void report(String message); void overview(); void icon(android.graphics.Bitmap bitmap);
     }
     private final Activity activity;
     private final AMap map;
@@ -57,22 +57,43 @@ final class JourneyController {
     private PoiItem destination;
     private Location plannedStart;
     private int searchEpoch;
-    private long lastInstruction;
-    private boolean destroyed;
-    private final Runnable watchdog=new Runnable(){public void run(){
-        if(destroyed||!host.active())return;
-        if(state.phase()==JourneyState.Phase.NAVIGATING&&(!usableFix()||SystemClock.elapsedRealtime()-lastInstruction>15000)){
-            stop("定位或导航指令已过期，导航已停止。请在停车状态检查定位并重新规划。");return;
+    private boolean destroyed, gpsWeak;
+    private final Runnable watchdog = new Runnable() {
+        @Override public void run() {
+            if (!active() || state.phase() != JourneyState.Phase.NAVIGATING) return;
+            guidanceReady(false);
+            if (state.phase() == JourneyState.Phase.NAVIGATING) handler.postDelayed(this, 2000);
         }
-        handler.postDelayed(this,2000);
-    }};
+    };
     JourneyController(Activity activity,AMap map,Host host){this.activity=activity;this.map=map;this.host=host;}
     private boolean active(){return !destroyed&&host.active();}
-    private boolean usableFix(){
-        Location fix=host.fix();
-        return fix!=null&&JourneyState.coordinate(fix.getLatitude(),fix.getLongitude())&&JourneyState.usableFix(
-            activity.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION)==PackageManager.PERMISSION_GRANTED,
-            fix.isFromMockProvider(),fix.hasAccuracy()?fix.getAccuracy():Float.NaN,SystemClock.elapsedRealtimeNanos(),host.fixNanos());
+    private boolean usableFix() { return trustedFixTime() > 0; }
+
+    private long trustedFixTime() {
+        Location fix = host.fix();
+        if (fix == null || !JourneyState.coordinate(fix.getLatitude(), fix.getLongitude())) return 0;
+        long time = host.fixNanos();
+        return JourneyState.usableFix(
+                activity.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED,
+                fix.isFromMockProvider(), fix.hasAccuracy() ? fix.getAccuracy() : Float.NaN,
+                SystemClock.elapsedRealtimeNanos(), time) ? time : 0;
+    }
+
+    private boolean guidanceReady(boolean newInstruction) {
+        if (!host.navigationAllowed()) {
+            stop("精确位置权限或系统定位已关闭，导航已结束。");
+            return false;
+        }
+        JourneyState.Guidance guidance = state.guidance(SystemClock.elapsedRealtime(),
+                gpsWeak ? 0 : trustedFixTime(), newInstruction);
+        if (guidance == JourneyState.Guidance.LIVE) return true;
+        if (guidance == JourneyState.Guidance.EXPIRED) {
+            stop("定位或导航指令持续中断，导航已结束。定位恢复后可重新规划。");
+        } else {
+            host.icon(null);
+            host.report("定位或导航指令暂时中断。已保留路线，正在等待恢复。");
+        }
+        return false;
     }
     private void show(AlertDialog next){if(dialog!=null)dialog.dismiss();dialog=next;next.setOnDismissListener(d->{if(dialog==next)dialog=null;});next.show();}
     void searchDialog(){
@@ -170,19 +191,25 @@ final class JourneyController {
                 }
                 @Override public void onStartNavi(int type){
                     if(!active()||engine!=navi||type!=NaviType.GPS||!state.started(token))return;
-                    cameraFollow(true);lastInstruction=SystemClock.elapsedRealtime();handler.removeCallbacks(watchdog);handler.postDelayed(watchdog,2000);host.report("前台GPS导航测试已启动，等待实时指令。无语音/后台导航，不用于实际骑行。");
+                    cameraFollow(true);state.startGuidance(SystemClock.elapsedRealtime());handler.removeCallbacks(watchdog);handler.postDelayed(watchdog,2000);host.report("前台GPS导航测试已启动，等待实时指令。无语音/后台导航，不用于实际骑行。");
                 }
                 @Override public void onNaviInfoUpdate(NaviInfo info){
-                    if(!active()||engine!=navi||!state.active(token)||info==null||info.getNaviType()!=NaviType.GPS)return;
-                    if(!usableFix()){stop("定位已失效，导航停止，请重新定位和规划。");return;}
-                    lastInstruction=SystemClock.elapsedRealtime();host.icon(info.getIconBitmap());
+                    if (!active() || engine != navi || !state.active(token)
+                            || state.phase() != JourneyState.Phase.NAVIGATING
+                            || info == null || info.getNaviType() != NaviType.GPS) return;
+                    if (!guidanceReady(true)) return;
+                    host.icon(info.getIconBitmap());
                     host.report(JourneyState.maneuver(info.getIconType())+" · 前台GPS测试 · 剩余"+Math.max(0,info.getPathRetainDistance())+"米 / "+Math.max(0,info.getPathRetainTime()/60)+"分钟\n下一路段："+safeName(info.getNextRoadName())+" · 距当前段末"+Math.max(0,info.getCurStepRetainDistance())+"米");
                 }
                 @Override public void onStopNavi(){if(active()&&engine==navi&&state.active(token))stop("SDK已结束导航。");}
                 @Override public void onArriveDestination(){if(active()&&engine==navi&&state.active(token))stop("高德报告已到达目的地，导航已结束。");}
                 @Override public void onReCalculateRouteForYaw(){if(active()&&engine==navi&&state.active(token))stop("检测到偏航，导航已停止；请停车后手动重新规划。");}
                 @Override public void onReCalculateRouteForTrafficJam(){if(active()&&engine==navi&&state.active(token))stop("路线需要更新，导航已停止；请停车后重新规划。");}
-                @Override public void onGpsSignalWeak(boolean weak){if(weak&&active()&&engine==navi&&state.active(token))stop("GPS信号弱，导航已停止，请恢复有效定位后重新规划。");}
+                @Override public void onGpsSignalWeak(boolean weak) {
+                    if (!active() || engine != navi || !state.active(token)) return;
+                    gpsWeak = weak;
+                    if (weak && state.phase() == JourneyState.Phase.NAVIGATING) guidanceReady(false);
+                }
             };
             engine.addAMapNaviListener(listener);
             host.report("正在向高德请求摩托路线（车型11，策略2001）…");
@@ -196,8 +223,16 @@ final class JourneyController {
         if(state.phase()==JourneyState.Phase.NAVIGATING||state.phase()==JourneyState.Phase.STARTING||state.phase()==JourneyState.Phase.PLANNING){stop("已取消算路/结束导航。");return;}
         if(navi==null||plannedStart==null||state.phase()!=JourneyState.Phase.READY){host.report("请先完成摩托算路。");return;}
         ++searchEpoch;if(dialog!=null){dialog.dismiss();dialog=null;}
-        Location current=host.fix();double moved=current==null?Double.NaN:plannedStart.distanceTo(current);
-        if(!state.start(usableFix(),SystemClock.elapsedRealtime(),moved)){stop("路线已过期、起点变化或定位无效，请重新规划。");return;}
+        Location current = host.fix();
+        if (current == null || !usableFix()) {
+            host.report("正在等待可用定位。已保留路线预览，定位恢复后可再次开始。");
+            return;
+        }
+        double moved = plannedStart.distanceTo(current);
+        if (!state.start(true, SystemClock.elapsedRealtime(), moved)) {
+            stop("路线已过期或起点变化，请重新规划。");
+            return;
+        }
         final long token=state.epoch();
         try{
             if(!navi.startNavi(NaviType.GPS)){stop("GPS导航启动请求被拒绝，未进入导航。");return;}
@@ -207,7 +242,7 @@ final class JourneyController {
     private void cameraFollow(boolean follow){map.setMyLocationStyle(new MyLocationStyle().myLocationType(follow?MyLocationStyle.LOCATION_TYPE_FOLLOW:MyLocationStyle.LOCATION_TYPE_FOLLOW_NO_CENTER).interval(2000));}
     private void clearRoute(){if(line!=null){line.remove();line=null;}plannedStart=null;}
     private void stopEngine(){
-        state.cancel();host.icon(null);handler.removeCallbacks(watchdog);
+        state.cancel();gpsWeak=false;host.icon(null);handler.removeCallbacks(watchdog);
         AMapNavi old=navi;SimpleNaviListener oldListener=listener;navi=null;listener=null;
         if(old!=null){
             try{old.removeAMapNaviListener(oldListener);}catch(RuntimeException ignored){}
