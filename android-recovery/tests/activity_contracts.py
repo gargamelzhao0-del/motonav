@@ -20,4 +20,8 @@ assert 'requestDisallowInterceptTouchEvent' in dial
 assert 'map.onLowMemory()' not in source
 assert 'public void overview(){dial.setRound(false);placeLogo();}' in source
 assert 'x*x+y*y>r*r' in dial
-print('PASS: 16 static activity/visual wiring guards (not runtime validation)')
+assert 'MyLocationStyle.ERROR_CODE' in source
+assert 'if(error!=0)' in source
+assert 'if(userRetry)' in source and 'centerOnFix(currentFix)' in source
+assert 'else if(locationProblem!=null)' in source
+print('PASS: 20 static activity/visual wiring guards (not runtime validation)')

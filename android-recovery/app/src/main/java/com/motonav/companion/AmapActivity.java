@@ -45,8 +45,21 @@ public final class AmapActivity extends Activity {
     private ScrollView controls;
     private boolean permissionPending;
     private long lastFixNanos;
+    private String locationProblem;
+    private boolean locationRequested, recenterPending=true;
     private final android.os.Handler handler=new android.os.Handler(android.os.Looper.getMainLooper());
-    private final Runnable freshness=new Runnable(){public void run(){if(foreground&&map!=null){if(!MapStartupPolicy.fresh(android.os.SystemClock.elapsedRealtimeNanos(),lastFixNanos))status.setText("尚无有效新定位：检查定位开关、权限与室外信号；可点定位重试");handler.postDelayed(this,5000);}}};
+    private final Runnable freshness=new Runnable(){public void run(){
+        if(foreground&&map!=null){
+            boolean allowed=checkSelfPermission(android.Manifest.permission.ACCESS_FINE_LOCATION)==PackageManager.PERMISSION_GRANTED||checkSelfPermission(android.Manifest.permission.ACCESS_COARSE_LOCATION)==PackageManager.PERMISSION_GRANTED;
+            if(!allowed&&!permissionPending){locationPermission(false);}
+            else if(locationRequested){
+                if(!systemLocationEnabled()){invalidateFix("系统定位开关已关闭；请打开后点定位重试。");}
+                else if(locationProblem!=null)status.setText(locationProblem);
+                else if(!MapStartupPolicy.fresh(android.os.SystemClock.elapsedRealtimeNanos(),lastFixNanos))status.setText("尚无有效新定位：请检查网络和室外信号，再点定位重试。");
+            }
+            handler.postDelayed(this,5000);
+        }
+    }};
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
         saved=new SavedMapConfig(this);
@@ -71,7 +84,7 @@ public final class AmapActivity extends Activity {
         ScrollView screen=new ScrollView(this);screen.setFillViewport(true);screen.addView(page);
         if(Build.VERSION.SDK_INT>=30)screen.setOnApplyWindowInsetsListener((v,insets)->{Insets bars=insets.getInsets(WindowInsets.Type.systemBars());v.setPadding(bars.left,bars.top,bars.right,bars.bottom);return insets;});
         TextView brand=new TextView(this);brand.setText("MOTO / NAV");brand.setTextSize(21);brand.setLetterSpacing(0.14f);brand.setTextColor(0xffe9eddf);brand.setTypeface(null,android.graphics.Typeface.BOLD);page.addView(brand);
-        TextView warning=new TextView(this);warning.setText("RECOVERY 03  ·  仅停车测试，不用于骑行");warning.setTextSize(12);warning.setTextColor(0xffc6a988);warning.setPadding(0,dp(4),0,dp(12));page.addView(warning);
+        TextView warning=new TextView(this);warning.setText("RECOVERY 04  ·  仅停车测试，不用于骑行");warning.setTextSize(12);warning.setTextColor(0xffc6a988);warning.setPadding(0,dp(4),0,dp(12));page.addView(warning);
         root.removeView(status);status.setTextSize(13);status.setPadding(dp(12),dp(10),dp(12),dp(10));status.setBackground(panel(0xff1a211c));page.addView(status);
         dial=new MapDial(this);frame=dial.mapFrame;page.addView(dial,new LinearLayout.LayoutParams(-1,dp(380)));
         TextView waiting=new TextView(this);waiting.setText("MOTO / NAV\n等待地图配置");waiting.setGravity(android.view.Gravity.CENTER);waiting.setTextSize(18);waiting.setTextColor(0xff9da69a);frame.addView(waiting,new FrameLayout.LayoutParams(-1,-1));
@@ -137,7 +150,7 @@ public final class AmapActivity extends Activity {
             map.getMap().getUiSettings().setScaleControlsEnabled(false);
             placeLogo();
             final TextureMapView activeMap=map;
-            map.getMap().setOnMyLocationChangeListener(location->{if(!foreground||map!=activeMap||location==null)return;currentFix=new android.location.Location(location);lastFixNanos=MapStartupPolicy.fixTime(android.os.SystemClock.elapsedRealtimeNanos(),System.currentTimeMillis(),location.getElapsedRealtimeNanos(),location.getTime());if(MapStartupPolicy.fresh(android.os.SystemClock.elapsedRealtimeNanos(),lastFixNanos))status.setText("当前位置 · 精度约"+Math.round(location.getAccuracy())+"米 · 定位状态");});
+            map.getMap().setOnMyLocationChangeListener(location->{if(!foreground||map!=activeMap)return;handleLocation(location);});
             journey=new JourneyController(this,map.getMap(),new JourneyController.Host(){
                 public boolean active(){return foreground&&consent&&map!=null;}
                 public String key(){return keys.sdkValue();}
@@ -147,12 +160,12 @@ public final class AmapActivity extends Activity {
                 public void overview(){dial.setRound(false);placeLogo();}
                 public void icon(android.graphics.Bitmap bitmap){turnIcon.setImageBitmap(bitmap);}
             });
-            map.getMap().setOnMapLoadedListener(()->{if(map==activeMap&&foreground&&lastFixNanos==0)status.setText("底图加载完成，正在等待定位；加载回调不代表鉴权成功");});
+            map.getMap().setOnMapLoadedListener(()->{if(map==activeMap&&foreground&&lastFixNanos==0&&locationProblem==null&&locationRequested)status.setText("底图加载完成，正在等待定位；加载回调不代表鉴权成功");});
             map.onResume();open.setEnabled(false);status.setText("地图加载中，底图回调不代表鉴权成功");controls.setVisibility(View.GONE);locationPermission(false);handler.removeCallbacks(freshness);handler.postDelayed(freshness,15000);
         }catch(RuntimeException|LinkageError e){dispose();status.setText(R.string.amap_failed);}
     }
     private void dispose(){
-        handler.removeCallbacks(freshness);lastFixNanos=0;currentFix=null;
+        handler.removeCallbacks(freshness);lastFixNanos=0;currentFix=null;locationRequested=false;locationProblem=null;
         if(journey!=null){journey.close();journey=null;}
         if(map!=null){TextureMapView old=map;map=null;try{old.getMap().setOnMyLocationChangeListener(null);old.getMap().setOnMapLoadedListener(null);}catch(RuntimeException|LinkageError ignored){}try{old.onPause();}catch(RuntimeException|LinkageError ignored){}try{old.onDestroy();}catch(RuntimeException|LinkageError ignored){}frame.removeAllViews();}
         if(sdkTouched){sdkTouched=false;try{MapsInitializer.updatePrivacyAgree(this,false);com.amap.api.location.AMapLocationClient.updatePrivacyAgree(this,false);}catch(RuntimeException|LinkageError ignored){}try{MapsInitializer.setApiKey("");}catch(RuntimeException|LinkageError ignored){}}
@@ -170,16 +183,53 @@ public final class AmapActivity extends Activity {
         if(consentDialog!=null){consentDialog.dismiss();consentDialog=null;}
         consent=false;dispose();keys.clear();boolean removed=saved.clear();if(keyInput!=null){keyInput.getText().clear();keyInput.clearFocus();InputMethodManager ime=(InputMethodManager)getSystemService(INPUT_METHOD_SERVICE);if(ime!=null)ime.hideSoftInputFromWindow(keyInput.getWindowToken(),0);}if(open!=null)open.setEnabled(false);if(status!=null)status.setText(removed?"已删除本App保存的Key并撤回同意；SDK缓存可能仍存在":"地图已停止，但本地删除未完全成功。请在系统中清除本测试应用数据后再使用。");controls.setVisibility(View.VISIBLE);
     }
+    private boolean systemLocationEnabled(){
+        android.location.LocationManager manager=(android.location.LocationManager)getSystemService(LOCATION_SERVICE);
+        if(manager==null)return false;
+        try{return Build.VERSION.SDK_INT>=28?manager.isLocationEnabled():manager.isProviderEnabled(android.location.LocationManager.GPS_PROVIDER)||manager.isProviderEnabled(android.location.LocationManager.NETWORK_PROVIDER);}
+        catch(RuntimeException e){return true;} // Unknown OS status: let the SDK report the actual failure.
+    }
+    private void invalidateFix(String message){currentFix=null;lastFixNanos=0;locationProblem=message;status.setText(message);}
+    private void centerOnFix(android.location.Location location){
+        map.getMap().animateCamera(com.amap.api.maps.CameraUpdateFactory.newLatLngZoom(new com.amap.api.maps.model.LatLng(location.getLatitude(),location.getLongitude()),16));recenterPending=false;
+    }
+    private void handleLocation(android.location.Location location){
+        if(!locationRequested)return;
+        if(location==null){invalidateFix("定位未返回结果，请点定位重试。");return;}
+        Bundle extra=location.getExtras();
+        int error=location instanceof com.amap.api.location.AMapLocation?((com.amap.api.location.AMapLocation)location).getErrorCode():extra==null?0:extra.getInt(com.amap.api.maps.model.MyLocationStyle.ERROR_CODE,0);
+        if(error!=0){invalidateFix(MapStartupPolicy.locationError(error));return;}
+        if(!MapStartupPolicy.validFix(location.getLatitude(),location.getLongitude(),location.hasAccuracy()?location.getAccuracy():Float.NaN,location.isFromMockProvider())){
+            invalidateFix("定位数据无效或来自模拟位置，未用作算路起点；请检查定位来源后重试。");return;
+        }
+        long time=MapStartupPolicy.fixTime(android.os.SystemClock.elapsedRealtimeNanos(),System.currentTimeMillis(),location.getElapsedRealtimeNanos(),location.getTime());
+        if(time==0){invalidateFix("收到过期或时间异常的位置，等待新的定位；请勿使用旧点算路。");return;}
+        currentFix=new android.location.Location(location);lastFixNanos=time;locationProblem=null;
+        if(recenterPending)centerOnFix(location);
+        boolean precise=checkSelfPermission(android.Manifest.permission.ACCESS_FINE_LOCATION)==PackageManager.PERMISSION_GRANTED;
+        status.setText((precise?"当前位置":"大致位置")+" · 精度约"+Math.round(location.getAccuracy())+"米 · "+(precise&&location.getAccuracy()<=100?"定位已更新":"暂不满足摩托算路精度要求"));
+    }
     private void locationPermission(boolean userRetry){
         if(!foreground||map==null||!consent||permissionPending)return;
         boolean precise=checkSelfPermission(android.Manifest.permission.ACCESS_FINE_LOCATION)==PackageManager.PERMISSION_GRANTED;
         boolean approximate=checkSelfPermission(android.Manifest.permission.ACCESS_COARSE_LOCATION)==PackageManager.PERMISSION_GRANTED;
         MapStartupPolicy.Action action=MapStartupPolicy.location(foreground,map!=null,consent,permissionPending,precise,approximate,saved.asked(),userRetry,shouldShowRequestPermissionRationale(android.Manifest.permission.ACCESS_FINE_LOCATION));
         if(action==MapStartupPolicy.Action.LOCATE){
-            try{map.getMap().setMyLocationEnabled(true);status.setText(precise?"等待当前位置…（仅前台定位）":"已获大致定位，位置可能不够精确");}
-            catch(SecurityException e){status.setText("定位权限已变化，请检查系统设置");}
+            try{
+                locationRequested=true;
+                if(userRetry){
+                    locationProblem=null;recenterPending=true;
+                    map.getMap().setMyLocationStyle(new com.amap.api.maps.model.MyLocationStyle().myLocationType(com.amap.api.maps.model.MyLocationStyle.LOCATION_TYPE_FOLLOW).interval(2000));
+                    if(currentFix!=null&&MapStartupPolicy.fresh(android.os.SystemClock.elapsedRealtimeNanos(),lastFixNanos))centerOnFix(currentFix);
+                    else {currentFix=null;lastFixNanos=0;map.getMap().setMyLocationEnabled(false);}
+                }
+                map.getMap().setMyLocationEnabled(true);
+                status.setText(!systemLocationEnabled()?"系统定位开关已关闭；请打开后点定位重试。":precise?"等待当前位置…（仅前台定位）":"已获大致定位，位置可能不够精确；摩托算路需精确权限");
+            }
+            catch(SecurityException e){locationRequested=false;invalidateFix("定位权限已变化，请检查系统设置");}
             return;
         }
+        locationRequested=false;currentFix=null;lastFixNanos=0;
         map.getMap().setMyLocationEnabled(false);
         if(action==MapStartupPolicy.Action.REQUEST){
             saved.asked(true);permissionPending=true;
@@ -194,6 +244,6 @@ public final class AmapActivity extends Activity {
         if(request==71){permissionPending=false;if(foreground)locationPermission(false);}
     }
     @Override protected void onResume(){super.onResume();foreground=true;handler.removeCallbacks(freshness);handler.postDelayed(freshness,15000);if(map==null)initialize();else{map.onResume();locationPermission(false);}}
-    @Override protected void onPause(){foreground=false;currentFix=null;lastFixNanos=0;handler.removeCallbacks(freshness);if(journey!=null)journey.pause();if(consentDialog!=null){consentDialog.dismiss();consentDialog=null;}if(map!=null){map.getMap().setMyLocationEnabled(false);map.onPause();}super.onPause();}
+    @Override protected void onPause(){foreground=false;currentFix=null;lastFixNanos=0;locationRequested=false;handler.removeCallbacks(freshness);if(journey!=null)journey.pause();if(consentDialog!=null){consentDialog.dismiss();consentDialog=null;}if(map!=null){map.getMap().setMyLocationEnabled(false);map.onPause();}super.onPause();}
     @Override protected void onDestroy(){dispose();keys.clear();super.onDestroy();}
 }
