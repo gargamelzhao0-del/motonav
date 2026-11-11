@@ -46,5 +46,11 @@ final class SavedMapConfig {
     boolean consent(boolean value){return prefs.edit().putInt("consent_version",value?1:0).commit();}
     boolean asked(){return prefs.getBoolean("permission_asked",false);}
     void asked(boolean value){prefs.edit().putBoolean("permission_asked",value).apply();}
-    boolean clear(){return prefs.edit().remove("cipher").remove("iv").remove("consent_version").commit();}
+    boolean clear(){
+        boolean keyRemoved=true;
+        try{KeyStore store=KeyStore.getInstance("AndroidKeyStore");store.load(null);store.deleteEntry(ALIAS);}
+        catch(Exception e){keyRemoved=false;}
+        boolean dataRemoved=prefs.edit().remove("cipher").remove("iv").remove("consent_version").commit();
+        return keyRemoved&&dataRemoved;
+    }
 }

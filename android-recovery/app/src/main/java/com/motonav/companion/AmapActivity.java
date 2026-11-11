@@ -87,7 +87,7 @@ public final class AmapActivity extends Activity {
     private void askConsent(){
         if(map!=null||!keys.configured()||!foreground||consentDialog!=null)return;
         consentDialog=new AlertDialog.Builder(this).setTitle("启用高德联网地图？").setMessage("本应用使用高德地图及定位SDK，联网时向高德提交Android Key、包信息及服务必需的网络、设备和位置信息，服务端可见IP。定位仅在本页面前台且已获系统权限时启动，用于展示当前位置；不传给ESP32，不提供导航。请先阅读页面中的隐私政策和条款。\n\nKey将用Android Keystore保护的AES-GCM加密保存于本应用私有存储，应用备份关闭。此次同意会保存，今后打开自动加载地图及定位；可在设置中删除Key并撤回同意。SDK自身缓存无法保证彻底清除。系统首次定位授权仍需本人操作。")
-            .setNegativeButton("不同意",(d,w)->{consent=false;status.setText(R.string.amap_denied);})
+            .setNegativeButton("不同意并关闭",(d,w)->{consent=false;dispose();boolean recorded=saved.consent(false);if(!recorded){saved.clear();keys.clear();open.setEnabled(false);}status.setText(recorded?"已撤回同意，不会自动联网定位":"已停止地图，但无法确认撤回记录已保存。请在系统中清除本测试应用数据后再使用。");})
             .setPositiveButton("同意并联网打开",(d,w)->{if(!foreground||isFinishing())return;if(!saved.consent(true)){status.setText("无法保存同意，请重试");return;}consent=true;initialize();}).create();
         consentDialog.setOnDismissListener(d->consentDialog=null);consentDialog.show();
     }
@@ -102,7 +102,7 @@ public final class AmapActivity extends Activity {
             com.amap.api.location.AMapLocationClient.updatePrivacyShow(this,true,true);
             com.amap.api.location.AMapLocationClient.updatePrivacyAgree(this,true);
             com.amap.api.location.AMapLocationClient.setApiKey(keys.sdkValue());
-            map.getMap().setMyLocationStyle(new com.amap.api.maps.model.MyLocationStyle().myLocationType(com.amap.api.maps.model.MyLocationStyle.LOCATION_TYPE_LOCATE).interval(2000));
+            map.getMap().setMyLocationStyle(new com.amap.api.maps.model.MyLocationStyle().myLocationType(com.amap.api.maps.model.MyLocationStyle.LOCATION_TYPE_FOLLOW).interval(2000));
             map.getMap().setMyLocationEnabled(false);map.getMap().getUiSettings().setMyLocationButtonEnabled(false);
             map.getMap().setOnMyLocationChangeListener(location->{if(!foreground||map==null)return;lastFixNanos=MapStartupPolicy.fixTime(android.os.SystemClock.elapsedRealtimeNanos(),System.currentTimeMillis(),location.getElapsedRealtimeNanos(),location.getTime());if(MapStartupPolicy.fresh(android.os.SystemClock.elapsedRealtimeNanos(),lastFixNanos))status.setText("当前位置 · 精度约"+Math.round(location.getAccuracy())+"米 · 非导航测试");});
             final MapView activeMap=map;
@@ -126,7 +126,7 @@ public final class AmapActivity extends Activity {
     }
     private void clearKey(){
         if(consentDialog!=null){consentDialog.dismiss();consentDialog=null;}
-        if(!saved.clear()){status.setText("删除保存配置失败，请重试");return;}consent=false;dispose();keys.clear();if(keyInput!=null){keyInput.getText().clear();keyInput.clearFocus();InputMethodManager ime=(InputMethodManager)getSystemService(INPUT_METHOD_SERVICE);if(ime!=null)ime.hideSoftInputFromWindow(keyInput.getWindowToken(),0);}if(open!=null)open.setEnabled(false);if(status!=null)status.setText("已删除本App保存的Key并撤回同意；SDK缓存可能仍存在");controls.setVisibility(View.VISIBLE);
+        consent=false;dispose();keys.clear();boolean removed=saved.clear();if(keyInput!=null){keyInput.getText().clear();keyInput.clearFocus();InputMethodManager ime=(InputMethodManager)getSystemService(INPUT_METHOD_SERVICE);if(ime!=null)ime.hideSoftInputFromWindow(keyInput.getWindowToken(),0);}if(open!=null)open.setEnabled(false);if(status!=null)status.setText(removed?"已删除本App保存的Key并撤回同意；SDK缓存可能仍存在":"地图已停止，但本地删除未完全成功。请在系统中清除本测试应用数据后再使用。");controls.setVisibility(View.VISIBLE);
     }
     private void locationPermission(boolean userRetry){
         if(!foreground||map==null||!consent||permissionPending)return;
