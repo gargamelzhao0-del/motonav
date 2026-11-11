@@ -19,7 +19,7 @@ https://github.com/gargamelzhao0-del/motonav/actions/runs/42979339851
 首轮之后源码复查修复了单次定位模式及拒绝同意未持久化的问题。**最新提交的构建结果以对应GitHub Actions为准**，不要用旧提交绿灯代替新提交验证。
 纯Java检查包含原有26,569项和新增522项权限/时效决策检查。新增摩托状态机、车辆字段、时效和方向文案有2,051项检查。额外源码契约检查只防止已知接线错误回归，不是运行时验收。
 
-未连接手机/模拟器；Keystore、重启/旋转/同签名升级、系统权限、定位和地图鉴权均未实机验证。CI不提供正式安装包，不持久保存临时debug签名。
+未连接手机/模拟器；Keystore、重启/旋转/同签名升级、系统权限、定位和地图鉴权均未实机验证。CI仅提供临时签名停车测试包，不提供正式发布包，不持久保存临时debug签名。
 
 ## 本次继续恢复（需对应CI及真机验证）
 已加入真实POI搜索/地点选择、按实际车牌与排量提交摩托路线（车型11/策略2001）、路线预览和显式启动的前台GPS导航HUD。路线成功前不能启动；错误16明确提示高德服务授权不足。导航回调提供转向图标、下一道路、剩余距离/时间。
@@ -38,7 +38,7 @@ SDK自动偏航/拥堵重算关闭接口未获验证；本App收到重算事件�
 - `sh tests/run.sh`
 - `gradle --no-daemon assembleDebug lintDebug`
 
-本仓库只含文本源码和配置，不含二进制Gradle wrapper、APK、Key或签名私钥。GitHub Actions仅测试、编译和lint，不发布APK；没有使用用户Key或生产签名。
+本仓库只含文本源码和配置，不含二进制Gradle wrapper、APK、Key或签名私钥。GitHub Actions执行测试、编译和lint，并输出保留7天的临时签名停车测试APK artifact；没有使用用户Key或生产签名。
 
 ## 首次安装前仍需完成
 - 固定并安全保管新测试签名，不能把每次CI新生成的debug证书当作可持续升级签名。
@@ -53,5 +53,9 @@ https://a.amap.com/lbs/static/unzip/Android_Location_Doc/com/amap/api/location/A
 ## 0.3 圆形地图视觉（未实机验收）
 使用 TextureMapView 实现圆形小地图、哑光表圈、夜间底图及紧凑的真实导航信息卡。无虚构速度、限速、朝向或路况。页面可滚动以容纳横屏和较大字体，地图手势不应被外层滚动截获。
 高德原标识保持默认大小，移动到圆内底部中央；没有重绘或隐藏标识。路线预览自动切换完整图以免端点被圆形裁掉。提供“圆形/完整图”切换以查看角落路线和排查设备裁剪问题。需真机确认 logo 完整可见、TextureView裁剪、地图手势、窄屏/横屏/大字体、按键和导航文本。编译或静态检查不等同这些验证。
-稳定签名尚未生成或上传。建议用户持有离线加密备份，在确认保管方案后再授权受控构建使用；公开仓库不得保存私钥或密码。当前 CI 的临时 debug 密钥不保证跨次构建一致，暂不发布可持续升级安装包。
+稳定签名尚未生成或上传。建议用户持有离线加密备份，在确认保管方案后再授权受控构建使用；公开仓库不得保存私钥或密码。当前 CI 的临时 debug 密钥不保证跨次构建一致，只提供一次性停车测试APK，不是可持续升级安装包。
 官方 TextureMapView 文档：https://a.amap.com/lbs/static/unzip/Android_Map_Doc/3D/com/amap/api/maps/TextureMapView.html
+
+## 临时测试包安装提示
+从对应提交成功运行的 Actions artifact 获取APK、certificate.txt与SHA256SUMS.txt。用 certificate.txt 中的 Signer certificate SHA-1 digest 绑定高德Android平台Key，包名为 com.motonav.recovery；可在App设置核对本安装SHA1。首次输入Key后加密保存在本App，不要发到聊天或仓库。
+每次CI可能生成不同签名，下次APK可能无法覆盖此测试版；不得为此卸载原MotoNav或清除原数据。首次实验保存的信息应视为不可迁移；后续固定签名前先确认安装迁移方案。不要使用此包骑行；尚未真机验证鉴权、定位、路线、圆形logo和权限流程。
