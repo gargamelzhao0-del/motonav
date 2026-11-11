@@ -17,4 +17,7 @@ dial = Path('app/src/main/java/com/motonav/companion/MapDial.java').read_text()
 assert 'setClipToOutline(true)' in dial
 assert 'toggleShape()' in dial
 assert 'requestDisallowInterceptTouchEvent' in dial
-print('PASS: 13 static activity/visual wiring guards (not runtime validation)')
+assert 'map.onLowMemory()' not in source
+assert 'public void overview(){dial.setRound(false);placeLogo();}' in source
+assert 'x*x+y*y>r*r' in dial
+print('PASS: 16 static activity/visual wiring guards (not runtime validation)')
