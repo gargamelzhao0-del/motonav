@@ -51,4 +51,19 @@ public final class MapFixTracker<T> {
         latest = null;
         navigation = null;
     }
+
+    public long observationAgeMillis(long nowNanos) {
+        return latest == null ? -1 : DiagnosticRecord.age(nowNanos, latest.timeNanos());
+    }
+    public long navigationAgeMillis(long nowNanos) {
+        return navigation == null ? -1 : DiagnosticRecord.age(nowNanos, navigation.timeNanos());
+    }
+    public String navigationReason(long nowNanos, boolean precisePermission, boolean systemEnabled) {
+        if (!precisePermission) return "precise_permission_missing";
+        if (!systemEnabled) return "system_location_off";
+        if (navigation != null) return MapStartupPolicy.fresh(nowNanos, navigation.timeNanos()) ? "usable" : "navigation_fix_expired";
+        if (latest == null) return "no_accepted_fix";
+        if (latest.source() == CELL || latest.source() == APPROXIMATE) return "source_not_for_navigation";
+        return MapStartupPolicy.navigationAccuracy(latest.accuracy()) ? "awaiting_precise_fix" : "accuracy_over_100m";
+    }
 }

@@ -64,6 +64,7 @@ public final class NavigationService extends Service implements JourneyControlle
             if (!stopping) {
                 if (!navigationAllowed()) { journey.end(); return; }
                 feed.maintain();
+                Diagnostics.fixState("navigation", fixes, precisePermission(), locationEnabled());
                 journey.refreshGuidance();
             }
             publish();
@@ -73,6 +74,7 @@ public final class NavigationService extends Service implements JourneyControlle
 
     @Override public void onCreate() {
         super.onCreate();
+        Diagnostics.record("lifecycle", "owner", "navigation", "state", "create");
         saved = new SavedMapConfig(this);
         journey = new JourneyController(this, this);
         feed = new AmapLocationFeed(this, this::receiveLocation);
@@ -181,6 +183,7 @@ public final class NavigationService extends Service implements JourneyControlle
                 startForeground(NOTIFICATION, notification, types);
             } else startForeground(NOTIFICATION, notification);
             navigating = true; stopping = false; retries = 0;
+            Diagnostics.record("navigation_state", "state", "foreground_started");
             acquireWakeLock();
             feed.maintain();
             start.run();
@@ -223,16 +226,19 @@ public final class NavigationService extends Service implements JourneyControlle
     }
 
     private void receiveLocation(AMapLocation location) {
-        if (!navigating || stopping || !navigationAllowed() || location == null || location.getErrorCode() != 0) return;
+        if (!navigating || stopping || !navigationAllowed() || location == null || location.getErrorCode() != 0) {
+            Diagnostics.record("location_decision", "owner", "navigation", "reason", "inactive_permission_or_sdk_error"); return;
+        }
         if (!MapStartupPolicy.validFix(location.getLatitude(), location.getLongitude(), location.getAccuracy(), location.isFromMockProvider())) return;
         long time = MapStartupPolicy.fixTime(SystemClock.elapsedRealtimeNanos(), System.currentTimeMillis(), location.getElapsedRealtimeNanos(), location.getTime());
-        if (time == 0) return;
+        if (time == 0) { Diagnostics.record("location_decision", "owner", "navigation", "reason", "measurement_expired_or_invalid_time"); return; }
         Location fix = new Location(location.getProvider());
         fix.setLatitude(location.getLatitude()); fix.setLongitude(location.getLongitude());
         fix.setAccuracy(location.getAccuracy()); fix.setTime(location.getTime()); fix.setElapsedRealtimeNanos(time);
         if (location.hasSpeed()) fix.setSpeed(location.getSpeed());
         if (location.hasBearing()) fix.setBearing(location.getBearing());
-        fixes.offer(fix, time, location.getAccuracy(), location.getLocationType(), precisePermission());
+        boolean accepted = fixes.offer(fix, time, location.getAccuracy(), location.getLocationType(), precisePermission());
+        Diagnostics.record("location_decision", "owner", "navigation", "accepted", accepted, "reason", accepted ? "accepted" : "source_or_order_rejected");
     }
 
     @Override public void finished() {
@@ -246,6 +252,7 @@ public final class NavigationService extends Service implements JourneyControlle
     }
 
     private void shutdownForeground() {
+        if (navigating) Diagnostics.record("navigation_state", "state", "foreground_stopped");
         navigating = false; stopping = false; pendingStart = null;
         handler.removeCallbacks(tick); handler.removeCallbacks(stopDeadline); handler.removeCallbacks(reconnect);
         reconnecting = false;
@@ -261,11 +268,13 @@ public final class NavigationService extends Service implements JourneyControlle
     @Override public void found(BluetoothDevice device) { if (view != null) view.found(device); }
     @Override public void ready() {
         handler.removeCallbacks(reconnect); reconnecting = false; retries = 0;
+        Diagnostics.record("ble_state", "state", "ready");
         status("圆屏已连接 · 实时导航协议 v3"); publish();
     }
     @Override public void acknowledged(int sequence) { }
     @Override public void disconnected() {
         if (destroyed) return;
+        Diagnostics.record("ble_state", "state", "disconnected");
         status("圆屏已断开");
         if (!navigating || stopping || !canReconnect() || reconnecting) return;
         reconnecting = true;

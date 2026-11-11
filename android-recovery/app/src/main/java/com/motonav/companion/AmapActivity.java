@@ -98,6 +98,7 @@ public final class AmapActivity extends Activity {
         label("摩托服务需高德授权。导航期间支持锁屏定位和已配对圆屏。",12);
         label("Android Key绑定包名："+getPackageName()+"\n本安装签名SHA1："+certificateSha1(),12);
         button("应用更新",()->startActivity(new Intent(this,UpdateActivity.class)));
+        button("定位诊断 / 实时日志",()->startActivity(new Intent(this,DiagnosticsActivity.class)));
         button("返回模拟功能（非真实导航）", () -> {
             if (NavigationService.navigating) { status.setText("请先结束当前导航，再进入模拟功能。"); return; }
             if (navigationService != null) navigationService.disconnectScreen();
@@ -343,7 +344,10 @@ public final class AmapActivity extends Activity {
     }
 
     private void handleLocation(AMapLocation location) {
-        if (!foreground || !consent || map == null || !locationRequested) return;
+        if (!foreground || !consent || map == null || !locationRequested) {
+            Diagnostics.record("location_decision", "owner", "map", "reason", "lifecycle_blocked", "foreground", foreground, "consent", consent, "map_ready", map != null, "requested", locationRequested);
+            return;
+        }
         boolean precise = hasPrecisePermission();
         if ((!precise && !hasApproximatePermission()) || !systemLocationEnabled()) {
             locationPermission(false);
@@ -354,23 +358,30 @@ public final class AmapActivity extends Activity {
             return;
         }
 
+        String decision = "duplicate_or_older"; boolean accepted = false;
         if (location == null) {
+            decision = "null_result";
             locationProblem = "尚未收到定位结果，正在继续获取。";
         } else if (location.getErrorCode() != 0) {
+            decision = "sdk_error";
             locationProblem = MapStartupPolicy.locationError(location.getErrorCode());
         } else if (!MapStartupPolicy.validFix(location.getLatitude(), location.getLongitude(),
                 location.getAccuracy(), location.isFromMockProvider())) {
+            decision = "invalid_or_mock";
             locationProblem = "收到无效或模拟位置，正在等待新定位。";
         } else {
             long time = MapStartupPolicy.fixTime(SystemClock.elapsedRealtimeNanos(), System.currentTimeMillis(),
                     location.getElapsedRealtimeNanos(), location.getTime());
             int source = location.getLocationType();
             if (time == 0 || !MapFixTracker.isLiveSource(source)) {
+                decision = time == 0 ? "measurement_expired_or_invalid_time" : "cached_or_unsupported_source";
                 locationProblem = "收到缓存、过期或无法确认来源的位置，正在等待新定位。";
             } else if (fixes.offer(snapshot(location, time), time, location.getAccuracy(), source, precise)) {
+                accepted = true; decision = "accepted";
                 locationProblem = null;
             }
         }
+        Diagnostics.record("location_decision", "owner", "map", "reason", decision, "accepted", accepted);
         renderLocation(precise);
     }
 
@@ -388,6 +399,7 @@ public final class AmapActivity extends Activity {
     }
 
     private void renderLocation(boolean precise) {
+        Diagnostics.fixState("map", fixes, precise, systemLocationEnabled());
         long now = SystemClock.elapsedRealtimeNanos();
         MapFixTracker.Fix<Location> observed = fixes.latest(now);
         MapFixTracker.Fix<Location> reliable = fixes.navigation(now, precise, true);
@@ -426,6 +438,7 @@ public final class AmapActivity extends Activity {
     }
 
     private void locationPermission(boolean userRetry) {
+        if (userRetry) Diagnostics.record("location_retry", "owner", "map", "foreground", foreground, "consent", consent, "requested", locationRequested);
         if (!foreground || map == null || !consent || permissionPending) return;
         boolean precise = hasPrecisePermission();
         boolean approximate = hasApproximatePermission();
@@ -477,6 +490,7 @@ public final class AmapActivity extends Activity {
     @Override protected void onResume() {
         super.onResume();
         foreground = true;
+        Diagnostics.record("lifecycle", "owner", "map", "state", "resume");
         if (map == null) initialize();
         else {
             map.onResume();
@@ -489,6 +503,7 @@ public final class AmapActivity extends Activity {
 
     @Override protected void onPause() {
         foreground = false;
+        Diagnostics.record("lifecycle", "owner", "map", "state", "pause");
         handler.removeCallbacks(freshness);
         stopLocation();
         if (navigationService != null) navigationService.detach(navigationView);
