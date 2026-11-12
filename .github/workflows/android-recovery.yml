@@ -59,10 +59,16 @@ jobs:
       - name: Build 1.75C navigation receiver
         uses: espressif/esp-idf-ci-action@v1
         with:
-          esp_idf_version: v5.5.1
+          esp_idf_version: v5.5.4
           target: esp32s3
           path: moto_esp32
-          command: idf.py build
+          # Match the measured local toolchain. Older resolver versions can
+          # introduce a second, newer LVGL while reconfiguring this lockfile.
+          command: >-
+            python -m pip install idf-component-manager==2.4.10 &&
+            idf.py reconfigure &&
+            test "$(cat managed_components/lvgl__lvgl/.component_hash)" = "184e532558c1c45fefed631f3e235423d22582aafb4630f3e8885c35281a49ae" &&
+            idf.py build
       - name: LVGL layouts, map animation and navigation takeover
         run: |
           cmake -S moto_esp32/tests/lvgl_host -B moto_esp32/build-host
