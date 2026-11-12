@@ -9,6 +9,7 @@ static uint64_t clock_ms;
 static std::array<uint16_t, 466 * 466> pixels;
 static std::array<uint16_t, 466 * 50> buffer;
 int64_t esp_timer_get_time() { return static_cast<int64_t>(clock_ms * 1000); }
+void advance_host_clock(uint32_t milliseconds) { clock_ms += milliseconds; lv_tick_inc(milliseconds); }
 static void flush(lv_display_t *display, const lv_area_t *area, uint8_t *data) {
     auto input = reinterpret_cast<uint16_t *>(data);
     for (int y = area->y1; y <= area->y2; ++y)
@@ -27,7 +28,6 @@ static void save(lv_display_t *display, const std::filesystem::path &path) {
     }
     if (!file) std::abort();
 }
-#if MOTONAV_AUTORUN_BENCH
 static bool contains_label(lv_obj_t *object, const char *text) {
     if (lv_obj_check_type(object, &lv_label_class) && std::strcmp(lv_label_get_text(object), text) == 0) return true;
     for (uint32_t i = 0; i < lv_obj_get_child_count(object); ++i)
@@ -40,7 +40,6 @@ static void require_label(const char *text) {
         std::exit(1);
     }
 }
-#endif
 int main(int argc, char **argv) {
     if (argc != 2) return 2;
     std::filesystem::path directory(argv[1]); std::filesystem::create_directories(directory);
@@ -57,11 +56,23 @@ int main(int argc, char **argv) {
     save(display, directory / "automatic-full.ppm");
     require_label("FULL FRAME");
     clock_ms += 43000; lv_tick_inc(43000);
+    save(display, directory / "automatic-map.ppm");
+    require_label("ROUTE MAP / SIMULATED");
+    clock_ms += 43000; lv_tick_inc(43000);
     save(display, directory / "automatic-finished.ppm");
     require_label("CONNECT PHONE");
     std::cout << "PASS: automatic test switches workloads and restores normal display\n";
 #endif
+#if MOTONAV_AUTORUN_MAP_BENCH
+    save(display, directory / "automatic-map.ppm");
+    require_label("ROUTE MAP / SIMULATED");
+    clock_ms += 43000; lv_tick_inc(43000);
+    save(display, directory / "automatic-finished.ppm");
+    require_label("CONNECT PHONE");
+    std::cout << "PASS: map-only automatic test restores normal display\n";
+#endif
     save(display, directory / "idle.ppm");
+    auto normal_children = lv_obj_get_child_count(lv_screen_active());
     snapshot.linked = snapshot.encrypted = snapshot.subscribed = snapshot.handshaken = true;
     snapshot.has_guidance = snapshot.stream_fresh = true;
     snapshot.guidance = {motonav::Live, 3, 250, 12000, 1000, 50};
@@ -77,7 +88,17 @@ int main(int argc, char **argv) {
     save(display, directory / "pairing.ppm");
     snapshot = {};
     lv_obj_send_event(lv_screen_active(), LV_EVENT_LONG_PRESSED, nullptr);
+    // Automatic builds retain their last workload. Cycle until the map is active.
+    for (int i=0;i<3 && !contains_label(lv_screen_active(), "ROUTE MAP / SIMULATED");++i) {
+        lv_obj_send_event(lv_screen_active(), LV_EVENT_SHORT_CLICKED, nullptr);
+        save(display, directory / "display-test.ppm");
+    }
     save(display, directory / "display-test.ppm");
+    require_label("ROUTE MAP / SIMULATED");
+    auto map_pixels = pixels;
+    clock_ms += 500; lv_tick_inc(500);
+    save(display, directory / "map-moving.ppm");
+    if (pixels == map_pixels) { std::cerr << "Map did not animate\n"; return 1; }
     snapshot.linked = snapshot.encrypted = snapshot.subscribed = snapshot.handshaken = true;
     snapshot.has_guidance = snapshot.stream_fresh = true;
     snapshot.guidance = {motonav::Live, 3, 250, 12000, 1000, 50};
@@ -86,5 +107,21 @@ int main(int argc, char **argv) {
         std::cerr << "Live guidance did not completely replace the display test\n";
         return 1;
     }
-    std::cout << "PASS: eight LVGL layout previews and live navigation interrupts the test; no hardware/FPS claim\n";
+    if (lv_obj_get_child_count(lv_screen_active()) != normal_children) return 1;
+    snapshot = {};
+    lv_obj_send_event(lv_screen_active(), LV_EVENT_LONG_PRESSED, nullptr);
+    save(display, directory / "map-before-pairing.ppm");
+    require_label("ROUTE MAP / SIMULATED");
+    snapshot.pairing = true; snapshot.passkey = 123;
+    save(display, directory / "pairing-interrupts-map.ppm");
+    require_label("PAIR WITH PHONE");
+    if (lv_obj_get_child_count(lv_screen_active()) != normal_children) return 1;
+    snapshot = {};
+    lv_obj_send_event(lv_screen_active(), LV_EVENT_LONG_PRESSED, nullptr);
+    save(display, directory / "map-before-exit.ppm");
+    lv_obj_send_event(lv_screen_active(), LV_EVENT_LONG_PRESSED, nullptr);
+    save(display, directory / "manual-exit.ppm");
+    require_label("CONNECT PHONE");
+    if (lv_obj_get_child_count(lv_screen_active()) != normal_children) return 1;
+    std::cout << "PASS: animated map, pairing/live preemption, manual exit and canvas cleanup; no hardware/FPS claim\n";
 }

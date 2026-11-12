@@ -20,7 +20,7 @@ int main() {
     StripStream stream;
     assert(stream.begin(0, 0, 466, 50) == StripStream::Start); stream.submitted(50);
     assert(stream.begin(0, 50, 466, 100) == StripStream::Continue); stream.submitted(100);
-    assert(stream.begin(20, 100, 40, 120) == StripStream::Partial);
+    assert(stream.begin(20, 100, 40, 120) == StripStream::Start);
     assert(stream.begin(0, 100, 466, 150) == StripStream::Start); stream.submitted(150);
     assert(stream.begin(0, 200, 466, 250) == StripStream::Start); // Gap is not a continuation.
     assert(stream.begin(0, 250, 466, 300) == StripStream::Start); // Previous write failed.
@@ -28,6 +28,15 @@ int main() {
     assert(stream.begin(0, 0, 466, 50) == StripStream::Start); // New frame resets the window.
     stream.submitted(466);
     assert(stream.begin(0, 0, 466, 50) == StripStream::Start);
+    assert(stream.begin(72, 100, 392, 172) == StripStream::Start); stream.submitted(172);
+    assert(stream.begin(72, 172, 392, 244) == StripStream::Continue); stream.submitted(244);
+    assert(stream.begin(74, 244, 392, 300) == StripStream::Start); // Changed columns.
+    assert(stream.begin(72, 100, 392, 172) == StripStream::Start); // Failed submission.
+    stream.submitted(173); // Incorrect completion cannot authorize continuation.
+    assert(stream.begin(72, 172, 392, 244) == StripStream::Start); stream.submitted(244);
+    assert(stream.begin(-2, 244, 392, 300) == StripStream::Partial); stream.submitted(300);
+    assert(stream.begin(72, 300, 392, 400) == StripStream::Start); stream.submitted(400);
+    assert(stream.begin(72, 100, 392, 172) == StripStream::Start); // New map frame.
 
     ScreenSnapshot s;
     assert(screen_mode(s) == ScreenMode::Disconnected);

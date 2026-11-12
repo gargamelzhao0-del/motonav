@@ -54,6 +54,8 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
+      - name: Firmware protocol, display model and raster checks
+        run: python3 moto_esp32/tests/run_host_tests.py
       - name: Build 1.75C navigation receiver
         uses: espressif/esp-idf-ci-action@v1
         with:
@@ -61,6 +63,11 @@ jobs:
           target: esp32s3
           path: moto_esp32
           command: idf.py build
+      - name: LVGL layouts, map animation and navigation takeover
+        run: |
+          cmake -S moto_esp32/tests/lvgl_host -B moto_esp32/build-host
+          cmake --build moto_esp32/build-host -j2
+          ctest --test-dir moto_esp32/build-host --output-on-failure
       - uses: actions/upload-artifact@v4
         with:
           name: motonav-175c-navigation-test

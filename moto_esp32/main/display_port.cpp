@@ -21,9 +21,13 @@ esp_err_t draw_strip(lv_display_t *, esp_lcd_panel_handle_t panel, int x1, int y
     auto plan = stream.strips.begin(x1, y1, x2, y2);
     if (plan == StripStream::Partial) return esp_lcd_panel_draw_bitmap(panel, x1, y1, x2, y2, pixels);
     if (plan == StripStream::Start) {
-        // Same 6-pixel column offset as the BSP. Keep a window through the
-        // bottom of the screen so following bands can use CO5300 RAMWRC.
-        const uint8_t columns[]{0x00, 0x06, 0x01, 0xd7};
+        // Same 6-pixel column offset as the BSP. The window uses the actual
+        // dirty rectangle's columns and extends downward for following bands.
+        // This also pipelines partial map updates instead of draining SPI for
+        // two address commands before every band.
+        const uint16_t left = static_cast<uint16_t>(x1 + 6), right = static_cast<uint16_t>(x2 + 5);
+        const uint8_t columns[]{static_cast<uint8_t>(left >> 8), static_cast<uint8_t>(left),
+                                static_cast<uint8_t>(right >> 8), static_cast<uint8_t>(right)};
         const uint8_t rows[]{static_cast<uint8_t>(y1 >> 8), static_cast<uint8_t>(y1), 0x01, 0xd1};
         ESP_RETURN_ON_ERROR(esp_lcd_panel_io_tx_param(stream.io, 0x02002a00, columns, sizeof(columns)), "display", "columns");
         ESP_RETURN_ON_ERROR(esp_lcd_panel_io_tx_param(stream.io, 0x02002b00, rows, sizeof(rows)), "display", "rows");
@@ -31,11 +35,11 @@ esp_err_t draw_strip(lv_display_t *, esp_lcd_panel_handle_t panel, int x1, int y
     // RAMWRC is also used by the board vendor's Arduino QSPI driver. Keep
     // the adapter's actual DMA completion callback and FPS counter intact.
     int command = plan == StripStream::Continue ? 0x32003c00 : 0x32002c00;
-    ESP_RETURN_ON_ERROR(esp_lcd_panel_io_tx_color(stream.io, command, pixels, (y2 - y1) * 466 * 2), "display", "pixels");
+    ESP_RETURN_ON_ERROR(esp_lcd_panel_io_tx_color(stream.io, command, pixels, (y2 - y1) * (x2 - x1) * 2), "display", "pixels");
     stream.strips.submitted(y2);
     return ESP_OK;
 }
-#if MOTONAV_AUTORUN_BENCH
+#if MOTONAV_AUTORUN_BENCH || MOTONAV_AUTORUN_MAP_BENCH
 void profile_frame(lv_event_t *event) {
     static int64_t frame_start, flush_start, wait_start;
     static int64_t render_us, flush_us, wait_us;
@@ -97,7 +101,7 @@ lv_display_t *start_display() {
     callbacks.custom_draw_bitmap = draw_strip;
     ESP_ERROR_CHECK(esp_lv_adapter_set_draw_bitmap_callbacks(display, &callbacks, &panel_stream));
     lv_display_add_event_cb(display, round_area, LV_EVENT_INVALIDATE_AREA, nullptr);
-#if MOTONAV_AUTORUN_BENCH
+#if MOTONAV_AUTORUN_BENCH || MOTONAV_AUTORUN_MAP_BENCH
     lv_display_add_event_cb(display, profile_frame, LV_EVENT_ALL, nullptr);
 #endif
 

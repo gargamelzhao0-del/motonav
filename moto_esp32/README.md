@@ -1,8 +1,12 @@
 # MotoNav 1.75C 导航接收固件
 
-固件版本 **0.2.1**，配套支持 NAV3 的 Android 0.7.0 及以后版本，将真实转向、距离、预计时间及车速显示在 Waveshare ESP32-S3-Touch-AMOLED-1.75C 上。本地开发以 ESP-IDF 5.5.4、官方 BSP 3.0.0、LVGL 9.5.0 为基线，依赖版本由 `dependencies.lock` 记录。界面当前使用英文，支持左右转、斜转、急转、直行及保持左/右方向的箭头，其他转向以明确文字表示。
+固件版本 **0.2.2**，配套支持 NAV3 的 Android 0.7.0 及以后版本，将真实转向、距离、预计时间及车速显示在 Waveshare ESP32-S3-Touch-AMOLED-1.75C 上。本地开发以 ESP-IDF 5.5.4、官方 BSP 3.0.0、LVGL 9.5.0 为基线，依赖版本由 `dependencies.lock` 记录。界面当前使用英文，支持左右转、斜转、急转、直行及保持左/右方向的箭头，其他转向以明确文字表示。
+
+0.2.2 增加独立的 `ROUTE MAP / SIMULATED` 性能页：320 × 300 RGB565 地图区域、局部坐标投影和裁剪、路线平移/旋转、像素扫描线绘制及连续区域传屏。此页不生成真实导航报文，也尚未接入手机路线。手机联调步骤见 [PHONE_INTEGRATION.md](PHONE_INTEGRATION.md)。
 
 代码在此目录独立开发，App 端联调约定见 [APP_PROTOCOL.md](APP_PROTOCOL.md)。`main/navigation_protocol.h` 负责接收与时效，`main/display_model.h` 负责显示状态，`main/navigation_ui.cpp` 负责 LVGL 界面，`main/display_port.cpp` 负责显示缓冲及传输，`main/main.cpp` 负责 BLE 生命周期。请用 0.2.1 替代 0.2.0：首次上板发现 Notify 特征缺少 NimBLE 必需的访问回调，会在注册服务时重启，现已修复并通过实机服务枚举及版本读取验证。
+
+后续产品分工、原型地图移植、40 FPS 预算、共享协议及远程升级路线见 [PROJECT_ARCHITECTURE.md](PROJECT_ARCHITECTURE.md)。该文档为后续设计，不表示全部能力已实现。
 
 手机负责定位和高德摩托算路。启动导航后由前台服务维持定位及 BLE，手机锁屏和地图页面重建后可以重新附着到同一导航会话。弱定位时保留路线，持续等待新的可信位置及导航指令。结束导航、撤回授权或进程终止后结束该会话。
 
@@ -18,19 +22,21 @@
 
 打开 Android 的真实地图页，设置高德 Key 和权限，点“连接圆屏”选择对应 MotoNav 设备，在系统配对窗口输入屏幕的六位码。选择真实目的地并完成摩托算路后，点“开始/结束”。手机支持发送导航状态和数据质量状态，接收端对重复包、CRC 错误、过期数据及旧会话分别处理。
 
-此版交付导航仪表、细分连接/时效状态、重新配对恢复、接收计数以及独立显示性能测试页。动态地图、中文路名字图和云端信息消息尚未实现。固件使用单应用分区，远程固件更新需后续引入升级分区和恢复流程。
+此版交付导航仪表、细分连接/时效状态、重新配对恢复、接收计数以及独立显示性能测试页。真实导航地图输入、中文路名字图和云端信息消息尚未实现。固件使用单应用分区，远程固件更新需后续引入升级分区和恢复流程。
 
 ## 40 FPS 的验证方式
 
-LVGL 刷新和界面服务周期为 16 ms，保留官方 BSP 的 QSPI 40 MHz，使用两块 50 行内部 RAM 绘制缓冲，LVGL 任务固定在 CPU1，NimBLE 固定在 CPU0。静态背景预先缓存到 RGB565 图像；连续全宽条带使用 CO5300 Memory Write Continue，其他矩形仍走官方面板驱动。CPU 使用 32 KB 指令缓存及 64 KB 数据缓存。数字和转向只在内容变化时重绘，不能把静态页面的低刷新率解释为性能不足。
+LVGL 刷新和界面服务周期为 16 ms，保留官方 BSP 的 QSPI 40 MHz，使用两块 50 行内部 RAM 绘制缓冲，LVGL 任务固定在 CPU1，NimBLE 固定在 CPU0。静态背景预先缓存到 RGB565 图像；列范围相同、行连续的条带使用 CO5300 Memory Write Continue，窗口变化、间断或提交失败时重新设定地址。CPU 使用 32 KB 指令缓存及 64 KB 数据缓存。数字和转向只在内容变化时重绘，不能把静态页面的低刷新率解释为性能不足。
 
-在未显示有效导航时长按屏幕进入 `DISPLAY TEST / NOT NAVIGATION`；短按切换 `PARTIAL HUD` 与 `FULL FRAME`，长按返回。配对或有效导航到来会自动退出测试。测试只改变本地显示，不生成 GPS、车速或导航报文。
+在未显示有效导航时长按屏幕进入 `DISPLAY TEST / NOT NAVIGATION`；短按依次切换 `PARTIAL HUD`、`FULL FRAME`、`ROUTE MAP / SIMULATED`，长按返回。配对或有效导航到来会自动退出测试并释放地图缓冲。测试只改变本地显示，不生成 GPS、车速或导航报文。
 
 FPS 来自 `esp_lv_adapter` 在最后一块像素传输完成时的计数，不是 16 ms 定时器次数。预热后显示当前 FPS、已采样窗口最低值和平均值，每 5 次采样打印 `display_test` 日志。每种负载至少连续测量 30 秒，记录最低值是否达到 40，以及有无撕裂、触摸丢失、BLE 延迟或花屏。全屏传输结果与局部 HUD 结果必须分开报告；即使全屏测试通过，也不能代表未来动态地图必然达到同一帧率。
 
 2026-11-12 本机实测：每项预热后约 40.5 秒、36 个采样点，局部 HUD 最低/平均 **59/59 FPS**，强制全屏重绘最低/平均 **31/31 FPS**（窗口值 31–32）。当前仪表应采用局部刷新；全屏 40 FPS 尚未达到。这些数字来自 BLE 广播空闲时的显示测试，不能替代实际手机导航负载测试。具体证据见 [HARDWARE_TEST_2026-11-12.md](HARDWARE_TEST_2026-11-12.md)。
 
-`CONFIG_MOTONAV_BOOT_DISPLAY_TEST` 可使台架构建启动后直接进入手动测试；默认关闭。执行 `pwsh -File tools/build.ps1 -DisplayBench`（或 `idf.py -DMOTONAV_AUTORUN_BENCH=ON build`）可生成自动测试版：每种负载运行 43 秒（含 2.5 秒预热），完成两种负载后返回正常界面；任何触摸操作取消自动切换，配对或有效导航会结束测试。再次执行不带 `-DisplayBench` 的构建脚本，或显式设置 `-DMOTONAV_AUTORUN_BENCH=OFF`，恢复正式构建；正式交付同时关闭 Kconfig 中的开机手动测试选项。
+0.2.2 延长回归至每项预热后约 120.5 秒：局部 HUD 最低/平均 **59/60 FPS**，强制全屏 **31/31 FPS**，320 × 300 动态地图 **41/42 FPS**。地图使用 7 个路线点和 22 条背景道路线段，BLE 仍为广播空闲；不是任意复杂度或真实手机导航并发的保证。完整范围、统计方式与优化记录见 [HARDWARE_TEST_0.2.2.md](HARDWARE_TEST_0.2.2.md)。
+
+`CONFIG_MOTONAV_BOOT_DISPLAY_TEST` 可使台架构建启动后直接进入手动测试；默认关闭。执行 `pwsh -File tools/build.ps1 -DisplayBench` 生成三种负载依次运行的自动测试版；`-MapBench` 只运行地图。每项默认 43 秒（含 2.5 秒预热），可用 `-BenchSeconds 123` 延长，结束后回到正常界面；任何触摸操作取消自动切换，配对或有效导航会结束测试。再次执行不带测试参数的构建脚本恢复正式构建；脚本会同时关闭两个自动测试 CMake 选项，正式交付还须关闭 Kconfig 中的开机手动测试选项。
 
 串口日志可用 `python tools/capture_serial.py --port COM21 --seconds 100 --output dist/serial.log` 限时采集。仅在已确认目标设备并允许重启时添加 `--reset-usb`；输出文件必须不存在，工具不扫描或访问其他串口。
 

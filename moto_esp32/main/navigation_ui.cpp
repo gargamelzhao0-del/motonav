@@ -1,9 +1,13 @@
 #include "navigation_ui.h"
+#include "route_map.h"
 #include "esp_lv_adapter.h"
 #include "esp_timer.h"
 #include "esp_log.h"
 #include "src/misc/cache/instance/lv_image_cache.h"
 #include <climits>
+#ifndef MOTONAV_BENCH_SECONDS
+#define MOTONAV_BENCH_SECONDS 43
+#endif
 
 namespace motonav {
 namespace {
@@ -15,10 +19,38 @@ lv_obj_t *top, *title, *number, *speed, *remaining, *footer, *arrow, *test_marke
 lv_point_precise_t arrow_points[6];
 int last_icon = -1;
 uint32_t last_title_color = 0;
-bool testing = false, full_frame = false, automatic_test = false;
+enum class Workload { Partial, Full, Map };
+Workload workload = Workload::Partial;
+bool testing = false, automatic_test = false;
+lv_obj_t *map_canvas = nullptr;
 uint64_t test_started = 0, last_sample = 0;
 uint32_t minimum_fps = UINT32_MAX, samples = 0;
 uint64_t total_fps = 0;
+uint64_t map_render_us = 0, map_render_max_us = 0, map_frames = 0;
+
+const char *workload_name() {
+    return workload == Workload::Map ? "map320x300" : workload == Workload::Full ? "full" : "partial";
+}
+void benchmark_layout() {
+    bool map = testing && workload == Workload::Map;
+    if (map && !map_canvas) {
+        map_canvas = create_route_map(lv_screen_active(), 320, 300);
+        if (map_canvas) lv_obj_set_pos(map_canvas, 72, 100);
+    } else if (!map && map_canvas) {
+        lv_obj_delete(map_canvas); map_canvas = nullptr;
+    }
+    lv_obj_set_flag(speed, LV_OBJ_FLAG_HIDDEN, map);
+    lv_obj_set_flag(remaining, LV_OBJ_FLAG_HIDDEN, map);
+    lv_obj_set_flag(arrow, LV_OBJ_FLAG_HIDDEN, map);
+    lv_obj_set_flag(test_marker, LV_OBJ_FLAG_HIDDEN, !testing || map);
+    lv_obj_set_y(title, map ? 78 : 88);
+    lv_obj_set_style_text_font(title, map ? &lv_font_montserrat_20 : &lv_font_montserrat_28, 0);
+    lv_obj_set_y(number, map ? 405 : 266);
+    lv_obj_set_style_text_font(number, map ? &lv_font_montserrat_20 : &lv_font_montserrat_48, 0);
+    lv_obj_set_y(footer, map ? 434 : 405);
+    lv_obj_set_width(footer, map ? 180 : 285);
+    last_icon = -1;
+}
 
 uint64_t milliseconds() { return static_cast<uint64_t>(esp_timer_get_time() / 1000); }
 void text(lv_obj_t *object, const char *value) {
@@ -86,26 +118,32 @@ void draw_arrow(int icon) {
     lv_line_set_points(arrow, arrow_points, shape.count);
 }
 void reset_benchmark() {
+    benchmark_layout();
     test_started = last_sample = milliseconds();
     minimum_fps = UINT32_MAX; samples = 0; total_fps = 0;
+    map_render_us = map_render_max_us = map_frames = 0;
     ESP_ERROR_CHECK(esp_lv_adapter_fps_stats_reset(display));
     text(number, "-- FPS"); text(speed, "WARMING UP");
     text(remaining, "Target: at least 40 FPS");
-    ESP_LOGI("display_test", "started workload=%s automatic=%d", full_frame ? "full" : "partial", automatic_test);
+    ESP_LOGI("display_test", "started workload=%s automatic=%d map_buffer=%s", workload_name(), automatic_test,
+             workload == Workload::Map ? (map_canvas ? "ready" : "allocation_failed") : "unused");
 }
 void report_benchmark() {
     if (!samples) return;
     ESP_LOGI("display_test", "completed workload=%s min=%lu avg=%lu samples=%lu measured_ms=%llu",
-        full_frame ? "full" : "partial", static_cast<unsigned long>(minimum_fps),
+        workload_name(), static_cast<unsigned long>(minimum_fps),
         static_cast<unsigned long>(total_fps / samples), static_cast<unsigned long>(samples),
         static_cast<unsigned long long>(milliseconds() - test_started - 2500));
+    if (map_frames) ESP_LOGI("map_profile", "frames=%llu draw_avg_us=%llu draw_max_us=%llu",
+        static_cast<unsigned long long>(map_frames), static_cast<unsigned long long>(map_render_us / map_frames),
+        static_cast<unsigned long long>(map_render_max_us));
 }
 void set_test(bool enabled) {
     if (!enabled && testing) report_benchmark();
     testing = enabled;
     if (!enabled) automatic_test = false;
-    lv_obj_set_flag(test_marker, LV_OBJ_FLAG_HIDDEN, !enabled);
     if (enabled) reset_benchmark();
+    else benchmark_layout();
     last_icon = -1;
 }
 void touch(lv_event_t *event) {
@@ -115,7 +153,7 @@ void touch(lv_event_t *event) {
     }
     else if (lv_event_get_code(event) == LV_EVENT_SHORT_CLICKED && testing) {
         automatic_test = false; report_benchmark();
-        full_frame = !full_frame; reset_benchmark();
+        workload = static_cast<Workload>((static_cast<unsigned>(workload) + 1) % 3); reset_benchmark();
     }
 }
 void refresh(lv_timer_t *) {
@@ -123,24 +161,40 @@ void refresh(lv_timer_t *) {
     ScreenMode mode = screen_mode(state);
     uint64_t now = milliseconds();
     if (testing && !may_test_display(state)) set_test(false);
-    if (testing && automatic_test && now - test_started >= 43000) {
-        if (!full_frame) {
-            report_benchmark(); full_frame = true; reset_benchmark();
+    if (testing && automatic_test && now - test_started >= MOTONAV_BENCH_SECONDS * 1000ULL) {
+        if (workload != Workload::Map) {
+            report_benchmark();
+            workload = static_cast<Workload>(static_cast<unsigned>(workload) + 1); reset_benchmark();
         } else {
             set_test(false);
             ESP_LOGI("display_test", "automatic test finished; normal navigation display restored");
         }
     }
+    // A workload change can create its canvas and reset counters after the
+    // timestamp above. Refresh it before unsigned elapsed-time calculations.
+    now = milliseconds();
     if (testing) {
         text(top, "DISPLAY TEST / NOT NAVIGATION");
-        text(title, full_frame ? "FULL FRAME" : "PARTIAL HUD");
-        text(footer, "Tap: workload  |  Hold: back");
-        draw_arrow(9);
-        // A 240 x 12 moving marker exercises partial invalidation; no simulated GPS is produced.
-        unsigned phase = static_cast<unsigned>((now - test_started) % 2000);
-        int y = 145 + static_cast<int>((phase < 1000 ? phase : 2000 - phase) * 110 / 1000);
-        lv_obj_set_y(test_marker, y);
-        if (full_frame) lv_obj_invalidate(lv_screen_active());
+        bool map = workload == Workload::Map;
+        text(title, map ? "ROUTE MAP / SIMULATED" : workload == Workload::Full ? "FULL FRAME" : "PARTIAL HUD");
+        text(footer, map ? "Tap next / Hold exit" : "Tap: workload  |  Hold: back");
+        if (map) {
+            if (!map_canvas) { text(title, "MAP MEMORY ERROR"); return; }
+            uint64_t begin = static_cast<uint64_t>(esp_timer_get_time());
+            render_map_benchmark(map_canvas, now - test_started);
+            uint64_t duration = static_cast<uint64_t>(esp_timer_get_time()) - begin;
+            if (now - test_started >= 2500) {
+                map_render_us += duration; ++map_frames;
+                if (duration > map_render_max_us) map_render_max_us = duration;
+            }
+        } else {
+            draw_arrow(9);
+            // A 240 x 12 moving marker exercises partial invalidation; no simulated GPS is produced.
+            unsigned phase = static_cast<unsigned>((now - test_started) % 2000);
+            int y = 145 + static_cast<int>((phase < 1000 ? phase : 2000 - phase) * 110 / 1000);
+            lv_obj_set_y(test_marker, y);
+            if (workload == Workload::Full) lv_obj_invalidate(lv_screen_active());
+        }
         if (now - last_sample >= 1100) {
             last_sample = now;
             uint32_t fps = 0;
@@ -150,12 +204,16 @@ void refresh(lv_timer_t *) {
             if (now - test_started >= 2500) {
                 if (fps < minimum_fps) minimum_fps = fps;
                 ++samples; total_fps += fps;
+                if (map) {
+                    std::snprintf(value, sizeof(value), "%lu FPS / MIN %lu", static_cast<unsigned long>(fps),
+                                  static_cast<unsigned long>(minimum_fps)); text(number, value);
+                }
                 std::snprintf(value, sizeof(value), "MIN %lu  /  AVG %lu", static_cast<unsigned long>(minimum_fps),
                               static_cast<unsigned long>(total_fps / samples)); text(speed, value);
                 std::snprintf(value, sizeof(value), "%lus measured / target 40", static_cast<unsigned long>((now - test_started - 2500) / 1000));
                 text(remaining, value);
                 if (samples % 5 == 0) ESP_LOGI("display_test", "workload=%s fps=%lu min=%lu avg=%lu samples=%lu",
-                    full_frame ? "full" : "partial", static_cast<unsigned long>(fps), static_cast<unsigned long>(minimum_fps),
+                    workload_name(), static_cast<unsigned long>(fps), static_cast<unsigned long>(minimum_fps),
                     static_cast<unsigned long>(total_fps / samples), static_cast<unsigned long>(samples));
             }
         }
@@ -227,9 +285,12 @@ void create_navigation_ui(lv_display_t *screen_display, const char *device_name,
     speed = label(330, 340, &lv_font_montserrat_28, White);
     remaining = label(374, 330, &lv_font_montserrat_20, Muted);
     footer = label(405, 285, &lv_font_montserrat_16, Muted);
-#if CONFIG_MOTONAV_BOOT_DISPLAY_TEST || MOTONAV_AUTORUN_BENCH
-#if MOTONAV_AUTORUN_BENCH
+#if CONFIG_MOTONAV_BOOT_DISPLAY_TEST || MOTONAV_AUTORUN_BENCH || MOTONAV_AUTORUN_MAP_BENCH
+#if MOTONAV_AUTORUN_BENCH || MOTONAV_AUTORUN_MAP_BENCH
     automatic_test = true;
+#endif
+#if MOTONAV_AUTORUN_MAP_BENCH
+    workload = Workload::Map;
 #endif
     set_test(true);
 #endif

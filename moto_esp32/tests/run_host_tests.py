@@ -24,7 +24,7 @@ with tempfile.TemporaryDirectory(prefix='motonav-firmware-tests-') as directory:
         fixture = output / 'nav3.frames'
         subprocess.run([str(java), '-cp', str(output), 'NavigationProtocolTests', str(fixture)], check=True)
         assert fixture.read_bytes() == (root / 'tests/nav3.frames').read_bytes(), 'Android protocol fixture changed'
-    for name in ['navigation_protocol_test', 'display_model_test']:
+    for name in ['navigation_protocol_test', 'display_model_test', 'map_projection_test', 'map_raster_test']:
         executable = output / (name + ('.exe' if os.name == 'nt' else ''))
         subprocess.run([args.cxx, '-std=c++17', '-Wall', '-Wextra', '-Werror',
                         str(root / 'tests' / (name + '.cpp')), '-o', str(executable)], check=True)
