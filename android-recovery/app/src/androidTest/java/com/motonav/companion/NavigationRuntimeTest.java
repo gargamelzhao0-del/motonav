@@ -118,7 +118,10 @@ public class NavigationRuntimeTest {
             @Override public void onProviderDisabled(String provider) { }
             @Override public void onStatusChanged(String provider,int status,android.os.Bundle extras) { }
         };
-        try {
+        // Foreground-only location permission requires an actually resumed Activity.
+        // Instrumentation running by itself is not evidence that the app is in the foreground.
+        try (ActivityScenario<SdkReplayActivity> scenario = ActivityScenario.launch(SdkReplayActivity.class)) {
+            assertTrue("Virtual GPS provider must be enabled",manager.isProviderEnabled(android.location.LocationManager.GPS_PROVIDER));
             instrumentation.runOnMainSync(() -> manager.requestLocationUpdates(android.location.LocationManager.GPS_PROVIDER,0,0,listener,android.os.Looper.getMainLooper()));
             assertTrue("No framework GPS callbacks from the emulator console trace",received.await(45,TimeUnit.SECONDS));
             Location point = latest.get();

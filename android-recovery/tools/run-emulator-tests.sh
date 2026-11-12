@@ -13,7 +13,7 @@ adb -s "$serial" shell settings put secure location_mode 3
 (
     while true; do
         # Public fixture; a framework GPS callback, not an AMap route or the user's location.
-        adb -s "$serial" emu geo fix 116.481763 39.989614 50
+        adb -s "$serial" emu geo fix 116.481763 39.989614 50 8
         sleep 1
     done
 ) > emulator-evidence/gps-injection.txt 2>&1 &
