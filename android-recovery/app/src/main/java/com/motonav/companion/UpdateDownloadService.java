@@ -77,7 +77,8 @@ public final class UpdateDownloadService extends Service {
                 if (destroyed || operation != token || token.isCancelled()) { if (file != null) file.delete(); return; }
                 operation = null; verifying = false;
                 if (failure == null) { ready = file; bytes = selected.sizeBytes; message = "下载与校验完成，打开更新页面确认安装。"; }
-                else { bytes = repository.partialBytes(selected); message = UpdateActivity.failureMessage(failure) + " 已保留可用断点，可继续下载。"; }
+                else { bytes = repository.partialBytes(selected); message = UpdateActivity.failureMessage(failure)
+                        + (bytes > 0 ? " 已保留可用断点，可继续下载。" : " 可重新下载。"); }
                 persist(); finishForeground();
                 try { getSystemService(NotificationManager.class).notify(NOTICE,notification(false)); } catch (SecurityException ignored) {}
             });

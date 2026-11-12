@@ -69,6 +69,7 @@ final class JourneyController {
     private int retryFailures, retryRequestId = -1;
     private long nextRouteRetryMs = -1;
     private boolean voicePlaying;
+    private final java.util.LinkedHashSet<Integer> settledRouteRequests = new java.util.LinkedHashSet<>();
     private Runnable pendingLocation;
     private final List<LatLng> routePoints = new ArrayList<>();
     private String message = "普通驾车导航 · 输入目的地后点击开始。";
@@ -253,6 +254,7 @@ final class JourneyController {
                 @Override public void onCalculateRouteFailure(AMapCalcRouteResult result){
                     boolean replanning = validReroute(token, engine, result);
                     if (!validPlan(token, engine) && !replanning) return;
+                    if (replanning && result != null) settleRouteRequest(result.getRouteRequestId());
                     Diagnostics.record("route_result", "state", replanning ? "reroute_failed" : "failed", "error", result==null?-1:result.getErrorCode());
                     if (replanning && JourneyState.retryableRouteError(result == null ? -1 : result.getErrorCode())) {
                         beginReroute(token, engine, "network", "路线更新暂未成功，保持导航并等待重试…");
@@ -262,7 +264,13 @@ final class JourneyController {
                     stop((replanning ? "路线更新失败，导航已结束。" : "") + JourneyState.routeError(result==null?-1:result.getErrorCode()));
                 }
                 @Override public void onCalculateRouteSuccess(AMapCalcRouteResult result){
+                    if (result == null) {
+                        if (validPlan(token,engine)) stop("高德未返回有效驾车路线。");
+                        else if (validReroute(token,engine,null)) scheduleRouteRetry("invalid_result");
+                        return;
+                    }
                     if (validReroute(token, engine, result)) {
+                        settleRouteRequest(result.getRouteRequestId());
                         try {
                             // During GPS navigation the SDK owns the active route. selectRouteId is pre-navigation only.
                             if (!replaceRoute(engine.getNaviPath())) { stop("更新后的路线无效，导航已结束。"); return; }
@@ -315,8 +323,8 @@ final class JourneyController {
                 }
                 @Override public void onStopNavi(){if(active()&&engine==navi&&state.active(token))stop("SDK已结束导航。");}
                 @Override public void onArriveDestination(){if(active()&&engine==navi&&state.active(token))stop("已到达目的地。", NavigationFrame.ARRIVED);}
-                @Override public void onReCalculateRouteForYaw(){beginReroute(token,engine,"yaw","已偏离路线，正在自动重新规划…");}
-                @Override public void onReCalculateRouteForTrafficJam(){beginReroute(token,engine,"traffic","前方路况变化，正在自动更新路线…");}
+                @Override public void onReCalculateRouteForYaw(){sdkReroute(token,engine,"yaw","已偏离路线，正在自动重新规划…");}
+                @Override public void onReCalculateRouteForTrafficJam(){sdkReroute(token,engine,"traffic","前方路况变化，正在自动更新路线…");}
                 @Override public void onGpsSignalWeak(boolean weak) {
                     if (!active() || engine != navi || !state.active(token)) return;
                     gpsWeak = weak;
@@ -332,9 +340,24 @@ final class JourneyController {
     }
     private boolean validPlan(long token,AMapNavi engine){return active()&&engine==navi&&state.planning(token);}
     private boolean validReroute(long token, AMapNavi engine, AMapCalcRouteResult result) {
-        return active() && engine == navi && state.active(token) && state.phase() == JourneyState.Phase.NAVIGATING
-                && (result == null ? state.rerouting() : result.getCalcRouteType() != ReCalculateRouteType.ROUTE_TYPE_COMMON
-                    && (retryRequestId < 0 || result.getRouteRequestId() == retryRequestId));
+        if (!active() || engine != navi || !state.active(token) || state.phase() != JourneyState.Phase.NAVIGATING) return false;
+        if (result == null) return state.rerouting();
+        if (result.getCalcRouteType() == ReCalculateRouteType.ROUTE_TYPE_COMMON || settledRouteRequests.contains(result.getRouteRequestId())) return false;
+        if (retryRequestId >= 0 && result.getRouteRequestId() != retryRequestId) {
+            settleRouteRequest(result.getRouteRequestId()); return false;
+        }
+        return true;
+    }
+    private void settleRouteRequest(int id) {
+        if (id <= 0) return;
+        settledRouteRequests.add(id);
+        if (settledRouteRequests.size() > 64) settledRouteRequests.remove(settledRouteRequests.iterator().next());
+    }
+    private void sdkReroute(long token, AMapNavi engine, String reason, String text) {
+        if (!active() || engine != navi || state.phase() != JourneyState.Phase.NAVIGATING || !state.active(token)) return;
+        if (retryRequestId >= 0 || nextRouteRetryMs >= 0) state.retryReroute(token,SystemClock.elapsedRealtime());
+        settleRouteRequest(retryRequestId); retryRequestId = -1; nextRouteRetryMs = -1;
+        beginReroute(token,engine,reason,text);
     }
     private void beginReroute(long token, AMapNavi engine, String reason, String text) {
         if (!active() || engine != navi || !state.reroute(token, SystemClock.elapsedRealtime())) return;
@@ -478,7 +501,7 @@ final class JourneyController {
         routePoints.clear(); plannedStart = null;
     }
     private void stopEngine() {
-        nextRouteRetryMs = -1; retryRequestId = -1; retryFailures = 0; voicePlaying = false;
+        nextRouteRetryMs = -1; retryRequestId = -1; retryFailures = 0; voicePlaying = false; settledRouteRequests.clear();
         state.cancel(); gpsWeak = false; icon(null); handler.removeCallbacks(watchdog);
         if (pendingLocation != null) handler.removeCallbacks(pendingLocation);
         pendingLocation = null;

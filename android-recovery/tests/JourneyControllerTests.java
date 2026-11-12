@@ -174,6 +174,9 @@ public class JourneyControllerTests {
             late.requestId = 101; engine.listener.onCalculateRouteSuccess(late);
             Handler.advance(1000); f.host.fixAt(30); engine.listener.onNaviInfoUpdate(new NaviInfo());
             check(f.controller.frame().mode() == NavigationFrame.LIVE, "matching retry recovers navigation");
+            AMapCalcRouteResult oldFailure = new AMapCalcRouteResult(1); oldFailure.error = 16;
+            engine.listener.onCalculateRouteFailure(oldFailure);
+            check(f.host.finished == 0 && f.controller.frame().mode() == NavigationFrame.LIVE, "retired request cannot end recovered navigation");
         }
         try (Fixture f = new Fixture()) {
             AMapNavi engine = f.navigate(); engine.listener.onReCalculateRouteForTrafficJam();
