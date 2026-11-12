@@ -1,9 +1,0 @@
-menu "MotoNav"
-    config MOTONAV_BOOT_DISPLAY_TEST
-        bool "Start in the explicitly labelled display performance test"
-        default n
-        help
-            Normally enter the display test by holding the idle screen.
-            This option supports bench tests without touch or a connected phone.
-            Pairing or valid live navigation always returns to the normal display.
-endmenu

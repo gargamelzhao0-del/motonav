@@ -2,9 +2,11 @@ param(
     [string]$IdfPath = 'C:/Espressif/frameworks/esp-idf-v5.5.4',
     [string]$IdfToolsPath = 'C:/Espressif',
     [string]$PythonEnvironment = 'C:/Espressif/python_env/idf5.5_py3.11_env',
+    [switch]$DeviceTests,
     [switch]$DisplayBench,
     [switch]$MapBench,
-    [ValidateRange(10,3600)][int]$BenchSeconds = 43
+    [ValidateRange(10,3600)][int]$BenchSeconds = 43,
+    [string]$BuildDirectory = 'build'
 )
 $ErrorActionPreference = 'Stop'
 if ($DisplayBench -and $MapBench) { throw 'Choose one bench mode' }
@@ -18,6 +20,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'ESP-IDF environment initialization failed' }
     $benchSetting = if ($DisplayBench) { 'ON' } else { 'OFF' }
     $mapBenchSetting = if ($MapBench) { 'ON' } else { 'OFF' }
-    idf.py -B build "-DMOTONAV_AUTORUN_BENCH=$benchSetting" "-DMOTONAV_AUTORUN_MAP_BENCH=$mapBenchSetting" "-DMOTONAV_BENCH_SECONDS=$BenchSeconds" build
+    $testSetting = if ($DeviceTests -or $DisplayBench -or $MapBench) { 'ON' } else { 'OFF' }
+    idf.py -B $BuildDirectory "-DMOTONAV_DEVICE_TESTS=$testSetting" "-DMOTONAV_AUTORUN_BENCH=$benchSetting" "-DMOTONAV_AUTORUN_MAP_BENCH=$mapBenchSetting" "-DMOTONAV_BENCH_SECONDS=$BenchSeconds" build
     if ($LASTEXITCODE -ne 0) { throw 'Firmware build failed' }
 } finally { Pop-Location }

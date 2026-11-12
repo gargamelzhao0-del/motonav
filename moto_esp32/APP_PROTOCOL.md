@@ -39,6 +39,6 @@ N,3,sequence,session,mode,icon,turn_m,remaining_m,remaining_s,speed_kmh,fix_age_
 
 ## 联调与扩展
 
-`tests/nav3.frames` 与 Android `NavigationProtocolTests` 实际编码结果逐字节对照。运行 `python tests/run_host_tests.py --android-source <android-recovery 路径>` 可验证当前 App 编码与固件接收器的互通；需在环境中设置 JAVA_HOME。
+`tests/fixtures/nav3.frames` 与 Android `NavigationProtocolTests` 实际编码结果逐字节对照。运行 `python tests/run_host_tests.py --android-source <android-recovery 路径>` 可验证当前 App 编码与固件接收器的互通；需在环境中设置 JAVA_HOME。
 
 当前协议尚不传输道路名称、路线几何、天气、消息或云端卡片。请勿在 NAV3 尾部直接追加字段：现有接收器会拒绝。以后扩展此类在线信息时需先约定带版本协商、长度及缓存界限的新消息，并保留 NAV3 兼容入口。

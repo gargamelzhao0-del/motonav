@@ -1,12 +1,14 @@
 # MotoNav 1.75C 导航接收固件
 
-固件版本 **0.2.3**，配套支持 NAV3 的 Android 0.7.0 及以后版本，将真实转向、距离、预计时间及车速显示在 Waveshare ESP32-S3-Touch-AMOLED-1.75C 上。本地开发以 ESP-IDF 5.5.4、官方 BSP 3.0.0、LVGL 9.5.0 为基线，依赖版本由 `dependencies.lock` 记录。界面当前使用英文，支持左右转、斜转、急转、直行及保持左/右方向的箭头，其他转向以明确文字表示。
+固件版本 **0.2.4**，配套支持 NAV3 的 Android 0.7.0 及以后版本，将真实转向、距离、预计时间及车速显示在 Waveshare ESP32-S3-Touch-AMOLED-1.75C 上。本地开发以 ESP-IDF 5.5.4、官方 BSP 3.0.0、LVGL 9.5.0 为基线，依赖版本由 `dependencies.lock` 记录。界面当前使用英文，支持左右转、斜转、急转、直行及保持左/右方向的箭头，其他转向以明确文字表示。
 
 0.2.3 的 `ROUTE MAP / SIMULATED` 性能页使用 **466 × 466 全屏地图**，地图覆盖圆屏四周，文字卡片叠在地图上，用户已确认铺满且文字清楚。地图以面板字节序直接绘入内部 RAM 的 DMA 条带，保持完整分辨率，不再分配整幅地图 Canvas。动态刷新覆盖全部圆屏像素及 3 像素径向余量，只省去外框后方不可见的四角。此页不生成真实导航报文，也尚未接入手机路线。手机联调步骤见 [PHONE_INTEGRATION.md](PHONE_INTEGRATION.md)。
 
-代码在此目录独立开发，App 端联调约定见 [APP_PROTOCOL.md](APP_PROTOCOL.md)。`main/navigation_protocol.h` 负责接收与时效，`main/display_model.h` 负责显示状态，`main/navigation_ui.cpp` 负责 LVGL 界面，`main/display_port.cpp` 负责显示缓冲及传输，`main/main.cpp` 负责 BLE 生命周期。请用 0.2.1 替代 0.2.0：首次上板发现 Notify 特征缺少 NimBLE 必需的访问回调，会在注册服务时重启，现已修复并通过实机服务枚举及版本读取验证。
+0.2.4 将应用、驱动、业务状态、界面与测试拆分为独立组件：`main/app_main.cpp` 只保留入口，`main/app/` 负责组装与导航业务，`components/` 提供显示、触摸、BLE、平台、核心、UI 和地图图形接口。正式版默认不编入测试；`tests/` 可整体移除后构建。详细代码树、接口调用、线程约束及扩展方式见 [FIRMWARE_LAYERS.md](FIRMWARE_LAYERS.md)。App 端联调约定见 [APP_PROTOCOL.md](APP_PROTOCOL.md)。
 
 后续产品分工、原型地图移植、40 FPS 预算、共享协议及远程升级路线见 [PROJECT_ARCHITECTURE.md](PROJECT_ARCHITECTURE.md)。该文档为后续设计，不表示全部能力已实现。
+
+本次分层重构、删除测试后的独立构建、COM21 实机回归和正式镜像校验见 [HARDWARE_TEST_0.2.4.md](HARDWARE_TEST_0.2.4.md)。
 
 手机负责定位和高德摩托算路。启动导航后由前台服务维持定位及 BLE，手机锁屏和地图页面重建后可以重新附着到同一导航会话。弱定位时保留路线，持续等待新的可信位置及导航指令。结束导航、撤回授权或进程终止后结束该会话。
 
@@ -16,19 +18,19 @@
 
 本机 Windows 可执行 `pwsh -File tools/build.ps1`，参数支持另行指定 IDF 和 Python 环境。该脚本只编译，不访问串口或刷写。独立主机测试：`python tests/run_host_tests.py`，不需要手机、串口或 Android SDK。
 
-`tests/lvgl_host` 可用 CMake 和桌面 C/C++ 编译器构建真实 LVGL 界面的离屏预览：先完成 IDF 配置下载依赖，再执行 `cmake -S tests/lvgl_host -B build-host`、`cmake --build build-host`，最后运行 `ui_preview <输出目录>`。它验证状态布局以及有效导航自动打断性能页，不模拟硬件 FPS；输出 PPM 可转换为 PNG 查看。
+`tests/lvgl_host` 可用 CMake 和桌面 C/C++ 编译器构建真实 LVGL 界面的离屏预览：先完成 IDF 配置下载依赖，再执行 `cmake -S tests/lvgl_host -B build-host`、`cmake --build build-host`，最后执行 `ctest --test-dir build-host --output-on-failure`；也可以运行 `ui_preview <输出目录>`。它验证状态布局以及有效导航自动打断性能页，不模拟硬件 FPS；输出 PPM 可转换为 PNG 查看。
 
 2026-11-12 经用户确认的 COM21 实物检测为 ESP32-S3、32 MB Flash（ID c8:4019）、8 MB OPI PSRAM，因此默认 Flash 配置已从原理图推定的 16 MB 改为实测 32 MB。应用分区仍为 6 MB。其他设备安装前也须以 Flash ID 核对容量及板型，完整备份旧 Flash，再按构建生成的 `flash_args` 写入各镜像。1.75C 的屏幕复位为 GPIO1，触摸复位为 GPIO2。
 
 打开 Android 的真实地图页，设置高德 Key 和权限，点“连接圆屏”选择对应 MotoNav 设备，在系统配对窗口输入屏幕的六位码。选择真实目的地并完成摩托算路后，点“开始/结束”。手机支持发送导航状态和数据质量状态，接收端对重复包、CRC 错误、过期数据及旧会话分别处理。
 
-此版交付导航仪表、细分连接/时效状态、重新配对恢复、接收计数以及独立显示性能测试页。真实导航地图输入、中文路名字图和云端信息消息尚未实现。固件使用单应用分区，远程固件更新需后续引入升级分区和恢复流程。
+此版交付导航仪表、细分连接/时效状态、重新配对恢复、接收计数；显示性能测试页仅在开发构建中启用。真实导航地图输入、中文路名字图和云端信息消息尚未实现。固件使用单应用分区，远程固件更新需后续引入升级分区和恢复流程。
 
 ## 40 FPS 的验证方式
 
 LVGL 刷新和界面服务周期为 16 ms，保留官方 BSP 的 QSPI 40 MHz，使用两块 64 行内部 RAM 绘制缓冲。LVGL 任务及 SPI 中断固定在 CPU1，NimBLE 固定在 CPU0；LVGL 软件绘制在适配器任务中同步执行。显示直接使用 `RGB565_SWAPPED`，DMA 完成回调保留适配器的帧计数，并通过信号量唤醒显示任务。静态仪表背景预先缓存；列范围相同、行连续的条带使用 CO5300 Memory Write Continue，窗口变化、间断或提交失败时重新设定地址。CPU 使用 32 KB 指令缓存及 64 KB 数据缓存。数字和转向只在内容变化时重绘，不能把静态页面的低刷新率解释为性能不足。
 
-在未显示有效导航时长按屏幕进入 `DISPLAY TEST / NOT NAVIGATION`；短按依次切换 `PARTIAL HUD`、`FULL FRAME`、`ROUTE MAP / SIMULATED`，长按返回。配对或有效导航到来会自动退出测试并释放地图缓冲。测试只改变本地显示，不生成 GPS、车速或导航报文。
+先用 `pwsh -File tools/build.ps1 -DeviceTests` 构建手动测试版，再在未显示有效导航时长按屏幕进入 `DISPLAY TEST / NOT NAVIGATION`；短按依次切换 `PARTIAL HUD`、`FULL FRAME`、`ROUTE MAP / SIMULATED`，长按返回。配对或有效导航到来会自动退出测试并释放地图缓冲。测试只改变本地显示，不生成 GPS、车速或导航报文。
 
 FPS 来自 `esp_lv_adapter` 在最后一块像素传输完成时的计数，不是 16 ms 定时器次数。预热后显示当前 FPS、已采样窗口最低值和平均值，每 5 次采样打印 `display_test` 日志。每种负载至少连续测量 30 秒，记录最低值是否达到 40，以及有无撕裂、触摸丢失、BLE 延迟或花屏。全屏传输结果与局部 HUD 结果必须分开报告；即使全屏测试通过，也不能代表未来动态地图必然达到同一帧率。
 
@@ -38,7 +40,7 @@ FPS 来自 `esp_lv_adapter` 在最后一块像素传输完成时的计数，不�
 
 0.2.3 的全屏实测、稳定性检查和交付镜像记录见 [HARDWARE_TEST_0.2.3.md](HARDWARE_TEST_0.2.3.md)。不能将 0.2.2 的局部地图成绩当作 466 × 466 全屏成绩。
 
-`CONFIG_MOTONAV_BOOT_DISPLAY_TEST` 可使台架构建启动后直接进入手动测试；默认关闭。执行 `pwsh -File tools/build.ps1 -DisplayBench` 生成三种负载依次运行的自动测试版；`-MapBench` 只运行地图。每项默认 43 秒（含 2.5 秒预热），可用 `-BenchSeconds 123` 延长，结束后回到正常界面。自动测试显示 `AUTO TEST`，期间记录并忽略触摸，防止误触截断测量；配对或有效导航仍会结束测试。正常固件的手动测试继续支持短按切换、长按退出。再次执行不带测试参数的构建脚本恢复正式构建；脚本会同时关闭两个自动测试 CMake 选项，正式交付还须关闭 Kconfig 中的开机手动测试选项。
+`-DisplayBench` 生成三种负载依次运行的自动测试版；`-MapBench` 只运行地图。每项默认 43 秒（含 2.5 秒预热），可用 `-BenchSeconds 123` 延长。测试结束后释放独立测试页面并回到导航界面。自动测试显示 `AUTO TEST`，期间忽略触摸；配对或有效导航仍会结束测试。再次执行不带测试参数的构建脚本恢复正式构建，三个测试 CMake 开关全部关闭。正式版不再有长按测试入口。旧开机测试 Kconfig 已移除；删除整个 `tests/` 后仍能构建正式版，详见分层文档。
 
 串口日志可用 `python tools/capture_serial.py --port COM21 --seconds 100 --output dist/serial.log` 限时采集。仅在已确认目标设备并允许重启时添加 `--reset-usb`；输出文件必须不存在，工具不扫描或访问其他串口。
 

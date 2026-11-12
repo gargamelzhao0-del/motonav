@@ -1,4 +1,7 @@
-#include "navigation_ui.h"
+#include "motonav/ui/navigation_ui.h"
+#if MOTONAV_DEVICE_TESTS
+#include "motonav/testing/display_benchmark.h"
+#endif
 #include <array>
 #include <filesystem>
 #include <fstream>
@@ -9,7 +12,7 @@ static uint64_t clock_ms;
 static std::array<uint16_t, 466 * 466> pixels;
 static std::array<uint16_t, 466 * 64> buffer;
 static unsigned rim_draws;
-int64_t esp_timer_get_time() { return static_cast<int64_t>(clock_ms * 1000); }
+static uint64_t host_time_us() { return clock_ms * 1000; }
 void advance_host_clock(uint32_t milliseconds) { clock_ms += milliseconds; lv_tick_inc(milliseconds); }
 static void flush(lv_display_t *display, const lv_area_t *area, uint8_t *data) {
     auto input = reinterpret_cast<uint16_t *>(data);
@@ -52,7 +55,23 @@ int main(int argc, char **argv) {
     lv_display_set_color_format(display, LV_COLOR_FORMAT_RGB565_SWAPPED);
     lv_display_set_buffers(display, buffer.data(), nullptr, sizeof(buffer), LV_DISPLAY_RENDER_MODE_PARTIAL);
     lv_display_set_flush_cb(display, flush);
-    motonav::create_navigation_ui(display, "MotoNav-1234", [] { return snapshot; });
+    motonav::SnapshotReader reader{[](void *) { return snapshot; }, nullptr};
+    motonav::UiExtension extension;
+#if MOTONAV_DEVICE_TESTS
+    static uint64_t fps_reset_us;
+    extension = motonav::testing::make_display_benchmark(display, reader, {
+        host_time_us,
+        [](lv_display_t *) {
+            // Simulate a workload switch crossing the millisecond boundary.
+            advance_host_clock(2); fps_reset_us = host_time_us();
+        },
+        [](lv_display_t *) -> uint32_t {
+            if (host_time_us() - fps_reset_us < 1000000) std::abort();
+            return 0; // Host previews cannot measure device FPS.
+        }});
+#endif
+    motonav::create_navigation_ui(display, "MotoNav-1234", reader, extension);
+
 #if MOTONAV_AUTORUN_BENCH || MOTONAV_AUTORUN_MAP_BENCH
     // Accidental touches must not silently truncate a timed hardware run.
     lv_obj_send_event(lv_screen_active(), LV_EVENT_SHORT_CLICKED, nullptr);
@@ -81,6 +100,7 @@ int main(int argc, char **argv) {
     std::cout << "PASS: map-only automatic test restores normal display\n";
 #endif
     save(display, directory / "idle.ppm");
+    auto *navigation_screen = lv_screen_active();
     auto normal_children = lv_obj_get_child_count(lv_screen_active());
     lv_obj_add_event_cb(lv_obj_get_child(lv_screen_active(),0), [](lv_event_t *) { ++rim_draws; }, LV_EVENT_DRAW_MAIN, nullptr);
     snapshot.linked = snapshot.encrypted = snapshot.subscribed = snapshot.handshaken = true;
@@ -96,6 +116,20 @@ int main(int argc, char **argv) {
     save(display, directory / "stale.ppm");
     snapshot.pairing = true; snapshot.passkey = 123;
     save(display, directory / "pairing.ppm");
+#if !MOTONAV_DEVICE_TESTS
+    snapshot = {};
+    save(display, directory / "production-idle.ppm");
+    auto idle_pixels = pixels;
+    lv_obj_send_event(lv_screen_active(), LV_EVENT_LONG_PRESSED, nullptr);
+    lv_obj_send_event(lv_screen_active(), LV_EVENT_SHORT_CLICKED, nullptr);
+    save(display, directory / "production-touch.ppm");
+    require_label("CONNECT PHONE");
+    require_label("MOTONAV");
+    if (pixels != idle_pixels || lv_screen_active() != navigation_screen ||
+        lv_obj_get_child_count(lv_screen_active()) != normal_children) return 1;
+    std::cout << "PASS: production UI links/runs without the benchmark or graphics components\n";
+    return 0;
+#else
     snapshot = {};
     lv_obj_send_event(lv_screen_active(), LV_EVENT_LONG_PRESSED, nullptr);
     // Automatic builds retain their last workload. Cycle until the map is active.
@@ -106,6 +140,10 @@ int main(int argc, char **argv) {
     save(display, directory / "display-test.ppm");
     require_label("ROUTE MAP / SIMULATED");
     auto map_pixels = pixels;
+    if (lv_screen_active() == navigation_screen) {
+        std::cerr << "Benchmark is mutating the production screen\n"; return 1;
+    }
+    lv_obj_add_event_cb(lv_obj_get_child(lv_screen_active(), 0), [](lv_event_t *) { ++rim_draws; }, LV_EVENT_DRAW_MAIN, nullptr);
     constexpr uint16_t normal_background = ((0x09 >> 3) << 11) | ((0x0f >> 2) << 5) | (0x0c >> 3);
     for (size_t edge : {size_t(233),size_t(233*466),size_t(233*466+465),size_t(465*466+233)}) {
         if (pixels[edge] == normal_background) {
@@ -125,7 +163,7 @@ int main(int argc, char **argv) {
         std::cerr << "Live guidance did not completely replace the display test\n";
         return 1;
     }
-    if (lv_obj_get_child_count(lv_screen_active()) != normal_children) return 1;
+    if (lv_screen_active() != navigation_screen || lv_obj_get_child_count(lv_screen_active()) != normal_children) return 1;
     snapshot = {};
     lv_obj_send_event(lv_screen_active(), LV_EVENT_LONG_PRESSED, nullptr);
     save(display, directory / "map-before-pairing.ppm");
@@ -133,13 +171,14 @@ int main(int argc, char **argv) {
     snapshot.pairing = true; snapshot.passkey = 123;
     save(display, directory / "pairing-interrupts-map.ppm");
     require_label("PAIR WITH PHONE");
-    if (lv_obj_get_child_count(lv_screen_active()) != normal_children) return 1;
+    if (lv_screen_active() != navigation_screen || lv_obj_get_child_count(lv_screen_active()) != normal_children) return 1;
     snapshot = {};
     lv_obj_send_event(lv_screen_active(), LV_EVENT_LONG_PRESSED, nullptr);
     save(display, directory / "map-before-exit.ppm");
     lv_obj_send_event(lv_screen_active(), LV_EVENT_LONG_PRESSED, nullptr);
     save(display, directory / "manual-exit.ppm");
     require_label("CONNECT PHONE");
-    if (lv_obj_get_child_count(lv_screen_active()) != normal_children) return 1;
+    if (lv_screen_active() != navigation_screen || lv_obj_get_child_count(lv_screen_active()) != normal_children) return 1;
     std::cout << "PASS: animated map, pairing/live preemption, manual exit and canvas cleanup; no hardware/FPS claim\n";
+#endif
 }
