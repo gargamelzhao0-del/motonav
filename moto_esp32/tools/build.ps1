@@ -5,7 +5,9 @@ param(
     [switch]$DeviceTests,
     [switch]$DisplayBench,
     [switch]$MapBench,
+    [switch]$LegacyQspi,
     [ValidateRange(10,3600)][int]$BenchSeconds = 43,
+    [ValidateSet(16,24,32,40,48,56,64)][int]$DisplayRows = 64,
     [string]$BuildDirectory = 'build'
 )
 $ErrorActionPreference = 'Stop'
@@ -21,6 +23,7 @@ try {
     $benchSetting = if ($DisplayBench) { 'ON' } else { 'OFF' }
     $mapBenchSetting = if ($MapBench) { 'ON' } else { 'OFF' }
     $testSetting = if ($DeviceTests -or $DisplayBench -or $MapBench) { 'ON' } else { 'OFF' }
-    idf.py -B $BuildDirectory "-DMOTONAV_DEVICE_TESTS=$testSetting" "-DMOTONAV_AUTORUN_BENCH=$benchSetting" "-DMOTONAV_AUTORUN_MAP_BENCH=$mapBenchSetting" "-DMOTONAV_BENCH_SECONDS=$BenchSeconds" build
+    $directSetting = if ($LegacyQspi) { 'OFF' } else { 'ON' }
+    idf.py -B $BuildDirectory "-DMOTONAV_DEVICE_TESTS=$testSetting" "-DMOTONAV_AUTORUN_BENCH=$benchSetting" "-DMOTONAV_AUTORUN_MAP_BENCH=$mapBenchSetting" "-DMOTONAV_BENCH_SECONDS=$BenchSeconds" "-DMOTONAV_DISPLAY_ROWS=$DisplayRows" "-DMOTONAV_DIRECT_QSPI=$directSetting" build
     if ($LASTEXITCODE -ne 0) { throw 'Firmware build failed' }
 } finally { Pop-Location }

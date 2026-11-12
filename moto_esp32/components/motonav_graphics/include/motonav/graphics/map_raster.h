@@ -1,5 +1,6 @@
 #pragma once
 #include "motonav/graphics/map_projection.h"
+#include "motonav/graphics/pixel_fill.h"
 #include <algorithm>
 #include <cstring>
 
@@ -20,10 +21,12 @@ public:
     }
     void clear(uint16_t color) {
         if (!valid_) return;
-        span(origin_y_, origin_x_, origin_x_ + width_ - 1, color);
-        // Reuse one cache-hot row with the platform's optimized memcpy.
-        for (int y = 1; y < height_; ++y)
-            std::memcpy(pixels_ + static_cast<size_t>(y) * stride_, pixels_, width_ * sizeof(uint16_t));
+        if (stride_ == static_cast<size_t>(width_)) {
+            fill_rgb565(pixels_, static_cast<size_t>(width_) * height_, color);
+        } else {
+            for (int y = 0; y < height_; ++y)
+                fill_rgb565(pixels_ + static_cast<size_t>(y) * stride_, width_, color);
+        }
     }
     void polygon(const ProjectedPoint *points, size_t count, uint16_t color) {
         if (!valid_ || !points || count < 3 || count > 4) return;
@@ -89,7 +92,7 @@ private:
         if (first>last) return;
         auto *row=pixels_+static_cast<size_t>(y-origin_y_)*stride_;
         first-=origin_x_; last-=origin_x_;
-        std::fill(row+first,row+last+1,color);
+        fill_rgb565(row+first, static_cast<size_t>(last-first+1), color);
     }
     void disk(ProjectedPoint p, float radius, uint16_t color) {
         int first=std::max(origin_y_,ceil_int(p.y-radius-0.5f));

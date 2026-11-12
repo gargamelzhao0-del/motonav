@@ -6,6 +6,7 @@ struct BenchmarkServices {
     uint64_t (*now_us)();
     void (*reset_fps)(lv_display_t *);
     uint32_t (*read_fps)(lv_display_t *);
+    void (*profile)(bool reset) = nullptr;
 };
 // Optional singleton feature; attach before creating navigation UI, while locked.
 // Timing/FPS services are injected. This module never controls panel/touch/BLE.

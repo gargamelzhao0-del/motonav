@@ -7,6 +7,14 @@
 
 using namespace motonav;
 int main() {
+    // Both 16-bit and 32-bit alignment, every tail length, and full rows.
+    for (size_t offset : {size_t(16),size_t(17)}) for (size_t length=0; length<=466; ++length) {
+        std::vector<uint16_t> pixels(520,0xdead), expected=pixels;
+        uint16_t color=static_cast<uint16_t>(length*71+3);
+        std::fill(expected.begin()+offset,expected.begin()+offset+length,color);
+        fill_rgb565(pixels.data()+offset,length,color);
+        assert(pixels==expected);
+    }
     constexpr int w=320,h=300,stride=324,guard=32;
     constexpr uint16_t sentinel=0x1234;
     std::vector<uint16_t> storage(guard+stride*h+guard,sentinel);

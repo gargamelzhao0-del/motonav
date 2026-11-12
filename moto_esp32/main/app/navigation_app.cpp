@@ -8,6 +8,7 @@
 #include "esp_log.h"
 #if MOTONAV_DEVICE_TESTS
 #include "motonav/testing/display_benchmark.h"
+#include "motonav/testing/driver_probe.h"
 #endif
 
 namespace motonav::app {
@@ -21,7 +22,10 @@ void run() {
     ESP_ERROR_CHECK(drivers::device_name(name, sizeof(name)));
 
     lv_display_t *display = nullptr;
-    ESP_ERROR_CHECK(drivers::display_init(&display));
+    drivers::DisplayConfig display_config;
+    display_config.buffer_rows = MOTONAV_DISPLAY_ROWS;
+    display_config.direct_qspi = MOTONAV_DIRECT_QSPI;
+    ESP_ERROR_CHECK(drivers::display_init(&display, display_config));
     ESP_ERROR_CHECK(drivers::touch_init(display));
     ESP_ERROR_CHECK(drivers::display_lock());
     SnapshotReader reader{[](void *context) {
@@ -29,15 +33,7 @@ void run() {
     }, &navigation};
     UiExtension extension;
 #if MOTONAV_DEVICE_TESTS
-    ESP_ERROR_CHECK(drivers::display_enable_fps(display, true));
-    extension = testing::make_display_benchmark(display, reader, {
-        drivers::monotonic_us,
-        [](lv_display_t *target) { ESP_ERROR_CHECK(drivers::display_reset_fps(target)); },
-        [](lv_display_t *target) {
-            uint32_t fps = 0;
-            ESP_ERROR_CHECK(drivers::display_read_fps(target, &fps));
-            return fps;
-        }});
+    extension = testing::make_display_benchmark(display, reader, testing::driver_benchmark_services(display));
 #endif
     create_navigation_ui(display, name, reader, extension);
     drivers::display_unlock();

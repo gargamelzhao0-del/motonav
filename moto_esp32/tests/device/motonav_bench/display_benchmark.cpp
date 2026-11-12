@@ -68,6 +68,7 @@ void reset_benchmark() {
     minimum_fps = UINT32_MAX; samples = 0; total_fps = 0;
     map_render_us = map_render_max_us = map_frames = 0;
     services.reset_fps(display);
+    if (services.profile) services.profile(true);
     set_label_text(view.number, "-- FPS"); set_label_text(view.speed, "WARMING UP");
     set_label_text(view.remaining, "Target: at least 40 FPS");
     ESP_LOGI("display_test", "started workload=%s automatic=%d map_buffer=%s", workload_name(), automatic_test,
@@ -75,6 +76,7 @@ void reset_benchmark() {
 }
 void report_benchmark() {
     if (!samples) return;
+    if (services.profile) services.profile(false);
     ESP_LOGI("display_test", "completed workload=%s min=%lu avg=%lu samples=%lu measured_ms=%llu",
         workload_name(), static_cast<unsigned long>(minimum_fps),
         static_cast<unsigned long>(total_fps / samples), static_cast<unsigned long>(samples),

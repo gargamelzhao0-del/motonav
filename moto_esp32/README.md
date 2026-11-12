@@ -1,10 +1,12 @@
 # MotoNav 1.75C 导航接收固件
 
-固件版本 **0.2.4**，配套支持 NAV3 的 Android 0.7.0 及以后版本，将真实转向、距离、预计时间及车速显示在 Waveshare ESP32-S3-Touch-AMOLED-1.75C 上。本地开发以 ESP-IDF 5.5.4、官方 BSP 3.0.0、LVGL 9.5.0 为基线，依赖版本由 `dependencies.lock` 记录。界面当前使用英文，支持左右转、斜转、急转、直行及保持左/右方向的箭头，其他转向以明确文字表示。
+固件版本 **0.2.5**，配套支持 NAV3 的 Android 0.7.0 及以后版本，将真实转向、距离、预计时间及车速显示在 Waveshare ESP32-S3-Touch-AMOLED-1.75C 上。本地开发以 ESP-IDF 5.5.4、官方 BSP 3.0.0、LVGL 9.5.0 为基线，依赖版本由 `dependencies.lock` 记录。界面当前使用英文，支持左右转、斜转、急转、直行及保持左/右方向的箭头，其他转向以明确文字表示。
 
 0.2.3 的 `ROUTE MAP / SIMULATED` 性能页使用 **466 × 466 全屏地图**，地图覆盖圆屏四周，文字卡片叠在地图上，用户已确认铺满且文字清楚。地图以面板字节序直接绘入内部 RAM 的 DMA 条带，保持完整分辨率，不再分配整幅地图 Canvas。动态刷新覆盖全部圆屏像素及 3 像素径向余量，只省去外框后方不可见的四角。此页不生成真实导航报文，也尚未接入手机路线。手机联调步骤见 [PHONE_INTEGRATION.md](PHONE_INTEGRATION.md)。
 
 0.2.4 将应用、驱动、业务状态、界面与测试拆分为独立组件：`main/app_main.cpp` 只保留入口，`main/app/` 负责组装与导航业务，`components/` 提供显示、触摸、BLE、平台、核心、UI 和地图图形接口。正式版默认不编入测试；`tests/` 可整体移除后构建。详细代码树、接口调用、线程约束及扩展方式见 [FIRMWARE_LAYERS.md](FIRMWARE_LAYERS.md)。App 端联调约定见 [APP_PROTOCOL.md](APP_PROTOCOL.md)。
+
+0.2.5 进一步分离板级 QSPI 传输，合并命令与像素阶段、按硬件上限分段 DMA，并加入可关闭的驱动耗时计数和独立传输测试。正式版默认使用测量后的 64 行双缓冲配置，保持 40 MHz 总线及完整分辨率。优化取舍和实机结果见 [HARDWARE_TEST_0.2.5.md](HARDWARE_TEST_0.2.5.md)。
 
 后续产品分工、原型地图移植、40 FPS 预算、共享协议及远程升级路线见 [PROJECT_ARCHITECTURE.md](PROJECT_ARCHITECTURE.md)。该文档为后续设计，不表示全部能力已实现。
 
