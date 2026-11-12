@@ -1,1 +1,5 @@
-idf_component_register(SRCS "main.cpp" "navigation_ui.cpp" INCLUDE_DIRS "." REQUIRES bt nvs_flash esp_timer esp_app_format)
+idf_component_register(SRCS "main.cpp" "navigation_ui.cpp" "display_port.cpp" INCLUDE_DIRS "." REQUIRES bt nvs_flash esp_timer esp_app_format)
+option(MOTONAV_AUTORUN_BENCH "Run both display workloads once at boot (bench firmware only)" OFF)
+if(MOTONAV_AUTORUN_BENCH)
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE MOTONAV_AUTORUN_BENCH=1)
+endif()

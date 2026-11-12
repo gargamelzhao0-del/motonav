@@ -1,4 +1,5 @@
 #include "../main/display_model.h"
+#include "../main/strip_stream.h"
 #include <cassert>
 #include <iostream>
 #include <random>
@@ -16,6 +17,18 @@ static std::string send(NavigationReceiver &r, const std::string &wire, uint64_t
     return reply;
 }
 int main() {
+    StripStream stream;
+    assert(stream.begin(0, 0, 466, 50) == StripStream::Start); stream.submitted(50);
+    assert(stream.begin(0, 50, 466, 100) == StripStream::Continue); stream.submitted(100);
+    assert(stream.begin(20, 100, 40, 120) == StripStream::Partial);
+    assert(stream.begin(0, 100, 466, 150) == StripStream::Start); stream.submitted(150);
+    assert(stream.begin(0, 200, 466, 250) == StripStream::Start); // Gap is not a continuation.
+    assert(stream.begin(0, 250, 466, 300) == StripStream::Start); // Previous write failed.
+    stream.submitted(300);
+    assert(stream.begin(0, 0, 466, 50) == StripStream::Start); // New frame resets the window.
+    stream.submitted(466);
+    assert(stream.begin(0, 0, 466, 50) == StripStream::Start);
+
     ScreenSnapshot s;
     assert(screen_mode(s) == ScreenMode::Disconnected);
     s.linked = true; assert(screen_mode(s) == ScreenMode::Securing);

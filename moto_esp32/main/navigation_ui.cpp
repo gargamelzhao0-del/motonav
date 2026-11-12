@@ -2,6 +2,7 @@
 #include "esp_lv_adapter.h"
 #include "esp_timer.h"
 #include "esp_log.h"
+#include "src/misc/cache/instance/lv_image_cache.h"
 #include <climits>
 
 namespace motonav {
@@ -14,7 +15,7 @@ lv_obj_t *top, *title, *number, *speed, *remaining, *footer, *arrow, *test_marke
 lv_point_precise_t arrow_points[6];
 int last_icon = -1;
 uint32_t last_title_color = 0;
-bool testing = false, full_frame = false;
+bool testing = false, full_frame = false, automatic_test = false;
 uint64_t test_started = 0, last_sample = 0;
 uint32_t minimum_fps = UINT32_MAX, samples = 0;
 uint64_t total_fps = 0;
@@ -33,6 +34,46 @@ lv_obj_t *label(int y, int width, const lv_font_t *font, uint32_t color) {
     lv_obj_remove_flag(object, LV_OBJ_FLAG_CLICKABLE);
     return object;
 }
+void create_rim(lv_obj_t *screen) {
+    // The decorative ring never changes. Cache its antialiasing once instead
+    // of recomputing a full circular mask for every damaged display strip.
+    // Cover the entire screen so LVGL can skip filling the background again
+    // beneath the cached image, including the 14-pixel margin around the ring.
+    auto *buffer = lv_draw_buf_create(466, 466, LV_COLOR_FORMAT_RGB565, LV_STRIDE_AUTO);
+    lv_obj_t *rim;
+    if (buffer) {
+        rim = lv_canvas_create(screen);
+        lv_obj_remove_style_all(rim);
+        lv_canvas_set_draw_buf(rim, buffer);
+        lv_canvas_fill_bg(rim, lv_color_hex(0x090f0c), LV_OPA_COVER);
+        lv_layer_t layer;
+        lv_canvas_init_layer(rim, &layer);
+        lv_draw_rect_dsc_t border;
+        lv_draw_rect_dsc_init(&border);
+        border.bg_opa = LV_OPA_TRANSP;
+        border.radius = LV_RADIUS_CIRCLE;
+        border.border_width = 2;
+        border.border_color = lv_color_hex(0x25362d);
+        lv_area_t area{14, 14, 451, 451};
+        lv_draw_rect(&layer, &border, &area);
+        lv_canvas_finish_layer(rim, &layer);
+        lv_obj_add_event_cb(rim, [](lv_event_t *event) {
+            auto *owned_buffer = static_cast<lv_draw_buf_t *>(lv_event_get_user_data(event));
+            lv_image_cache_drop(owned_buffer);
+            lv_image_set_src(lv_event_get_target_obj(event), nullptr);
+            lv_draw_buf_destroy(owned_buffer);
+        }, LV_EVENT_DELETE, buffer);
+    } else {
+        rim = lv_obj_create(screen);
+        lv_obj_remove_style_all(rim);
+        lv_obj_set_style_radius(rim, LV_RADIUS_CIRCLE, 0);
+        lv_obj_set_style_border_width(rim, 2, 0);
+        lv_obj_set_style_border_color(rim, lv_color_hex(0x25362d), 0);
+    }
+    const int size = buffer ? 466 : 438;
+    lv_obj_set_size(rim, size, size); lv_obj_center(rim);
+    lv_obj_remove_flag(rim, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE));
+}
 void draw_arrow(int icon) {
     if (icon == last_icon) return;
     last_icon = icon;
@@ -50,17 +91,30 @@ void reset_benchmark() {
     ESP_ERROR_CHECK(esp_lv_adapter_fps_stats_reset(display));
     text(number, "-- FPS"); text(speed, "WARMING UP");
     text(remaining, "Target: at least 40 FPS");
+    ESP_LOGI("display_test", "started workload=%s automatic=%d", full_frame ? "full" : "partial", automatic_test);
+}
+void report_benchmark() {
+    if (!samples) return;
+    ESP_LOGI("display_test", "completed workload=%s min=%lu avg=%lu samples=%lu measured_ms=%llu",
+        full_frame ? "full" : "partial", static_cast<unsigned long>(minimum_fps),
+        static_cast<unsigned long>(total_fps / samples), static_cast<unsigned long>(samples),
+        static_cast<unsigned long long>(milliseconds() - test_started - 2500));
 }
 void set_test(bool enabled) {
+    if (!enabled && testing) report_benchmark();
     testing = enabled;
+    if (!enabled) automatic_test = false;
     lv_obj_set_flag(test_marker, LV_OBJ_FLAG_HIDDEN, !enabled);
     if (enabled) reset_benchmark();
     last_icon = -1;
 }
 void touch(lv_event_t *event) {
     ScreenSnapshot state = snapshot();
-    if (lv_event_get_code(event) == LV_EVENT_LONG_PRESSED && may_test_display(state)) set_test(!testing);
+    if (lv_event_get_code(event) == LV_EVENT_LONG_PRESSED && may_test_display(state)) {
+        automatic_test = false; set_test(!testing);
+    }
     else if (lv_event_get_code(event) == LV_EVENT_SHORT_CLICKED && testing) {
+        automatic_test = false; report_benchmark();
         full_frame = !full_frame; reset_benchmark();
     }
 }
@@ -69,6 +123,14 @@ void refresh(lv_timer_t *) {
     ScreenMode mode = screen_mode(state);
     uint64_t now = milliseconds();
     if (testing && !may_test_display(state)) set_test(false);
+    if (testing && automatic_test && now - test_started >= 43000) {
+        if (!full_frame) {
+            report_benchmark(); full_frame = true; reset_benchmark();
+        } else {
+            set_test(false);
+            ESP_LOGI("display_test", "automatic test finished; normal navigation display restored");
+        }
+    }
     if (testing) {
         text(top, "DISPLAY TEST / NOT NAVIGATION");
         text(title, full_frame ? "FULL FRAME" : "PARTIAL HUD");
@@ -148,13 +210,7 @@ void create_navigation_ui(lv_display_t *screen_display, const char *device_name,
     lv_obj_add_flag(screen, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(screen, touch, LV_EVENT_LONG_PRESSED, nullptr);
     lv_obj_add_event_cb(screen, touch, LV_EVENT_SHORT_CLICKED, nullptr);
-    lv_obj_t *rim = lv_obj_create(screen);
-    lv_obj_remove_style_all(rim);
-    lv_obj_set_size(rim, 438, 438); lv_obj_center(rim);
-    lv_obj_set_style_radius(rim, LV_RADIUS_CIRCLE, 0);
-    lv_obj_set_style_border_width(rim, 2, 0);
-    lv_obj_set_style_border_color(rim, lv_color_hex(0x25362d), 0);
-    lv_obj_remove_flag(rim, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE));
+    create_rim(screen);
     top = label(52, 310, &lv_font_montserrat_16, Muted);
     title = label(88, 350, &lv_font_montserrat_28, Lime);
     arrow = lv_line_create(screen); lv_obj_set_pos(arrow, 153, 130);
@@ -171,7 +227,10 @@ void create_navigation_ui(lv_display_t *screen_display, const char *device_name,
     speed = label(330, 340, &lv_font_montserrat_28, White);
     remaining = label(374, 330, &lv_font_montserrat_20, Muted);
     footer = label(405, 285, &lv_font_montserrat_16, Muted);
-#if CONFIG_MOTONAV_BOOT_DISPLAY_TEST
+#if CONFIG_MOTONAV_BOOT_DISPLAY_TEST || MOTONAV_AUTORUN_BENCH
+#if MOTONAV_AUTORUN_BENCH
+    automatic_test = true;
+#endif
     set_test(true);
 #endif
     refresh(nullptr);

@@ -27,6 +27,20 @@ static void save(lv_display_t *display, const std::filesystem::path &path) {
     }
     if (!file) std::abort();
 }
+#if MOTONAV_AUTORUN_BENCH
+static bool contains_label(lv_obj_t *object, const char *text) {
+    if (lv_obj_check_type(object, &lv_label_class) && std::strcmp(lv_label_get_text(object), text) == 0) return true;
+    for (uint32_t i = 0; i < lv_obj_get_child_count(object); ++i)
+        if (contains_label(lv_obj_get_child(object, i), text)) return true;
+    return false;
+}
+static void require_label(const char *text) {
+    if (!contains_label(lv_screen_active(), text)) {
+        std::cerr << "Missing automatic test state: " << text << '\n';
+        std::exit(1);
+    }
+}
+#endif
 int main(int argc, char **argv) {
     if (argc != 2) return 2;
     std::filesystem::path directory(argv[1]); std::filesystem::create_directories(directory);
@@ -36,6 +50,17 @@ int main(int argc, char **argv) {
     lv_display_set_buffers(display, buffer.data(), nullptr, sizeof(buffer), LV_DISPLAY_RENDER_MODE_PARTIAL);
     lv_display_set_flush_cb(display, flush);
     motonav::create_navigation_ui(display, "MotoNav-1234", [] { return snapshot; });
+#if MOTONAV_AUTORUN_BENCH
+    save(display, directory / "automatic-partial.ppm");
+    require_label("PARTIAL HUD");
+    clock_ms += 43000; lv_tick_inc(43000);
+    save(display, directory / "automatic-full.ppm");
+    require_label("FULL FRAME");
+    clock_ms += 43000; lv_tick_inc(43000);
+    save(display, directory / "automatic-finished.ppm");
+    require_label("CONNECT PHONE");
+    std::cout << "PASS: automatic test switches workloads and restores normal display\n";
+#endif
     save(display, directory / "idle.ppm");
     snapshot.linked = snapshot.encrypted = snapshot.subscribed = snapshot.handshaken = true;
     snapshot.has_guidance = snapshot.stream_fresh = true;

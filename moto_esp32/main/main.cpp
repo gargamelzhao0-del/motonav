@@ -1,4 +1,5 @@
 #include "navigation_ui.h"
+#include "display_port.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
@@ -9,6 +10,7 @@
 #include "esp_log.h"
 #include "esp_system.h"
 #include "esp_app_desc.h"
+#include "esp_heap_caps.h"
 #include "bsp/esp-bsp.h"
 extern "C" {
 #include "nimble/nimble_port.h"
@@ -78,10 +80,16 @@ int write_navigation(uint16_t connection, uint16_t, ble_gatt_access_ctxt *ctx, v
     return 0;
 }
 
+int notification_access(uint16_t, uint16_t, ble_gatt_access_ctxt *ctx, void *) {
+    // NimBLE requires a callback even for a notify-only characteristic.
+    // Replies are sent through ble_gatts_notify_custom, never by ATT reads.
+    return ctx->op == BLE_GATT_ACCESS_OP_READ_CHR ? BLE_ATT_ERR_READ_NOT_PERMITTED : BLE_ATT_ERR_WRITE_NOT_PERMITTED;
+}
+
 const ble_gatt_chr_def characteristics[] = {
     {.uuid = &rx_uuid.u, .access_cb = write_navigation,
      .flags = BLE_GATT_CHR_F_WRITE | BLE_GATT_CHR_F_WRITE_ENC | BLE_GATT_CHR_F_WRITE_AUTHEN},
-    {.uuid = &tx_uuid.u, .flags = BLE_GATT_CHR_F_NOTIFY, .val_handle = &tx_handle}, {}
+    {.uuid = &tx_uuid.u, .access_cb = notification_access, .flags = BLE_GATT_CHR_F_NOTIFY, .val_handle = &tx_handle}, {}
 };
 const ble_gatt_chr_def info_characteristics[] = {
     {.uuid = &revision_uuid.u, .access_cb = read_revision, .flags = BLE_GATT_CHR_F_READ}, {}
@@ -181,11 +189,7 @@ extern "C" void app_main() {
     ESP_ERROR_CHECK(state_mutex ? ESP_OK : ESP_ERR_NO_MEM);
     uint8_t mac[6]; ESP_ERROR_CHECK(esp_read_mac(mac, ESP_MAC_BT));
     std::snprintf(device_name, sizeof(device_name), "MotoNav-%02X%02X", mac[4], mac[5]);
-    bsp_display_cfg_t cfg{};
-    cfg.lv_adapter_cfg = ESP_LV_ADAPTER_DEFAULT_CONFIG(); cfg.lv_adapter_cfg.task_core_id = 1;
-    cfg.rotation = ESP_LV_ADAPTER_ROTATE_0; cfg.tear_avoid_mode = ESP_LV_ADAPTER_TEAR_AVOID_MODE_NONE;
-    cfg.touch_flags.mirror_x = cfg.touch_flags.mirror_y = 1;
-    lv_display_t *display = bsp_display_start_with_config(&cfg);
+    lv_display_t *display = motonav::start_display();
     ESP_ERROR_CHECK(display ? ESP_OK : ESP_FAIL);
     ESP_ERROR_CHECK(bsp_display_brightness_set(70));
     ESP_ERROR_CHECK(bsp_display_lock(portMAX_DELAY));
@@ -208,9 +212,10 @@ extern "C" void app_main() {
     while (true) {
         vTaskDelay(pdMS_TO_TICKS(5000));
         auto s = read_snapshot();
-        ESP_LOGI(Tag, "state=%d link=%d secure=%d rx=%lu dup=%lu rejected=%lu heap=%lu",
+        ESP_LOGI(Tag, "state=%d link=%d secure=%d rx=%lu dup=%lu rejected=%lu heap=%lu internal=%lu",
             static_cast<int>(motonav::screen_mode(s)), s.linked, s.encrypted,
             static_cast<unsigned long>(s.packets.accepted), static_cast<unsigned long>(s.packets.duplicates),
-            static_cast<unsigned long>(s.packets.rejected), static_cast<unsigned long>(esp_get_free_heap_size()));
+            static_cast<unsigned long>(s.packets.rejected), static_cast<unsigned long>(esp_get_free_heap_size()),
+            static_cast<unsigned long>(heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)));
     }
 }
