@@ -11,7 +11,8 @@ set(COMPONENTS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../components")
 set(BENCH_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../device/motonav_bench")
 function(add_preview target tests)
     add_executable(${target} preview.cpp
-        ${COMPONENTS_DIR}/motonav_ui/navigation_ui.cpp ${COMPONENTS_DIR}/motonav_ui/dashboard.cpp)
+        ${COMPONENTS_DIR}/motonav_ui/navigation_ui.cpp ${COMPONENTS_DIR}/motonav_ui/dashboard.cpp
+        ${COMPONENTS_DIR}/motonav_ui/label_cache.cpp)
     target_include_directories(${target} PRIVATE .
         ${COMPONENTS_DIR}/motonav_core/include ${COMPONENTS_DIR}/motonav_ui/include)
     target_compile_definitions(${target} PRIVATE MOTONAV_DEVICE_TESTS=${tests})
@@ -31,6 +32,8 @@ add_preview(ui_map_autorun_test 1)
 target_compile_definitions(ui_map_autorun_test PRIVATE MOTONAV_AUTORUN_MAP_BENCH=1)
 add_preview(ui_map_decoder_test 1)
 target_compile_definitions(ui_map_decoder_test PRIVATE MOTONAV_MAP_DECODER_ONLY=1)
+add_preview(ui_uncached_test 1)
+target_compile_definitions(ui_uncached_test PRIVATE MOTONAV_DISABLE_LABEL_CACHE=1)
 enable_testing()
 add_test(NAME ui_production_without_tests COMMAND ui_production "${CMAKE_CURRENT_BINARY_DIR}/preview-production")
 add_test(NAME ui_normal COMMAND ui_preview "${CMAKE_CURRENT_BINARY_DIR}/preview-normal")
@@ -41,3 +44,7 @@ add_test(NAME ui_map_pixels_equal COMMAND ${CMAKE_COMMAND} -E compare_files
     "${CMAKE_CURRENT_BINARY_DIR}/preview-normal/map-moving.ppm"
     "${CMAKE_CURRENT_BINARY_DIR}/preview-decoder/map-moving.ppm")
 set_tests_properties(ui_map_pixels_equal PROPERTIES DEPENDS "ui_normal;ui_decoder_fallback")
+add_test(NAME ui_uncached_reference COMMAND ui_uncached_test "${CMAKE_CURRENT_BINARY_DIR}/preview-uncached")
+add_test(NAME ui_cached_pixels_equal COMMAND ${CMAKE_COMMAND}
+    "-DROOT=${CMAKE_CURRENT_BINARY_DIR}" -P "${CMAKE_CURRENT_SOURCE_DIR}/compare_cache.cmake")
+set_tests_properties(ui_cached_pixels_equal PROPERTIES DEPENDS "ui_normal;ui_uncached_reference")

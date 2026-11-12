@@ -1,4 +1,4 @@
-# 固件分层与接口（0.2.5）
+# 固件分层与接口（0.2.6）
 
 本文件描述当前已实现的结构。主程序只组装模块；板级实现由独立 ESP-IDF 组件管理，应用不直接调用 BSP、NimBLE 或 LCD/I²C 接口。现有 NAV3 协议保持兼容。
 
@@ -22,6 +22,7 @@ moto_esp32/
 │   ├── motonav_platform/             NVS 初始化、设备名、版本、时钟、内存
 │   ├── motonav_core/                 纯 C++ 协议、会话、显示状态模型
 │   ├── motonav_ui/                   导航页面、仪表控件、可选页面扩展接口
+│   │   └── label_cache.*            私有的有界标签像素缓存，不接触驱动
 │   └── motonav_graphics/             全屏地图投影、裁剪、RGB565 条带渲染
 ├── tests/
 │   ├── device/motonav_bench/         可选设备测试组件，模拟地图也在这里
@@ -104,7 +105,8 @@ ESP_ERROR_CHECK(drivers::ble_start(name, drivers::firmware_version(), navigation
 - 部分分段提交失败时先收回已接受的 DMA，再锁存故障阻止后续命令；若无法确认 DMA 已回收则终止运行，绝不虚构完成后复用内存。初始化失败不自动改用其他传输实现。
 - SPI 热路径放入内部指令 RAM，减少 Flash 指令缓存未命中的影响；这不表示整条 LVGL/驱动调用链支持 Flash 缓存关闭期间运行。当前没有固件 OTA。
 - 从普通应用任务调用 LVGL 时先 `display_lock()`，完成后解锁；LVGL 自己的事件和定时回调已经持锁。亮度接口自己加锁，并在完成上一笔 DMA 后操作面板。
-- Dashboard 的点数组必须与页面同寿命。导航页持有自己的 Dashboard；测试组件创建独立 LVGL screen，退出时切回导航页并删除测试 screen，连同地图/背景缓存一起释放。
+- Dashboard 的点数组必须与页面同寿命。导航页持有自己的 Dashboard；测试组件创建独立 LVGL screen，退出时切回导航页并删除测试 screen，连同地图/仪表背景一起释放。
+- `motonav_ui/label_cache.cpp` 独立管理 8 槽标签缓存，仅接受已验证的内置字体、ASCII 单行居中标签和实色背景；透明、渐变、多行、选中、旋转及其他字体交回 LVGL。圆角仍由 LVGL 绘制，缓存只复制实色中部。缓存键包含文字副本、绘制描述、尺寸、背景色与圆角；不保存可变文字指针作为内容依据。一个延迟分配的约 466 KiB 像素池按平台的大块分配策略进入 PSRAM，槽位复用，不逐帧分配；跨页面保留，LVGL 反初始化时释放。`label_cache_stats()` 只读命中/重绘/容量，调用时持 LVGL 锁。
 - 地图接口调用必须持 LVGL 锁。路线最多 512 点、背景道路最多 64 段；输入在函数返回前复制/投影。当前自定义绘制单元依赖 LVGL 9.5.0 私有接口，不能单独升级 LVGL 而跳过回归。
 
 ## 正式构建与可删除测试
@@ -132,6 +134,8 @@ pwsh -File tools/build.ps1 -MapBench -BenchSeconds 43
 
 设备分析器位于 `tests/device/motonav_bench/driver_probe.cpp`，为测试组件注入时钟/FPS/驱动计数，并监听 LVGL 渲染事件。`driver_profile` 的耗时可以重叠，不能相加当作帧时间；DMA 等待与绘制本来就在流水执行。`transfers` 是逻辑像素条带数，不是拆分后的硬件 DMA 事务数。正式构建不注册这个分析器，删除 `tests/` 不影响驱动。
 
+0.2.6 增加 `draw_profile` 软件绘制任务耗时和 `map_paint` 地图栅格耗时；地图计时器由调用方注入，默认空指针关闭。软件任务分析器依赖固定的 LVGL 9.5.0 同步软件绘制模式，只存在于测试组件。主机离屏测试增加不启用缓存的参考构建，逐像素比较所有状态以及文字、颜色、尺寸、字体、位置、透明度、缓存替换和析构。
+
 原 `CONFIG_MOTONAV_BOOT_DISPLAY_TEST` 已删除，避免 Kconfig 遗留值把测试带入正式包。脚本每次显式设置 `MOTONAV_DEVICE_TESTS`、`MOTONAV_AUTORUN_BENCH`、`MOTONAV_AUTORUN_MAP_BENCH`，无测试参数就全部关闭。直接使用 IDF 时要注意 CMake 缓存；恢复正式版使用：
 
 ```text
@@ -152,4 +156,4 @@ python tools/export_source.py dist/source-production
 
 新传感器或存储驱动新增为独立组件，公开小接口并返回真实读数/错误，不在驱动中创建页面。应用增加业务服务，UI 只接收状态；云端消息与地图路线接收也分别建立有界业务模块，避免重新塞回 `app_main.cpp`。
 
-目前只封装已经接入的显示、触摸、BLE 与基础平台服务；未实现电池/充电、IMU、RTC、音频、TF 卡业务或固件 OTA。正式导航仍为 NAV3 仪表，真实路线输入尚待两端联调。全屏地图图形组件保留，模拟路线只存在于测试模块；本次重构不等于已达成全屏 40 FPS。
+目前只封装已经接入的显示、触摸、BLE 与基础平台服务；未实现电池/充电、IMU、RTC、音频、TF 卡业务或固件 OTA。正式导航仍为 NAV3 仪表，真实路线输入尚待两端联调。全屏地图图形组件保留，模拟路线只存在于测试模块；性能验收只适用于 [0.2.6 实测报告](HARDWARE_TEST_0.2.6.md) 所列负载。

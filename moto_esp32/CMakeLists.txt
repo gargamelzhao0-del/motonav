@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-set(PROJECT_VER "0.2.5")
+set(PROJECT_VER "0.2.6")
 option(MOTONAV_DEVICE_TESTS "Include removable on-device test screens" OFF)
 option(MOTONAV_AUTORUN_BENCH "Run all display workloads once at boot" OFF)
 option(MOTONAV_AUTORUN_MAP_BENCH "Run only the map workload once at boot" OFF)

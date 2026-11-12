@@ -1,6 +1,9 @@
 #include "motonav/ui/dashboard.h"
+#include "label_cache.h"
 #include "motonav/core/display_model.h"
 #include "src/misc/cache/instance/lv_image_cache.h"
+#include "src/core/lv_obj_event_private.h"
+#include "src/misc/lv_area_private.h"
 
 namespace motonav {
 namespace { constexpr uint32_t Lime = 0xc4fa64, White = 0xf2f3e9, Muted = 0x89978c; }
@@ -28,6 +31,16 @@ static void create_rim(lv_obj_t *screen) {
         rim = lv_canvas_create(screen);
         lv_obj_remove_style_all(rim);
         lv_canvas_set_draw_buf(rim, buffer);
+        lv_obj_add_event_cb(rim, [](lv_event_t *event) {
+            auto *object = lv_event_get_target_obj(event);
+            auto *cover = static_cast<lv_cover_check_info_t *>(lv_event_get_param(event));
+            lv_area_t bounds; lv_obj_get_coords(object, &bounds);
+            if (cover->res != LV_COVER_RES_MASKED && !lv_image_get_rotation(object) &&
+                lv_image_get_scale_x(object) == LV_SCALE_NONE && lv_image_get_scale_y(object) == LV_SCALE_NONE &&
+                lv_obj_get_style_opa(object, LV_PART_MAIN) == LV_OPA_COVER &&
+                lv_obj_get_style_image_opa(object, LV_PART_MAIN) == LV_OPA_COVER &&
+                lv_area_is_in(cover->area, &bounds, 0)) cover->res = LV_COVER_RES_COVER;
+        }, LV_EVENT_COVER_CHECK, nullptr);
         lv_canvas_fill_bg(rim, lv_color_hex(0x090f0c), LV_OPA_COVER);
         lv_layer_t layer;
         lv_canvas_init_layer(rim, &layer);
@@ -40,6 +53,12 @@ static void create_rim(lv_obj_t *screen) {
         lv_area_t area{14, 14, 451, 451};
         lv_draw_rect(&layer, &border, &area);
         lv_canvas_finish_layer(rim, &layer);
+        // Cache in display byte order once; repeated partial/full refreshes
+        // can copy this image without swapping every pixel on every frame.
+        for (uint32_t y=0; y<buffer->header.h; ++y)
+            lv_draw_sw_rgb565_swap(buffer->data+y*buffer->header.stride, buffer->header.w);
+        buffer->header.cf = LV_COLOR_FORMAT_RGB565_SWAPPED;
+        lv_canvas_set_draw_buf(rim, buffer);
         lv_obj_add_event_cb(rim, [](lv_event_t *event) {
             auto *owned_buffer = static_cast<lv_draw_buf_t *>(lv_event_get_user_data(event));
             lv_image_cache_drop(owned_buffer);
@@ -70,6 +89,7 @@ void dashboard_arrow(Dashboard &view, int icon) {
 }
 
 void create_dashboard(lv_obj_t *screen, Dashboard &view) {
+    initialize_label_cache();
     lv_obj_set_style_bg_color(screen, lv_color_hex(0x090f0c), 0);
     lv_obj_remove_flag(screen, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_flag(screen, LV_OBJ_FLAG_CLICKABLE);

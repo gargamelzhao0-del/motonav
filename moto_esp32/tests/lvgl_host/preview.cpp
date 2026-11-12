@@ -1,4 +1,5 @@
 #include "motonav/ui/navigation_ui.h"
+#include "motonav/ui/dashboard.h"
 #if MOTONAV_DEVICE_TESTS
 #include "motonav/testing/display_benchmark.h"
 #endif
@@ -47,6 +48,57 @@ static void require_label(const char *text) {
         std::exit(1);
     }
 }
+#if MOTONAV_DEVICE_TESTS
+static void exercise_label_cache(lv_display_t *display, const std::filesystem::path &directory) {
+    auto *previous = lv_screen_active();
+    auto *screen = lv_obj_create(nullptr);
+    lv_obj_set_style_bg_color(screen, lv_color_hex(0x17334d), 0);
+    auto *label = lv_label_create(screen);
+    lv_obj_set_size(label, 350, LV_SIZE_CONTENT); lv_obj_set_pos(label, 58, 76);
+    lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_text_font(label, &lv_font_montserrat_20, 0);
+    lv_obj_set_style_bg_color(label, lv_color_hex(0x090f0c), 0);
+    lv_obj_set_style_bg_opa(label, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(label, 6, 0);
+    lv_label_set_text(label, "CACHE / TEST 40");
+    lv_screen_load(screen);
+    save(display, directory / "cache-initial.ppm");
+    auto before = motonav::label_cache_stats();
+    lv_obj_invalidate(label); save(display, directory / "cache-hit.ppm");
+#ifndef MOTONAV_DISABLE_LABEL_CACHE
+    auto hit = motonav::label_cache_stats();
+    if (hit.hits <= before.hits || hit.misses != before.misses) std::abort();
+#endif
+    lv_label_set_text(label, "CACHE / TEST 41"); save(display, directory / "cache-text.ppm");
+    lv_obj_set_style_text_color(label, lv_color_hex(0xec8137), 0); save(display, directory / "cache-color.ppm");
+    lv_obj_set_style_bg_color(label, lv_color_hex(0x2a4867), 0); save(display, directory / "cache-background.ppm");
+    lv_obj_set_style_text_font(label, &lv_font_montserrat_28, 0); save(display, directory / "cache-font.ppm");
+    lv_obj_set_style_radius(label, 0, 0); save(display, directory / "cache-radius.ppm");
+    lv_obj_set_pos(label, 42, 123); save(display, directory / "cache-move.ppm");
+    lv_obj_set_width(label, 150); save(display, directory / "cache-wrap.ppm");
+    lv_obj_set_width(label, 350); lv_label_set_text(label, "ONE\nTWO"); save(display, directory / "cache-multiline.ppm");
+    lv_label_set_text(label, "CACHE / TEST 41");
+    lv_obj_set_style_bg_opa(label, LV_OPA_50, 0); save(display, directory / "cache-translucent.ppm");
+    lv_obj_set_style_bg_opa(label, LV_OPA_COVER, 0);
+    lv_obj_set_style_opa(label, LV_OPA_50, 0); save(display, directory / "cache-opacity.ppm");
+    lv_obj_set_style_opa(label, LV_OPA_COVER, 0);
+    lv_obj_set_style_recolor(label, lv_color_hex(0x36adf0), 0);
+    lv_obj_set_style_recolor_opa(label, LV_OPA_50, 0); save(display, directory / "cache-recolor.ppm");
+    lv_obj_set_style_recolor_opa(label, LV_OPA_TRANSP, 0);
+    // More distinct strings than cache slots exercises replacement safely.
+    for (int i=0;i<12;++i) { lv_label_set_text_fmt(label, "REPLACEMENT %d", i); lv_obj_invalidate(label); lv_refr_now(display); }
+    lv_label_set_text(label, "CACHE / TEST 41"); save(display, directory / "cache-eviction.ppm");
+    unsigned index = 0;
+    for (auto *font : {&lv_font_montserrat_16, &lv_font_montserrat_20, &lv_font_montserrat_28, &lv_font_montserrat_48}) {
+        lv_obj_set_style_text_font(label, font, 0);
+        for (const char *text : {"W/y!?()_", "fjAVT[]", "gqp.,:;"}) {
+            lv_label_set_text(label, text);
+            save(display, directory / ("cache-bearing-"+std::to_string(index++)+".ppm"));
+        }
+    }
+    lv_screen_load(previous); lv_obj_delete(screen);
+}
+#endif
 int main(int argc, char **argv) {
     if (argc != 2) return 2;
     std::filesystem::path directory(argv[1]); std::filesystem::create_directories(directory);
@@ -128,6 +180,8 @@ int main(int argc, char **argv) {
     if (pixels != idle_pixels || lv_screen_active() != navigation_screen ||
         lv_obj_get_child_count(lv_screen_active()) != normal_children) return 1;
     std::cout << "PASS: production UI links/runs without the benchmark or graphics components\n";
+    lv_deinit();
+    if (motonav::label_cache_stats().bytes) std::abort();
     return 0;
 #else
     snapshot = {};
@@ -180,5 +234,8 @@ int main(int argc, char **argv) {
     require_label("CONNECT PHONE");
     if (lv_screen_active() != navigation_screen || lv_obj_get_child_count(lv_screen_active()) != normal_children) return 1;
     std::cout << "PASS: animated map, pairing/live preemption, manual exit and canvas cleanup; no hardware/FPS claim\n";
+    exercise_label_cache(display, directory);
 #endif
+    lv_deinit();
+    if (motonav::label_cache_stats().bytes) std::abort();
 }

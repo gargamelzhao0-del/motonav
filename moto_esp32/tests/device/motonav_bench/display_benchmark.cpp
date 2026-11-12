@@ -28,6 +28,7 @@ uint64_t test_started = 0, last_sample = 0;
 uint32_t minimum_fps = UINT32_MAX, samples = 0;
 uint64_t total_fps = 0;
 uint64_t map_render_us = 0, map_render_max_us = 0, map_frames = 0;
+LabelCacheStats cache_start;
 
 const char *workload_name() {
     return workload == Workload::Map ? "map466x466" : workload == Workload::Full ? "full" : "partial";
@@ -67,6 +68,8 @@ void reset_benchmark() {
     test_started = last_sample = milliseconds();
     minimum_fps = UINT32_MAX; samples = 0; total_fps = 0;
     map_render_us = map_render_max_us = map_frames = 0;
+    cache_start = label_cache_stats();
+    if (map_canvas) configure_route_map_profiler(map_canvas, services.now_us);
     services.reset_fps(display);
     if (services.profile) services.profile(true);
     set_label_text(view.number, "-- FPS"); set_label_text(view.speed, "WARMING UP");
@@ -76,6 +79,10 @@ void reset_benchmark() {
 }
 void report_benchmark() {
     if (!samples) return;
+    const auto cache = label_cache_stats();
+    ESP_LOGI("label_cache", "hits=%llu misses=%llu bytes=%u",
+        static_cast<unsigned long long>(cache.hits-cache_start.hits),
+        static_cast<unsigned long long>(cache.misses-cache_start.misses), static_cast<unsigned>(cache.bytes));
     if (services.profile) services.profile(false);
     ESP_LOGI("display_test", "completed workload=%s min=%lu avg=%lu samples=%lu measured_ms=%llu",
         workload_name(), static_cast<unsigned long>(minimum_fps),
@@ -84,6 +91,12 @@ void report_benchmark() {
     if (map_frames) ESP_LOGI("map_profile", "frames=%llu prepare_avg_us=%llu prepare_max_us=%llu",
         static_cast<unsigned long long>(map_frames), static_cast<unsigned long long>(map_render_us / map_frames),
         static_cast<unsigned long long>(map_render_max_us));
+    if (map_canvas) {
+        const auto paint = route_map_paint_stats(map_canvas);
+        ESP_LOGI("map_paint", "tiles=%llu total_us=%llu tile_avg_us=%llu",
+            static_cast<unsigned long long>(paint.calls), static_cast<unsigned long long>(paint.elapsed_us),
+            static_cast<unsigned long long>(paint.calls ? paint.elapsed_us / paint.calls : 0));
+    }
 }
 void touch(lv_event_t *event);
 void set_test(bool enabled) {

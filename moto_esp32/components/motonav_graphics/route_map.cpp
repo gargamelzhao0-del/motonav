@@ -26,6 +26,8 @@ struct MapScene {
     size_t road_count = 0, route_count = 0;
     lv_draw_buf_t strip{};
     uint16_t *pixels = nullptr; // Decoder fallback only; direct draw needs no scratch copy.
+    uint64_t (*clock_us)() = nullptr;
+    MapPaintStats stats;
 };
 lv_image_decoder_t *map_decoder;
 constexpr uint8_t MapDrawUnit = 240; // Application unit, separate from LVGL's built-in units.
@@ -64,7 +66,8 @@ void line(MapRaster &raster, const Segment &segment, int width, uint32_t color, 
         std::min(segment.a.y, segment.b.y) - width > bottom) return;
     raster.line(segment.a, segment.b, width, panel_color(color));
 }
-void paint(MapRaster &raster, const MapScene &scene, int top, int bottom) {
+void paint(MapRaster &raster, MapScene &scene, int top, int bottom) {
+    const uint64_t begin = scene.clock_us ? scene.clock_us() : 0;
     raster.clear(panel_color(0x20292e));
     for (size_t i=0; i<scene.road_count; ++i) {
         line(raster, scene.roads[i], 8, 0x10191e, top, bottom);
@@ -74,6 +77,10 @@ void paint(MapRaster &raster, const MapScene &scene, int top, int bottom) {
         for (size_t i=0; i<scene.route_count; ++i)
             line(raster, scene.route[i], pass ? 7 : 12, pass ? 0xb66dff : 0x2a1440, top, bottom);
     player(raster, scene.image.header.w/2, scene.image.header.h*7/10);
+    if (scene.clock_us) {
+        scene.stats.elapsed_us += scene.clock_us() - begin;
+        ++scene.stats.calls;
+    }
 }
 int32_t evaluate(lv_draw_unit_t *, lv_draw_task_t *task) {
     auto *dsc = lv_draw_task_get_image_dsc(task);
@@ -241,4 +248,12 @@ bool render_route_map(lv_obj_t *view, const MapCamera &camera, const MapGeometry
     return true;
 }
 
+void configure_route_map_profiler(lv_obj_t *view, uint64_t (*clock_us)()) {
+    auto *scene = view ? scene_for(lv_image_get_src(view)) : nullptr;
+    if (scene) { scene->clock_us = clock_us; scene->stats = {}; }
+}
+MapPaintStats route_map_paint_stats(lv_obj_t *view) {
+    auto *scene = view ? scene_for(lv_image_get_src(view)) : nullptr;
+    return scene ? scene->stats : MapPaintStats{};
+}
 } // namespace motonav
