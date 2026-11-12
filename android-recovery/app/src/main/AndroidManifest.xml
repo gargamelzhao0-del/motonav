@@ -28,6 +28,7 @@
         <meta-data android:name="com.amap.api.v2.apikey" android:value="" />
         <provider android:name=".UpdateApkProvider" android:authorities="${applicationId}.updates" android:exported="false" android:grantUriPermissions="true" />
         <activity android:name=".DiagnosticsActivity" android:exported="false" />
+        <activity android:name=".SdkReplayActivity" android:exported="false" />
         <activity android:name=".UpdateActivity" android:exported="false" />
         <activity android:name=".MainActivity" android:exported="false" />
         <activity android:name=".AmapActivity" android:exported="true">

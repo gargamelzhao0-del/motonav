@@ -103,6 +103,10 @@ public final class AmapActivity extends Activity {
         label("Android Key绑定包名："+getPackageName()+"\n本安装签名SHA1："+certificateSha1(),12);
         button("应用更新",()->startActivity(new Intent(this,UpdateActivity.class)));
         button("定位诊断 / 实时日志",()->startActivity(new Intent(this,DiagnosticsActivity.class)));
+        button("SDK 模拟导航测试",()->{
+            if (NavigationService.navigating) { status.setText("请先结束真实导航，再运行 SDK 模拟测试。"); return; }
+            startActivity(new Intent(this,SdkReplayActivity.class));
+        });
         button("返回模拟功能（非真实导航）", () -> {
             if (NavigationService.navigating) { status.setText("请先结束当前导航，再进入模拟功能。"); return; }
             if (navigationService != null) navigationService.disconnectScreen();

@@ -109,8 +109,10 @@ public class NavigationRuntimeTest {
                 NaviSetting.updatePrivacyShow(context,true,true); NaviSetting.updatePrivacyAgree(context,true);
                 // Deliberately invalid fixture. No user's Key or signing secrets are supplied to emulator CI.
                 AMapNavi.setApiKey(context,"00000000000000000000000000000000");
-                engine.set(AMapNavi.getInstance(context));
-                engine.get().addAMapNaviListener(listener);
+                try {
+                    engine.set(AMapNavi.getInstance(context));
+                    engine.get().addAMapNaviListener(listener);
+                } catch (Exception e) { throw new AssertionError("SDK initialization threw a checked exception",e); }
             });
             assertTrue("Real SDK initialization never called back",completed.await(40,TimeUnit.SECONDS));
             writeEvidence("amap-sdk-runtime.txt","Real AMap SDK callback: "+outcome.get()
@@ -120,6 +122,28 @@ public class NavigationRuntimeTest {
                 if (engine.get() != null) { engine.get().removeAMapNaviListener(listener); AMapNavi.destroy(); }
             });
         }
+    }
+    @Test public void simulationRequiresExplicitConfigurationAndCannotStartDuringNavigation() {
+        try (ActivityScenario<SdkReplayActivity> scenario = ActivityScenario.launch(SdkReplayActivity.class)) {
+            scenario.onActivity(activity -> {
+                activity.startTest();
+                assertFalse(NavigationService.navigating);
+            });
+            InstrumentationRegistry.getInstrumentation().waitForIdleSync();
+            scenario.onActivity(activity -> capture(activity,"sdk-simulation-unconfigured.png"));
+            scenario.recreate();
+            scenario.onActivity(activity -> {
+                NavigationService.navigating = true;
+                try { activity.startTest(); assertTrue(NavigationService.navigating); }
+                finally { NavigationService.navigating = false; }
+            });
+        }
+    }
+    @Test public void waitingReasonSeparatesActualSdkAndMapStreams() {
+        long now = SystemClock.elapsedRealtime();
+        assertEquals(GuidanceHealth.Reason.GPS_WEAK,GuidanceHealth.reason(now,true,now*1_000_000L,0,now));
+        assertEquals(GuidanceHealth.Reason.MAP_FIX_STALE_SDK_LIVE,GuidanceHealth.reason(now,false,0,now*1_000_000L,now));
+        assertEquals(GuidanceHealth.Reason.INSTRUCTION_MISSING,GuidanceHealth.reason(now,false,now*1_000_000L,0,-1));
     }
     private static JourneyState navigating(long now) {
         JourneyState state = new JourneyState(); long token=state.begin(true,true);

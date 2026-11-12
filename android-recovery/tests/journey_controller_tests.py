@@ -65,8 +65,9 @@ public class AMap {public Polyline line; public Polyline addPolyline(PolylineOpt
     "com/amap/api/navi/model/AMapCalcRouteResult.java": 'package com.amap.api.navi.model; public class AMapCalcRouteResult {public int type,error,requestId;public int[] ids={1};public AMapCalcRouteResult(int t){type=t;requestId=t==0?1:t+10;}public int getRouteRequestId(){return requestId;}public int getCalcRouteType(){return type;}public int getErrorCode(){return error;}public int[] getRouteid(){return ids;}}',
     "com/amap/api/navi/model/AMapNaviPath.java": '''package com.amap.api.navi.model; public class AMapNaviPath {public java.util.List<NaviLatLng> points=java.util.List.of(new NaviLatLng(30,120),new NaviLatLng(30.01,120.01)); public int length=1000;public java.util.List<NaviLatLng> getCoordList(){return points;}public int getAllLength(){return length;}}''',
     "com/amap/api/navi/model/NaviInfo.java": '''package com.amap.api.navi.model; public class NaviInfo {public int getNaviType(){return 1;}public int getIconType(){return 3;}public int getCurStepRetainDistance(){return 60;}public int getPathRetainDistance(){return 800;}public int getPathRetainTime(){return 120;}public String getNextRoadName(){return "road";}public android.graphics.Bitmap getIconBitmap(){return null;}}''',
+    "com/amap/api/navi/model/AMapNaviLocation.java": '''package com.amap.api.navi.model; public class AMapNaviLocation {public Long getTime(){return System.currentTimeMillis();}public int getLocationType(){return 0;}public float getAccuracy(){return 8;}public boolean isMatchNaviPath(){return true;}}''',
     "com/amap/api/navi/SimpleNaviListener.java": '''package com.amap.api.navi; import com.amap.api.navi.model.*;
-public class SimpleNaviListener {public void onInitNaviSuccess(){}public void onInitNaviFailure(){}public void onCalculateRouteFailure(AMapCalcRouteResult r){}public void onCalculateRouteSuccess(AMapCalcRouteResult r){}public void onStartNavi(int t){}public void onNaviInfoUpdate(NaviInfo i){}public void onStopNavi(){}public void onArriveDestination(){}public void onReCalculateRouteForYaw(){}public void onReCalculateRouteForTrafficJam(){}public void onGpsSignalWeak(boolean w){}}
+public class SimpleNaviListener {public void onInitNaviSuccess(){}public void onInitNaviFailure(){}public void onCalculateRouteFailure(AMapCalcRouteResult r){}public void onCalculateRouteSuccess(AMapCalcRouteResult r){}public void onStartNavi(int t){}public void onNaviInfoUpdate(NaviInfo i){}public void onLocationChange(AMapNaviLocation l){}public void onStopNavi(){}public void onArriveDestination(){}public void onReCalculateRouteForYaw(){}public void onReCalculateRouteForTrafficJam(){}public void onGpsSignalWeak(boolean w){}}
 ''',
     "com/amap/api/navi/AMapNavi.java": '''package com.amap.api.navi; import com.amap.api.navi.model.*; import java.util.*;
 public class AMapNavi {
@@ -103,7 +104,7 @@ with tempfile.TemporaryDirectory(prefix="motonav-journey-") as directory:
     production = Path("app/src/main/java/com/motonav/companion")
     sources = [str(root / name) for name in stubs]
     sources += [str(production / (name + ".java")) for name in
-                ("JourneyController", "JourneyState", "MapStartupPolicy", "NavigationFrame", "DiagnosticRecord")]
+                ("JourneyController", "JourneyState", "GuidanceHealth", "MapStartupPolicy", "NavigationFrame", "DiagnosticRecord")]
     classes = root / "classes"
     classes.mkdir()
     subprocess.run(["java", "-m", "jdk.compiler/com.sun.tools.javac.Main", "-encoding", "UTF-8",
