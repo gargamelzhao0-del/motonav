@@ -20,6 +20,10 @@
 
 ## 诊断信息
 
+Android 11 AVD 实测发现 GPS 回调的 `elapsedRealtimeNanos=1794479031553906000`，但开机计时只有 `72961571089`；其毫秒值与 `getTime()=1794479031553` 相同，是日历时间混入了开机计时字段。0.7.6 会将此新测量判成未来并拒绝。0.7.7 仅识别与测量日历时间相符的这一种时钟域错误，再按原日历时间计算年龄；15 秒以上、未来日历时间、不相符的未来值，以及正常但已过期的开机计时仍拒绝。增加真实 GPS 用例及边界回归，原始时间数据保留在测试 artifact。该发现不等于已证实异地手机同因。
+
+`location_callback.reason` 标记 `epoch_elapsed`、`wall_fallback`、`future_elapsed` 或 `monotonic`，便于从手机诊断区分时间来源。
+
 原来“定位或导航指令暂时中断”现拆分为 GPS 弱、地图定位过期、地图定位过期但 SDK 位置仍更新、未收到首条指令、指令过期、等待中断后的新位置。观察导航 SDK 的位置流只用于诊断，不会把地图的旧位置时间改成当前时间。
 
 远程诊断使用已有的 `navigation_state` 事件，新增状态值 `sdk_position`、`sdk_instruction`、`waiting`、`sdk_replay_instruction`、`sdk_replay_end`。只记录时效、精度、类型、计数和枚举原因，不上传坐标、道路名或 Key。须先主动开启诊断。

@@ -152,7 +152,7 @@ final class JourneyController {
         syncVoice(false);
         frame = NavigationFrame.status(NavigationFrame.WAITING);
         icon(null);
-        GuidanceHealth.Reason reason = GuidanceHealth.reason(SystemClock.elapsedRealtime(),gpsWeak,
+        GuidanceHealth.Reason reason = GuidanceHealth.reason(SystemClock.elapsedRealtimeNanos(),gpsWeak,
                 trustedFixTime(),lastSdkFixNanos,lastInstructionReceivedMs);
         if (reason != lastWaitingReason) Diagnostics.record("navigation_state", "state", "waiting", "reason", reason.name(),
                 "fix_age_ms", DiagnosticRecord.age(SystemClock.elapsedRealtimeNanos(),trustedFixTime()),

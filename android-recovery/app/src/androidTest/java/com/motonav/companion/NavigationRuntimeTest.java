@@ -196,9 +196,11 @@ public class NavigationRuntimeTest {
     }
     @Test public void waitingReasonSeparatesActualSdkAndMapStreams() {
         long now = SystemClock.elapsedRealtime();
-        assertEquals(GuidanceHealth.Reason.GPS_WEAK,GuidanceHealth.reason(now,true,now*1_000_000L,0,now));
-        assertEquals(GuidanceHealth.Reason.MAP_FIX_STALE_SDK_LIVE,GuidanceHealth.reason(now,false,0,now*1_000_000L,now));
-        assertEquals(GuidanceHealth.Reason.INSTRUCTION_MISSING,GuidanceHealth.reason(now,false,now*1_000_000L,0,-1));
+        assertEquals(GuidanceHealth.Reason.GPS_WEAK,GuidanceHealth.reason(now*1_000_000L,true,now*1_000_000L,0,now));
+        assertEquals(GuidanceHealth.Reason.MAP_FIX_STALE_SDK_LIVE,GuidanceHealth.reason(now*1_000_000L,false,0,now*1_000_000L,now));
+        assertEquals(GuidanceHealth.Reason.INSTRUCTION_MISSING,GuidanceHealth.reason(now*1_000_000L,false,now*1_000_000L,0,-1));
+        long precise = now*1_000_000L+500_000;
+        assertEquals(GuidanceHealth.Reason.INSTRUCTION_MISSING,GuidanceHealth.reason(precise,false,precise,0,-1));
     }
     private static JourneyState navigating(long now) {
         JourneyState state = new JourneyState(); long token=state.begin(true,true);

@@ -3,10 +3,11 @@ package com.motonav.companion;
 /** Diagnoses independent streams without relaxing the production freshness gate. */
 public final class GuidanceHealth {
     public enum Reason { GPS_WEAK, MAP_FIX_STALE, MAP_FIX_STALE_SDK_LIVE, INSTRUCTION_MISSING, INSTRUCTION_STALE, AWAITING_NEW_POSITION }
-    public static Reason reason(long nowMs, boolean gpsWeak, long mapFixNanos, long sdkFixNanos, long instructionMs) {
+    public static Reason reason(long nowNanos, boolean gpsWeak, long mapFixNanos, long sdkFixNanos, long instructionMs) {
+        long nowMs = nowNanos/1_000_000L;
         if (gpsWeak) return Reason.GPS_WEAK;
-        if (!MapStartupPolicy.fresh(nowMs * 1_000_000L,mapFixNanos))
-            return MapStartupPolicy.fresh(nowMs * 1_000_000L,sdkFixNanos) ? Reason.MAP_FIX_STALE_SDK_LIVE : Reason.MAP_FIX_STALE;
+        if (!MapStartupPolicy.fresh(nowNanos,mapFixNanos))
+            return MapStartupPolicy.fresh(nowNanos,sdkFixNanos) ? Reason.MAP_FIX_STALE_SDK_LIVE : Reason.MAP_FIX_STALE;
         if (instructionMs < 0) return Reason.INSTRUCTION_MISSING;
         if (instructionMs > nowMs || nowMs-instructionMs > 15_000) return Reason.INSTRUCTION_STALE;
         return Reason.AWAITING_NEW_POSITION;

@@ -25,12 +25,20 @@ public final class MapStartupPolicy {
         return "高德定位失败（错误"+code+"），请记录错误码并检查定位权限、系统开关及网络。";
     }
     public static long fixTime(long nowNanos,long wallNowMillis,long elapsedNanos,long wallFixMillis){
-        if(elapsedNanos>0)return fresh(nowNanos,elapsedNanos)?elapsedNanos:0;
+        if(elapsedNanos>0 && !epochBasedElapsed(nowNanos,elapsedNanos,wallFixMillis))
+            return fresh(nowNanos,elapsedNanos)?elapsedNanos:0;
         // Some SDK locations omit elapsedRealtimeNanos. Do not mark cached wall-clock fixes fresh.
+        // Android Emulator's GPS HAL can instead put Unix-epoch nanoseconds in this
+        // field. Only use wall time when both fields demonstrably describe the same
+        // epoch measurement; never rescue arbitrary future or stale monotonic fixes.
         if(wallFixMillis<=0||wallFixMillis>wallNowMillis)return 0;
         long age=wallNowMillis-wallFixMillis;
         if(age>15000||nowNanos<=age*1000000L)return 0;
         return nowNanos-age*1000000L;
+    }
+    public static boolean epochBasedElapsed(long nowNanos,long elapsedNanos,long wallFixMillis) {
+        return elapsedNanos>nowNanos && wallFixMillis>=946684800000L
+                && Math.abs(elapsedNanos/1000000L-wallFixMillis)<=1;
     }
     public static boolean fresh(long now,long fix){return fix>0&&now>=fix&&now-fix<=15000000000L;}
 }
