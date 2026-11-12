@@ -21,8 +21,6 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
-import java.util.ArrayDeque;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.ArrayBlockingQueue;
@@ -37,19 +35,18 @@ import org.json.JSONObject;
 /** Explicit, expiring diagnosis sessions. No coordinates, SDK messages, keys or stable device IDs. */
 final class Diagnostics {
     private static final Object LOCK = new Object(), FILE_LOCK = new Object();
-    private static final long SESSION_MS = 60 * 60 * 1000L;
-    private static final int FILE_BYTES = 512 * 1024, QUEUE_LIMIT = 512;
+    private static volatile long sessionLimitMs = 60 * 60 * 1000L;
+    private static final int FILE_BYTES = 512 * 1024;
     private static final Handler main = new Handler(Looper.getMainLooper());
     private static final ThreadPoolExecutor writer = new ThreadPoolExecutor(1, 1, 0, TimeUnit.SECONDS,
         new ArrayBlockingQueue<>(256), task -> new Thread(task, "motonav-diagnostic-file"),
         new ThreadPoolExecutor.AbortPolicy());
     private static final ScheduledExecutorService sender = Executors.newSingleThreadScheduledExecutor(
         task -> new Thread(task, "motonav-diagnostic-upload"));
-    private static final ArrayDeque<Entry> queue = new ArrayDeque<>();
-    private record Entry(long sequence, String line) {}
+    private static volatile DiagnosticSpool spool;
     private static Context context;
     private static File directory;
-    private static boolean enabled;
+    private static boolean enabled, uploadEligible;
     private static volatile boolean storageFailed;
     private static String session = "", transportState = "未连接";
     private static long started, sequence, lastDelivered, nextAttempt;
@@ -60,7 +57,7 @@ final class Diagnostics {
     private static final Runnable heartbeat = new Runnable() {
         @Override public void run() {
             synchronized (LOCK) { if (!enabled) return; }
-            if (SystemClock.elapsedRealtime() - started >= SESSION_MS) { stop(); return; }
+            if (SystemClock.elapsedRealtime() - started >= sessionLimitMs) { stop(); return; }
             environment();
             main.postDelayed(this, 5000);
         }
@@ -84,13 +81,17 @@ final class Diagnostics {
     }
 
     static void start(DiagnosticEndpoint destination) {
+        start(destination, false);
+    }
+    static void start(DiagnosticEndpoint destination, boolean extended) {
         stop();
         synchronized (LOCK) {
+            sessionLimitMs = (extended ? 240L : 60L) * 60 * 1000;
             session = UUID.randomUUID().toString().replace("-", "");
             sequence = 0; started = SystemClock.elapsedRealtime(); lastDelivered = 0;
-            dropped = 0; failures = 0; nextAttempt = 0; queue.clear(); endpoint = destination;
+            dropped = 0; failures = 0; nextAttempt = 0; endpoint = destination;
             transportState = destination == null ? "仅本地记录" : "正在连接";
-            enabled = true;
+            enabled = true; uploadEligible = destination != null;
         }
         record("session_start", "version", BuildConfig.VERSION_NAME, "version_code", BuildConfig.VERSION_CODE,
             "api", Build.VERSION.SDK_INT, "manufacturer", Build.MANUFACTURER, "model", Build.MODEL);
@@ -101,9 +102,9 @@ final class Diagnostics {
     }
 
     static void stop() {
-        record("session_stop", "reason", "user_or_expiry");
+        emit(true, "session_stop", "reason", "user_or_expiry");
         synchronized (LOCK) {
-            enabled = false; endpoint = null; queue.clear();
+            enabled = false; endpoint = null; uploadEligible = false;
             if (pump != null) { pump.cancel(false); pump = null; }
             if (connection != null) connection.disconnect();
             connection = null;
@@ -115,20 +116,25 @@ final class Diagnostics {
     private static void emit(boolean immediate, String event, Object... fields) {
         String line;
         synchronized (LOCK) {
-            if (!enabled || SystemClock.elapsedRealtime() - started >= SESSION_MS) return;
+            if (!enabled || (SystemClock.elapsedRealtime() - started >= sessionLimitMs && !event.equals("session_stop"))) return;
             try { line = DiagnosticRecord.line(session, ++sequence, SystemClock.elapsedRealtime() - started, event, fields); }
             catch (RuntimeException ignored) { return; }
-            if (endpoint != null) {
-                if (queue.size() >= QUEUE_LIMIT) { queue.removeFirst(); dropped++; }
-                queue.addLast(new Entry(sequence, line));
-            }
+            // Persist in sequence order before the sender can observe the event, including crashes/stops.
+            if (uploadEligible) try { outbox().append(line, immediate); }
+            catch (java.io.IOException e) { storageFailed = true; }
         }
         Log.i("MotoNavDiag", line);
-        if (immediate) append(line);
-        else try { writer.execute(() -> append(line)); }
+        if (immediate) append(line, true);
+        else try { writer.execute(() -> append(line, false)); }
         catch (java.util.concurrent.RejectedExecutionException ignored) { storageFailed = true; }
     }
-    private static void append(String line) {
+    private static DiagnosticSpool outbox() throws java.io.IOException {
+        synchronized (FILE_LOCK) {
+            if (spool == null) spool = new DiagnosticSpool(directory);
+            return spool;
+        }
+    }
+    private static void append(String line, boolean sync) {
         synchronized (FILE_LOCK) {
             try {
                 if (!directory.isDirectory() && !directory.mkdirs()) throw new java.io.IOException();
@@ -166,9 +172,9 @@ final class Diagnostics {
     }
     static String status() {
         synchronized (LOCK) {
-            String state = enabled ? "诊断记录中 · 剩余 " + Math.max(0, (SESSION_MS - (SystemClock.elapsedRealtime() - started)) / 60000) + " 分钟"
+            String state = enabled ? "诊断记录中 · 剩余 " + Math.max(0, (sessionLimitMs - (SystemClock.elapsedRealtime() - started)) / 60000) + " 分钟"
                 : "诊断已停止；现有本地记录仍可导出";
-            if (enabled) state += "\n" + transportState + " · 待发送 " + queue.size() + " 条 · 丢弃 " + dropped + " 条";
+            if (enabled) state += "\n" + transportState + " · 待发送 " + (spool == null ? 0 : spool.size()) + " 条 · 丢弃 " + (dropped + (spool == null ? 0 : spool.dropped())) + " 条";
             if (enabled && lastDelivered > 0) state += "\n最近上传确认：" + (SystemClock.elapsedRealtime() - lastDelivered) / 1000 + " 秒前";
             if (enabled && endpoint != null) state += "\n接收端：" + endpoint.host;
             return state + (storageFailed ? "\n本地写入失败，请保留远程接收记录" : "");
@@ -176,22 +182,19 @@ final class Diagnostics {
     }
 
     private static void upload() {
-        DiagnosticEndpoint target; String currentSession; List<Entry> batch = new ArrayList<>();
+        DiagnosticEndpoint target; String currentSession; List<DiagnosticSpool.Entry> batch;
         synchronized (LOCK) {
-            if (!enabled || endpoint == null || queue.isEmpty() || SystemClock.elapsedRealtime() < nextAttempt) return;
-            if (SystemClock.elapsedRealtime() - started >= SESSION_MS) { main.post(Diagnostics::stop); return; }
+            if (!enabled || endpoint == null || SystemClock.elapsedRealtime() < nextAttempt) return;
+            if (SystemClock.elapsedRealtime() - started >= sessionLimitMs) { main.post(Diagnostics::stop); return; }
             target = endpoint; currentSession = session;
-            int size = 0;
-            for (Entry entry : queue) {
-                int bytes = entry.line().getBytes(StandardCharsets.UTF_8).length + 1;
-                if (batch.size() == 24 || size + bytes > 32768) break;
-                batch.add(entry); size += bytes;
-            }
         }
+        try { batch = outbox().batch(24, 32768); }
+        catch (java.io.IOException e) { storageFailed = true; return; }
+
         if (batch.isEmpty()) return;
         HttpsURLConnection request = null; int responseCode = -1;
         try {
-            StringBuilder body = new StringBuilder(); for (Entry item : batch) body.append(item.line()).append('\n');
+            StringBuilder body = new StringBuilder(); for (DiagnosticSpool.Entry item : batch) body.append(item.line()).append('\n');
             byte[] bytes = body.toString().getBytes(StandardCharsets.UTF_8);
             request = (HttpsURLConnection) new URL(target.uploadUrl).openConnection();
             request.setRequestMethod("POST"); request.setDoOutput(true); request.setInstanceFollowRedirects(false);
@@ -218,14 +221,14 @@ final class Diagnostics {
             if (new JSONObject(result.toString("UTF-8")).getLong("last_seq") != last) throw new java.io.IOException();
             synchronized (LOCK) {
                 if (!enabled || endpoint != target || !session.equals(currentSession)) return;
-                while (!queue.isEmpty() && queue.peekFirst().sequence() <= last) queue.removeFirst();
+                outbox().acknowledge(batch.get(0).session(), last);
                 failures = 0; nextAttempt = 0; lastDelivered = SystemClock.elapsedRealtime(); transportState = "远程接收已确认";
             }
         } catch (Exception ignored) {
             synchronized (LOCK) {
                 if (enabled && endpoint == target && session.equals(currentSession)) {
                     if (responseCode >= 400 && responseCode < 500 && responseCode != 429) {
-                        endpoint = null; queue.clear(); transportState = "连接已失效（HTTP " + responseCode + "），请重新连接；本地仍记录";
+                        endpoint = null; transportState = "连接已失效（HTTP " + responseCode + "），请重新连接；本地仍记录";
                     } else {
                         nextAttempt = SystemClock.elapsedRealtime() + Math.min(60000, 2000L << Math.min(failures++, 5));
                         transportState = "上传未确认，等待重试";

@@ -28,8 +28,12 @@ public final class JourneyState {
     public boolean ready(long token,long now){if(!planning(token)||now<0)return false;phase=Phase.READY;readyAt=now;return true;}
     public boolean start(boolean goodFix,long now,double movedMeters){
         if(phase!=Phase.READY)return false;
-        if(!goodFix||now<readyAt||now-readyAt>60000||!Double.isFinite(movedMeters)||movedMeters<0||movedMeters>60){cancel();return false;}
+        if(!goodFix||!startPositionValid(now,movedMeters)){cancel();return false;}
         phase=Phase.STARTING;return true;
+    }
+    public boolean startPositionValid(long now, double movedMeters) {
+        return (phase == Phase.READY || phase == Phase.STARTING) && now >= readyAt && now-readyAt <= 60000
+                && Double.isFinite(movedMeters) && movedMeters >= 0 && movedMeters <= 60;
     }
     public boolean started(long token){if(token!=epoch||phase!=Phase.STARTING)return false;phase=Phase.NAVIGATING;return true;}
     public boolean active(long token){return token==epoch&&(phase==Phase.STARTING||phase==Phase.NAVIGATING);}
@@ -46,11 +50,16 @@ public final class JourneyState {
         return true;
     }
     public boolean rerouting() { return rerouteSinceMs >= 0; }
+    public boolean retryReroute(long token, long nowMs) {
+        if (!reroute(token, nowMs)) return false;
+        rerouteSinceMs = nowMs;
+        return true;
+    }
     public boolean rerouteExpired(long nowMs) {
         return rerouting() && nowMs - rerouteSinceMs >= 30_000;
     }
     public boolean rerouted(long token, long nowMs) {
-        if (token != epoch || phase != Phase.NAVIGATING || nowMs < 0 || rerouteExpired(nowMs)) return false;
+        if (token != epoch || phase != Phase.NAVIGATING || nowMs < 0) return false;
         rerouteSinceMs = -1;
         // Route geometry alone is not a live instruction. Require a subsequent fix and instruction.
         waitingSinceMs = nowMs;
@@ -92,5 +101,9 @@ public final class JourneyState {
         if(code==17)return "高德服务调用额度不足（17）。请检查此 Key 的配额后重试。";
         if(code==2)return "驾车算路连接失败（2）。请检查手机网络后重试，目的地已保留。";
         return "驾车算路失败（"+code+"）。请检查网络、定位和高德应用配置；本次未生成可导航路线。";
+    }
+    public static boolean retryableRouteError(int code) {
+        // Configuration, service entitlement and invalid endpoints require user action.
+        return code == 2 || code == 15 || code == 19 || code == -1;
     }
 }

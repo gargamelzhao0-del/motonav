@@ -29,6 +29,16 @@ public final class UpdateTests {
                 minSdk, installed, candidate);
     }
     public static void main(String[] args) throws Exception {
+        yes(UpdateTransport.resumeOffset(206,"bytes 40-99/100",60,40,100)==40);
+        yes(UpdateTransport.resumeOffset(206,"bytes 0-99/100",-1,0,100)==0);
+        yes(UpdateTransport.resumeOffset(200,null,100,40,100)==0);
+        rejects(()->UpdateTransport.resumeOffset(206,"bytes 41-99/100",60,40,100));
+        rejects(()->UpdateTransport.resumeOffset(206,"bytes 40-98/100",59,40,100));
+        rejects(()->UpdateTransport.resumeOffset(206,"bytes 40-99/101",60,40,100));
+        rejects(()->UpdateTransport.resumeOffset(206,"bytes 40-99/100",61,40,100));
+        rejects(()->UpdateTransport.resumeOffset(200,null,60,40,100));
+        rejects(()->UpdateTransport.resumeOffset(416,null,0,40,100));
+        rejects(()->UpdateTransport.resumeOffset(206,null,60,40,100));
         UpdatePolicy.Release good = release(6, APK, HASH, 100);
         valid(good); checks++;
         rejects(() -> valid(release(5, APK, HASH, 100)));

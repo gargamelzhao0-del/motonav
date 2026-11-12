@@ -40,6 +40,20 @@ public final class UpdateActivity extends Activity {
     private Button check, download, install, cancel, reminders;
     private boolean foreground, destroyed, returningFromSettings, checkFromNotification;
     private AlertDialog permissionDialog;
+    private UpdateDownloadService downloader;
+    private boolean downloadBound;
+    private UpdateDownloadService.Snapshot shownDownload;
+    private final android.content.ServiceConnection downloadConnection = new android.content.ServiceConnection() {
+        public void onServiceConnected(android.content.ComponentName name, android.os.IBinder binder) {
+            if (!downloadBound) return;
+            downloader = ((UpdateDownloadService.LocalBinder) binder).service(); refreshDownload();
+            if (checkFromNotification && foreground) { checkFromNotification = false; checkForUpdate(); }
+        }
+        public void onServiceDisconnected(android.content.ComponentName name) { downloader = null; refreshButtons(); }
+    };
+    private final Runnable downloadRefresh = new Runnable() {
+        public void run() { if (!foreground) return; refreshDownload(); main.postDelayed(this,500); }
+    };
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
@@ -72,7 +86,7 @@ public final class UpdateActivity extends Activity {
         reminders = button(page, "开启新版提醒", this::toggleReminders);
         download = button(page, "下载并验证", this::downloadUpdate);
         install = button(page, "交给系统安装", this::requestInstall);
-        cancel = button(page, "取消当前操作", () -> cancelOperation("已取消。未安装任何更新。"));
+        cancel = button(page, "暂停下载 / 取消操作", () -> { if (downloader != null && downloader.snapshot().busy()) { downloader.pause(); refreshDownload(); } else cancelOperation("已取消。未安装任何更新。"); });
         button(page, "返回地图", this::finish);
         setContentView(scroll);
         refreshButtons();
@@ -88,11 +102,12 @@ public final class UpdateActivity extends Activity {
     }
     private void refreshButtons() {
         if (check == null) return;
-        boolean idle = foreground && operation == null && !destroyed;
+        boolean downloading = downloader != null && downloader.snapshot().busy();
+        boolean idle = foreground && operation == null && !destroyed && !downloading && downloader != null;
         check.setEnabled(idle);
         download.setEnabled(idle && release != null && ready == null);
         install.setEnabled(idle && ready != null);
-        cancel.setEnabled(foreground && operation != null);
+        cancel.setEnabled(foreground && (operation != null || downloading));
         reminders.setEnabled(idle);
         boolean enabled = UpdateCheckJob.enabled(this);
         reminders.setText(enabled ? "关闭新版提醒" : "开启新版提醒");
@@ -140,6 +155,9 @@ public final class UpdateActivity extends Activity {
 
     private void checkForUpdate() {
         if (!foreground || operation != null) return;
+        if (downloader == null) { checkFromNotification = true; return; }
+        if (downloader.snapshot().busy()) { refreshDownload(); return; }
+        if (downloader != null) downloader.forget();
         discardReady(); release = null;
         runWork("正在检查官方发布清单…", repository::check, found -> {
             release = found;
@@ -148,38 +166,27 @@ public final class UpdateActivity extends Activity {
         }, false);
     }
     private void downloadUpdate() {
-        if (!foreground || operation != null || release == null || ready != null) return;
-        final UpdatePolicy.Release selected = release;
-        runWork("正在连接下载服务…请停留在此页。", token -> repository.download(selected, token,
-                new UpdateRepository.Progress() {
-                    @Override public void transferred(long bytes, long total) { downloadProgress(token, bytes, total, false); }
-                    @Override public void verifying() { downloadProgress(token, selected.sizeBytes, selected.sizeBytes, true); }
-                }), file -> {
-            ready = file;
-            progressBar.setVisibility(View.VISIBLE); progressBar.setIndeterminate(false); progressBar.setProgress(100);
-            progressText.setVisibility(View.VISIBLE); progressText.setText("下载与校验完成 · 等待安装");
-            status.setText("安装包已验证，请点击「交给系统安装」，再按系统提示完成更新。");
-        }, false);
+        if (!foreground || operation != null || release == null || ready != null || downloader == null) return;
+        try {
+            UpdateDownloadService.begin(this, release);
+            status.setText("正在启动后台下载…");
+        } catch (RuntimeException e) { status.setText("无法启动后台下载，请返回应用后重试。"); }
     }
-
-    private void downloadProgress(UpdateTransport.Cancellation token, long bytes, long total, boolean verifying) {
-        main.post(() -> {
-            if (destroyed || !foreground || operation != token || token.isCancelled()) return;
-            progressBar.setVisibility(View.VISIBLE);
-            progressText.setVisibility(View.VISIBLE);
-            if (verifying) {
-                progressBar.setIndeterminate(true);
-                status.setText("下载完成，正在校验安装包…");
-                progressText.setText("请稍候，校验完成后可安装。");
-                return;
-            }
-            int percent = total > 0 ? (int) Math.min(100, bytes * 100 / total) : 0;
-            progressBar.setIndeterminate(total <= 0); progressBar.setProgress(percent);
-            status.setText("正在下载更新…离开本页或点取消会停止。");
-            progressText.setText(total > 0 ? String.format(Locale.getDefault(), "已下载 %.1f / %.1f MB · %d%%",
-                    bytes / 1_000_000.0, total / 1_000_000.0, percent)
-                    : String.format(Locale.getDefault(), "已下载 %.1f MB", bytes / 1_000_000.0));
-        });
+    private void refreshDownload() {
+        if (!foreground || downloader == null) { refreshButtons(); return; }
+        UpdateDownloadService.Snapshot state = downloader.snapshot();
+        if (operation == null && state.release() != null && !state.equals(shownDownload)) {
+            shownDownload = state;
+            release = state.release(); ready = state.ready(); status.setText(state.message());
+            progressBar.setVisibility(View.VISIBLE); progressText.setVisibility(View.VISIBLE);
+            progressBar.setIndeterminate(state.verifying());
+            int percent = (int)Math.min(100,state.bytes()*100/release.sizeBytes);
+            progressBar.setProgress(percent);
+            progressText.setText(state.verifying() ? "正在校验完整安装包…" : String.format(Locale.getDefault(),
+                    "%.1f / %.1f MB · %d%%",state.bytes()/1_000_000.0,release.sizeBytes/1_000_000.0,percent));
+            download.setText(state.bytes() > 0 && ready == null ? "继续下载并验证" : "下载并验证");
+        }
+        refreshButtons();
     }
 
     private void hideProgress() {
@@ -189,6 +196,7 @@ public final class UpdateActivity extends Activity {
     }
     private void requestInstall() {
         if (!foreground || operation != null || ready == null || release == null) return;
+        if (NavigationService.navigating) { status.setText("请先结束当前导航，再安装更新。"); return; }
         if (!getPackageManager().canRequestPackageInstalls()) {
             if (permissionDialog != null) return;
             permissionDialog = new AlertDialog.Builder(this).setTitle("允许此应用请求安装？")
@@ -217,6 +225,7 @@ public final class UpdateActivity extends Activity {
 
     private void launchInstaller(File file) {
         if (!foreground || destroyed || ready != file) return;
+        if (NavigationService.navigating) { status.setText("导航正在进行，请结束导航后再安装更新。"); return; }
         if (!getPackageManager().canRequestPackageInstalls()) {
             status.setText("安装来源权限已变化。未发起安装，请再次点击安装检查。"); return;
         }
@@ -228,6 +237,7 @@ public final class UpdateActivity extends Activity {
             startActivity(intent);
             // Keep the immutable file until normal cache expiry, even if this activity is destroyed.
             // Starting the installer is NOT evidence that the user accepted or installation succeeded.
+            if (downloader != null) downloader.forget();
             ready = null; release = null;
             hideProgress();
             status.setText("已交给 Android 安装器；是否安装由你和系统决定。这里不把打开安装器视为安装成功。");
@@ -260,14 +270,14 @@ public final class UpdateActivity extends Activity {
                 getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
                 hideProgress();
                 if (error != null) {
-                    if (invalidateOnFailure) discardReady();
+                    if (invalidateOnFailure) { discardReady(); if (downloader != null) downloader.forget(); }
                     status.setText(failureMessage(error));
                 } else completed.run(result);
                 refreshButtons();
             });
         });
     }
-    private static String failureMessage(Exception error) {
+    static String failureMessage(Exception error) {
         // Never display exception details, URLs, paths, SDK data or diagnostics that could contain secrets.
         String code = error.getMessage();
         if ("not_published".equals(code)) return "官方发布尚未提供更新清单或文件。未下载或安装更新。";
@@ -286,9 +296,11 @@ public final class UpdateActivity extends Activity {
         }
         refreshButtons();
     }
-    private void discardReady() { if (ready != null) { ready.delete(); ready = null; } }
+    private void discardReady() { ready = null; }
     @Override protected void onResume() {
         super.onResume(); foreground = true;
+        downloadBound = bindService(new Intent(this,UpdateDownloadService.class),downloadConnection,BIND_AUTO_CREATE);
+        main.removeCallbacks(downloadRefresh); main.post(downloadRefresh);
         UpdateCheckJob.restoreSchedule(this);
         if (returningFromSettings) {
             returningFromSettings = false;
@@ -300,7 +312,11 @@ public final class UpdateActivity extends Activity {
     }
     @Override protected void onPause() {
         foreground = false;
-        cancelOperation("操作因离开更新页面而取消。请返回后重新操作。");
+        main.removeCallbacks(downloadRefresh);
+        shownDownload = null;
+        if (downloadBound) { unbindService(downloadConnection); downloadBound = false; }
+        downloader = null;
+        cancelOperation("检查或安装校验已暂停，后台下载继续进行。");
         if (permissionDialog != null) { permissionDialog.dismiss(); permissionDialog = null; }
         super.onPause();
     }

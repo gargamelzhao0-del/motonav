@@ -142,6 +142,7 @@ public final class NavigationService extends Service implements JourneyControlle
     @Override public boolean active() { return !destroyed && saved.consent() && keys.configured(); }
     @Override public boolean navigationAllowed() { return active() && precisePermission() && locationEnabled(); }
     @Override public String key() { return keys.sdkValue(); }
+    @Override public boolean voiceEnabled() { return getSharedPreferences("navigation_ui", MODE_PRIVATE).getBoolean("voice_enabled", true); }
     @Override public void refreshLocation() { if (view != null) view.refreshLocation(); }
     @Override public Location fix() {
         if (!navigating) return view == null ? null : view.fix();
@@ -155,12 +156,13 @@ public final class NavigationService extends Service implements JourneyControlle
     }
 
     @Override public boolean beginNavigation(Runnable start) {
+        if (stopping) shutdownForeground();
         if (view == null || !navigationAllowed() || pendingStart != null || navigating) return false;
         Location initial = fix();
         long initialTime = fixNanos();
-        if (initial == null || initialTime == 0) return false;
         fixes.clear();
-        fixes.offer(new Location(initial), initialTime, initial.getAccuracy(), MapFixTracker.SYSTEM_NETWORK, true);
+        if (initial != null && initialTime > 0)
+            fixes.offer(new Location(initial), initialTime, initial.getAccuracy(), MapFixTracker.SYSTEM_NETWORK, true);
         pendingStart = start;
         try {
             startForegroundService(new Intent(this, NavigationService.class).setAction(START));

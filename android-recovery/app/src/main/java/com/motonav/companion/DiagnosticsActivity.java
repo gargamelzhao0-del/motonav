@@ -36,7 +36,7 @@ public final class DiagnosticsActivity extends Activity {
         });
         text(page, "定位诊断 / 实时日志", 23);
         text(page, "记录定位来源、精度、数据年龄、权限、省电状态、算路阶段和错误码。不会记录经纬度、目的地、车牌或高德 Key。", 15);
-        text(page, "粘贴本次诊断连接后，点击开始。日志将经 HTTPS 和 Cloudflare 临时通道发送到调试电脑。返回地图后继续记录，可随时停止；每次最长 60 分钟，退出进程后需重新开启。", 15);
+        text(page, "粘贴本次诊断连接后，点击开始。日志将经 HTTPS 和 Cloudflare 临时通道发送到调试电脑。返回地图后继续记录，可随时停止；默认记录 1 小时，可选 4 小时；接收连接仍须在有效期内。未确认上传的记录会保留在本机，重新连接时自动补传；进程退出后需手动重新开启。", 15);
         link = new EditText(this); link.setHint("本次诊断连接（含连接凭证）"); link.setSingleLine(true);
         link.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
         link.setSaveEnabled(false); link.setSaveFromParentEnabled(false);
@@ -49,14 +49,15 @@ public final class DiagnosticsActivity extends Activity {
                 if (text != null && text.length() <= 1024) link.setText(text);
             }
         });
+        android.widget.Switch extended = new android.widget.Switch(this); extended.setText("本次诊断持续 4 小时"); page.addView(extended);
         button(page, "开始实时诊断", () -> {
             try {
                 DiagnosticEndpoint endpoint = DiagnosticEndpoint.parse(link.getText().toString());
-                Diagnostics.start(endpoint); link.getText().clear();
+                Diagnostics.start(endpoint, extended.isChecked()); link.getText().clear();
                 result.setText("已开始。请返回地图复现问题；看到异常时可回来标记。");
             } catch (IllegalArgumentException error) { result.setText("连接格式无效，请粘贴完整的本次诊断连接。"); }
         });
-        button(page, "仅在手机记录", () -> { Diagnostics.start(null); result.setText("本地诊断已开始，稍后可以导出。"); });
+        button(page, "仅在手机记录", () -> { Diagnostics.start(null, extended.isChecked()); result.setText("本地诊断已开始，稍后可以导出。"); });
         button(page, "标记：刚刚出现问题", () -> {
             if (Diagnostics.active()) { Diagnostics.record("user_mark", "reason", "problem_observed"); result.setText("已记录问题标记。"); }
             else result.setText("请先开始诊断。");
