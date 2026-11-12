@@ -6,6 +6,7 @@ activity = (base / 'UpdateActivity.java').read_text()
 repository = (base / 'UpdateRepository.java').read_text()
 provider = (base / 'UpdateApkProvider.java').read_text()
 transport = (base / 'UpdateTransport.java').read_text()
+download_service = (base / 'UpdateDownloadService.java').read_text()
 manifest = ET.parse('app/src/main/AndroidManifest.xml').getroot()
 a = '{http://schemas.android.com/apk/res/android}'
 assert any(e.get(a+'name') == 'android.permission.REQUEST_INSTALL_PACKAGES' for e in manifest.findall('uses-permission'))
@@ -15,6 +16,15 @@ p = next(e for e in app.findall('provider') if e.get(a+'name') == '.UpdateApkPro
 assert p.get(a+'exported') == 'false' and p.get(a+'grantUriPermissions') == 'true'
 assert p.get(a+'authorities') == '${applicationId}.updates'
 assert next(e for e in app.findall('activity') if e.get(a+'name') == '.UpdateActivity').get(a+'exported') == 'false'
+service = next(e for e in app.findall('service') if e.get(a+'name') == '.UpdateDownloadService')
+assert service.get(a+'exported') == 'false' and service.get(a+'foregroundServiceType') == 'dataSync'
+assert 'FOREGROUND_SERVICE_DATA_SYNC' in Path('app/src/main/AndroidManifest.xml').read_text()
+assert 'repository.download(selected, token' in download_service and 'repository.download(' not in activity
+pause = activity.split('@Override protected void onPause()',1)[1].split('@Override protected void onDestroy()',1)[0]
+assert 'downloader.pause()' not in pause and 'unbindService(downloadConnection)' in pause
+assert 'onTimeout(int startId,int type)' in download_service
+assert activity.count('if (NavigationService.navigating)') == 2
+assert 'fetchResumable' in repository and 'resumeOffset' in transport
 assert 'UpdateActivity.class' in (base / 'AmapActivity.java').read_text()
 assert 'getApkContentsSigners()' in repository and 'getSigningCertificateHistory' not in repository
 assert 'GET_SIGNATURES | PackageManager.GET_SIGNING_CERTIFICATES' in repository
@@ -37,7 +47,7 @@ assert 'uri.getEncodedPath()' in provider and 'uri.getQuery() != null' in provid
 assert 'UnsupportedOperationException("read_only")' in provider
 assert 'setInstanceFollowRedirects(false)' in transport and 'setConnectTimeout(10000)' in transport and 'setReadTimeout(10000)' in transport
 assert 'MAX_REDIRECTS' in transport and 'checkDeadline(deadline)' in transport
-for source in (activity, repository, provider, transport):
+for source in (activity, repository, provider, transport, download_service):
     assert 'SavedMapConfig' not in source and 'AmapKeySession' not in source
     assert 'android.location' not in source and 'Log.' not in source and 'printStackTrace' not in source
     assert 'setHostnameVerifier' not in source and 'setSSLSocketFactory' not in source

@@ -3,6 +3,8 @@ package com.motonav.companion;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.io.File;
+import java.io.RandomAccessFile;
 import java.net.URI;
 import java.util.concurrent.atomic.AtomicBoolean;
 import javax.net.ssl.HttpsURLConnection;
@@ -117,6 +119,70 @@ public final class UpdateTransport {
         if (progress != null) progress.transferred(total, expected);
         cancellation.check();
         return total;
+    }
+
+    /** Resume only the immutable official asset. Final full-file hash/signature checks remain mandatory. */
+    public static void fetchResumable(String origin, File file, long expected, Cancellation cancellation,
+                                     Progress progress) throws IOException {
+        if (!UpdatePolicy.isOfficialAsset(origin, false) || expected <= 0 || expected > UpdatePolicy.MAX_APK_BYTES)
+            throw new IOException("untrusted_source");
+        try (RandomAccessFile output = new RandomAccessFile(file, "rw")) {
+            if (output.length() > expected) output.setLength(0);
+            final long offset = output.length();
+            cancellation.check();
+            if (progress != null) progress.transferred(offset, expected);
+            if (offset == expected) return;
+            long deadline = System.nanoTime() + 300L * 1_000_000_000L;
+            String current = origin;
+            for (int hop = 0; hop <= UpdatePolicy.MAX_REDIRECTS; hop++) {
+                cancellation.check(); checkDeadline(deadline);
+                if (!UpdatePolicy.allowedRedirect(origin, current, false)) throw new IOException("untrusted_redirect");
+                HttpsURLConnection connection = (HttpsURLConnection) URI.create(current).toURL().openConnection();
+                cancellation.connection = connection;
+                try {
+                    connection.setInstanceFollowRedirects(false); connection.setConnectTimeout(10000); connection.setReadTimeout(10000);
+                    connection.setUseCaches(false); connection.setRequestProperty("Accept-Encoding", "identity");
+                    connection.setRequestProperty("User-Agent", "MotoNav-Updater/2");
+                    if (offset > 0) connection.setRequestProperty("Range", "bytes=" + offset + "-");
+                    int code = connection.getResponseCode();
+                    cancellation.check(); checkDeadline(deadline);
+                    if (code == 301 || code == 302 || code == 303 || code == 307 || code == 308) {
+                        String location = connection.getHeaderField("Location");
+                        if (location == null || hop == UpdatePolicy.MAX_REDIRECTS) throw new IOException("redirect_limit");
+                        try { current = URI.create(current).resolve(location).toString(); }
+                        catch (IllegalArgumentException e) { throw new IOException("untrusted_redirect"); }
+                        continue;
+                    }
+                    String encoding = connection.getContentEncoding();
+                    if (encoding != null && !encoding.equalsIgnoreCase("identity")) throw new IOException("unexpected_encoding");
+                    final long start = resumeOffset(code, connection.getHeaderField("Content-Range"),
+                            connection.getContentLengthLong(), offset, expected);
+                    if (start == 0) output.setLength(0);
+                    output.seek(start);
+                    OutputStream stream = new OutputStream() {
+                        @Override public void write(int value) throws IOException { output.write(value); }
+                        @Override public void write(byte[] bytes, int from, int length) throws IOException { output.write(bytes, from, length); }
+                    };
+                    try (InputStream input = connection.getInputStream()) {
+                        copyBounded(input, stream, expected-start, expected-start, deadline, cancellation,
+                                progress == null ? null : (done,total) -> progress.transferred(start+done, expected));
+                    } finally { output.getFD().sync(); }
+                    return;
+                } finally { connection.disconnect(); cancellation.connection = null; }
+            }
+            throw new IOException("redirect_limit");
+        }
+    }
+    public static long resumeOffset(int code, String range, long length, long offset, long expected) throws IOException {
+        if (offset < 0 || offset >= expected || expected <= 0 || expected > UpdatePolicy.MAX_APK_BYTES) throw new IOException("download_size");
+        if (code == 200) {
+            if (length >= 0 && length != expected) throw new IOException("download_size");
+            return 0; // Server ignored Range: replace the partial file instead of appending twice.
+        }
+        if (code != 206) throw new IOException(code == 404 ? "not_published" : "http_failure");
+        String required = "bytes " + offset + "-" + (expected-1) + "/" + expected;
+        if (!required.equals(range) || (length >= 0 && length != expected-offset)) throw new IOException("invalid_range");
+        return offset;
     }
 
     private static void checkDeadline(long deadline) throws IOException {

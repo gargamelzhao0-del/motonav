@@ -9,15 +9,14 @@ import org.json.JSONObject;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
-import java.io.FileOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.security.DigestOutputStream;
 import java.security.MessageDigest;
 import java.util.UUID;
 
 /** Update operations for background workers. No access to map config or navigation state. */
 final class UpdateRepository {
+    private static final Object DOWNLOAD_LOCK = new Object();
     interface Progress extends UpdateTransport.Progress { void verifying(); }
     private final Context context;
     UpdateRepository(Context context) { this.context = context.getApplicationContext(); }
@@ -31,7 +30,10 @@ final class UpdateRepository {
         ByteArrayOutputStream bytes = new ByteArrayOutputStream();
         UpdateTransport.fetch(UpdatePolicy.MANIFEST_URL, true, bytes, -1, cancellation);
         cancellation.check();
-        JSONObject json = new JSONObject(bytes.toString(StandardCharsets.UTF_8.name()));
+        return decodeRelease(bytes.toString(StandardCharsets.UTF_8.name()));
+    }
+    UpdatePolicy.Release decodeRelease(String encoded) throws Exception {
+        JSONObject json = new JSONObject(encoded);
         // A deliberately small, versioned schema. Do not coerce numbers/booleans from strings.
         if (json.length() != 8) throw new IllegalArgumentException("manifest_schema");
         UpdatePolicy.Release release = new UpdatePolicy.Release(integer(json, "schemaVersion"),
@@ -41,27 +43,40 @@ final class UpdateRepository {
         UpdatePolicy.validateRelease(release, installed.packageName, version(installed), Build.VERSION.SDK_INT);
         return release;
     }
+    static String encodeRelease(UpdatePolicy.Release release) {
+        try {
+            return new JSONObject().put("schemaVersion",release.schemaVersion).put("applicationId",release.applicationId)
+                    .put("versionCode",release.versionCode).put("versionName",release.versionName).put("minSdk",release.minSdk)
+                    .put("apkUrl",release.apkUrl).put("sha256",release.sha256).put("sizeBytes",release.sizeBytes).toString();
+        } catch (org.json.JSONException e) { throw new IllegalArgumentException("manifest_schema"); }
+    }
+    long partialBytes(UpdatePolicy.Release release) {
+        return Math.min(release.sizeBytes, new File(UpdateApkProvider.directory(context), release.sha256 + ".partial").length());
+    }
 
     File download(UpdatePolicy.Release release, UpdateTransport.Cancellation cancellation, Progress progress) throws Exception {
+        synchronized (DOWNLOAD_LOCK) { return downloadLocked(release, cancellation, progress); }
+    }
+    private File downloadLocked(UpdatePolicy.Release release, UpdateTransport.Cancellation cancellation, Progress progress) throws Exception {
         PackageInfo installed = installed();
         UpdatePolicy.validateRelease(release, installed.packageName, version(installed), Build.VERSION.SDK_INT);
         File directory = UpdateApkProvider.directory(context).getCanonicalFile();
         if (!directory.isDirectory() && !directory.mkdirs()) throw new IOException("storage_failure");
         String id = UUID.randomUUID().toString().replace("-", "");
-        File pending = new File(directory, id + ".pending.apk");
+        File pending = new File(directory, release.sha256 + ".partial");
         File verified = new File(directory, id + ".apk");
-        boolean kept = false;
+        boolean kept = false, downloaded = false;
         try {
-            if (!pending.createNewFile() || verified.exists()) throw new IOException("storage_failure");
+            if (!pending.getCanonicalFile().getParentFile().equals(directory) || verified.exists()) throw new IOException("storage_failure");
+            UpdateTransport.fetchResumable(release.apkUrl, pending, release.sizeBytes, cancellation, progress);
+            downloaded = true;
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            try (FileOutputStream file = new FileOutputStream(pending);
-                 DigestOutputStream output = new DigestOutputStream(file, digest)) {
-                UpdateTransport.fetch(release.apkUrl, false, output, release.sizeBytes, cancellation, progress);
-                output.flush();
-                file.getFD().sync();
+            progress.verifying();
+            try (FileInputStream input = new FileInputStream(pending)) {
+                byte[] bytes = new byte[32768]; int count;
+                while ((count = input.read(bytes)) != -1) { cancellation.check(); digest.update(bytes,0,count); }
             }
             cancellation.check();
-            progress.verifying();
             UpdatePolicy.validateHash(release.sha256, hex(digest.digest()));
             verifyArchive(pending, release);
             cancellation.check();
@@ -70,8 +85,11 @@ final class UpdateRepository {
             cancellation.check();
             kept = true;
             return verified;
+        } catch (Exception e) {
+            // Interrupted transfers stay resumable; invalid completed archives must be replaced.
+            if (downloaded && !cancellation.isCancelled()) pending.delete();
+            throw e;
         } finally {
-            pending.delete();
             if (!kept) verified.delete();
         }
     }

@@ -62,7 +62,7 @@ public class AMap {public Polyline line; public Polyline addPolyline(PolylineOpt
     "com/amap/api/navi/enums/ReCalculateRouteType.java": 'package com.amap.api.navi.enums; public class ReCalculateRouteType {public static final int ROUTE_TYPE_COMMON=0;}',
     "com/amap/api/navi/model/AMapCarInfo.java": 'package com.amap.api.navi.model; public class AMapCarInfo {public String type;public void setCarType(String t){type=t;}}',
     "com/amap/api/navi/model/NaviLatLng.java": 'package com.amap.api.navi.model; public class NaviLatLng {private final double lat,lon;public NaviLatLng(double a,double b){lat=a;lon=b;}public double getLatitude(){return lat;}public double getLongitude(){return lon;}}',
-    "com/amap/api/navi/model/AMapCalcRouteResult.java": 'package com.amap.api.navi.model; public class AMapCalcRouteResult {public int type,error;public int[] ids={1};public AMapCalcRouteResult(int t){type=t;}public int getCalcRouteType(){return type;}public int getErrorCode(){return error;}public int[] getRouteid(){return ids;}}',
+    "com/amap/api/navi/model/AMapCalcRouteResult.java": 'package com.amap.api.navi.model; public class AMapCalcRouteResult {public int type,error,requestId;public int[] ids={1};public AMapCalcRouteResult(int t){type=t;requestId=t==0?1:t+10;}public int getRouteRequestId(){return requestId;}public int getCalcRouteType(){return type;}public int getErrorCode(){return error;}public int[] getRouteid(){return ids;}}',
     "com/amap/api/navi/model/AMapNaviPath.java": '''package com.amap.api.navi.model; public class AMapNaviPath {public java.util.List<NaviLatLng> points=java.util.List.of(new NaviLatLng(30,120),new NaviLatLng(30.01,120.01)); public int length=1000;public java.util.List<NaviLatLng> getCoordList(){return points;}public int getAllLength(){return length;}}''',
     "com/amap/api/navi/model/NaviInfo.java": '''package com.amap.api.navi.model; public class NaviInfo {public int getNaviType(){return 1;}public int getIconType(){return 3;}public int getCurStepRetainDistance(){return 60;}public int getPathRetainDistance(){return 800;}public int getPathRetainTime(){return 120;}public String getNextRoadName(){return "road";}public android.graphics.Bitmap getIconBitmap(){return null;}}''',
     "com/amap/api/navi/SimpleNaviListener.java": '''package com.amap.api.navi; import com.amap.api.navi.model.*;
@@ -71,10 +71,11 @@ public class SimpleNaviListener {public void onInitNaviSuccess(){}public void on
     "com/amap/api/navi/AMapNavi.java": '''package com.amap.api.navi; import com.amap.api.navi.model.*; import java.util.*;
 public class AMapNavi {
  public static AMapNavi latest; public static int instances;
- public SimpleNaviListener listener; public AMapCarInfo car; public int strategy,starts,stops,selections; public NaviLatLng from;
+ public SimpleNaviListener listener; public AMapCarInfo car; public int strategy,starts,stops,selections,recalculations; public boolean voice,speaking; public NaviLatLng from;
  public AMapNaviPath path=new AMapNaviPath(); public Map<Integer,AMapNaviPath> paths=new HashMap<>();
  public AMapNavi(){paths.put(1,path);} public static AMapNavi getInstance(Object c){instances++;return latest=new AMapNavi();}public static void setApiKey(Object c,String k){} public static void destroy(){}
- public void stopSpeak(){}public void setUseInnerVoice(boolean a,boolean b){}public void setCarInfo(AMapCarInfo c){car=c;}
+ public void stopSpeak(){speaking=false;}public void startSpeak(){speaking=true;}public void setUseInnerVoice(boolean a,boolean b){voice=a;}public void setCarInfo(AMapCarInfo c){car=c;}
+ public int reCalculateRouteReturnRequestId(int strategy){return 100+(++recalculations);}
  public boolean calculateDriveRoute(List<NaviLatLng> f,List<NaviLatLng> t,List<NaviLatLng> w,int s){strategy=s;from=f.get(0);return true;}
  public Map<Integer,AMapNaviPath> getNaviPaths(){return paths;}public AMapNaviPath getNaviPath(){return path;}
  public boolean selectRouteId(int i){selections++;return true;}public boolean startNavi(int t){starts++;listener.onStartNavi(t);return true;}

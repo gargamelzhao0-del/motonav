@@ -96,6 +96,10 @@ public final class AmapActivity extends Activity {
         open=button("阅读并同意后打开地图",this::askConsent);open.setEnabled(keys.configured());
         button("高德隐私政策",()->policy(PRIVACY));button("高德服务条款",()->policy(TERMS));
         label("使用普通汽车驾车路线，不避让摩托车禁限行。无需填写车牌和排量；不提供车牌限行判断。",12);
+        Switch voice=new Switch(this);voice.setText("导航语音播报");voice.setTextColor(0xffeef3e6);
+        android.content.SharedPreferences navigationPrefs=getSharedPreferences("navigation_ui",MODE_PRIVATE);
+        voice.setChecked(navigationPrefs.getBoolean("voice_enabled",true));
+        voice.setOnCheckedChangeListener((v,on)->{navigationPrefs.edit().putBoolean("voice_enabled",on).apply();if(journey!=null)journey.refreshGuidance();});root.addView(voice);
         label("Android Key绑定包名："+getPackageName()+"\n本安装签名SHA1："+certificateSha1(),12);
         button("应用更新",()->startActivity(new Intent(this,UpdateActivity.class)));
         button("定位诊断 / 实时日志",()->startActivity(new Intent(this,DiagnosticsActivity.class)));
