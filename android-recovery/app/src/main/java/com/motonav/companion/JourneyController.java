@@ -28,6 +28,7 @@ import com.amap.api.navi.enums.ReCalculateRouteType;
 import com.amap.api.navi.model.AMapCarInfo;
 import com.amap.api.navi.model.AMapCalcRouteResult;
 import com.amap.api.navi.model.AMapNaviPath;
+import com.amap.api.navi.model.AMapNaviLocation;
 import com.amap.api.navi.model.NaviInfo;
 import com.amap.api.navi.model.NaviLatLng;
 import com.amap.api.services.core.PoiItem;
@@ -69,6 +70,8 @@ final class JourneyController {
     private int retryFailures, retryRequestId = -1;
     private long nextRouteRetryMs = -1;
     private boolean voicePlaying;
+    private long lastInstructionReceivedMs = -1, lastSdkFixNanos;
+    private GuidanceHealth.Reason lastWaitingReason;
     private final java.util.LinkedHashSet<Integer> settledRouteRequests = new java.util.LinkedHashSet<>();
     private Runnable pendingLocation;
     private final List<LatLng> routePoints = new ArrayList<>();
@@ -149,7 +152,13 @@ final class JourneyController {
         syncVoice(false);
         frame = NavigationFrame.status(NavigationFrame.WAITING);
         icon(null);
-        report("定位或导航指令暂时中断。已保留路线，正在等待恢复。");
+        GuidanceHealth.Reason reason = GuidanceHealth.reason(SystemClock.elapsedRealtimeNanos(),gpsWeak,
+                trustedFixTime(),lastSdkFixNanos,lastInstructionReceivedMs);
+        if (reason != lastWaitingReason) Diagnostics.record("navigation_state", "state", "waiting", "reason", reason.name(),
+                "fix_age_ms", DiagnosticRecord.age(SystemClock.elapsedRealtimeNanos(),trustedFixTime()),
+                "navigation_age_ms", DiagnosticRecord.age(SystemClock.elapsedRealtimeNanos(),lastSdkFixNanos));
+        lastWaitingReason = reason;
+        report(GuidanceHealth.message(reason));
         return false;
     }
     private void show(AlertDialog next){if(dialog!=null)dialog.dismiss();dialog=next;next.setOnDismissListener(d->{if(dialog==next)dialog=null;});next.show();}
@@ -307,8 +316,13 @@ final class JourneyController {
                 }
                 @Override public void onNaviInfoUpdate(NaviInfo info){
                     if (!active() || engine != navi || !state.active(token)
-                            || state.phase() != JourneyState.Phase.NAVIGATING
-                            || info == null || info.getNaviType() != NaviType.GPS) return;
+                            || state.phase() != JourneyState.Phase.NAVIGATING || info == null) return;
+                    long now = SystemClock.elapsedRealtime();
+                    Diagnostics.record("navigation_state", "state", "sdk_instruction", "count", info.getNaviType(),
+                            "accepted", info.getNaviType() == NaviType.GPS, "icon", info.getIconType(),
+                            "callback_gap_ms", lastInstructionReceivedMs < 0 ? -1 : now-lastInstructionReceivedMs);
+                    if (info.getNaviType() != NaviType.GPS) return;
+                    lastInstructionReceivedMs = now;
                     if (!guidanceReady(true)) return;
                     Location fix = host.fix();
                     int speed = fix != null && fix.hasSpeed() && Float.isFinite(fix.getSpeed())
@@ -317,9 +331,20 @@ final class JourneyController {
                             info.getCurStepRetainDistance(), info.getPathRetainDistance(),
                             info.getPathRetainTime(), speed, host.fixNanos() / 1_000_000L,
                             SystemClock.elapsedRealtime()).at(SystemClock.elapsedRealtime());
-                    if (frame.mode() != NavigationFrame.LIVE) { icon(null); report("等待有效的导航指令。"); return; }
+                    if (frame.mode() != NavigationFrame.LIVE) { syncVoice(false); icon(null); report("等待有效的导航指令。"); return; }
+                    lastWaitingReason = null;
                     icon(info.getIconBitmap());
                     report(JourneyState.maneuver(info.getIconType())+" · 剩余"+Math.max(0,info.getPathRetainDistance())+"米 / "+Math.max(0,info.getPathRetainTime()/60)+"分钟\n下一路段："+safeName(info.getNextRoadName())+" · 距当前段末"+Math.max(0,info.getCurStepRetainDistance())+"米");
+                }
+                @Override public void onLocationChange(AMapNaviLocation location) {
+                    if (!active() || engine != navi || !state.active(token) || location == null) return;
+                    Long measured = location.getTime();
+                    lastSdkFixNanos = MapStartupPolicy.fixTime(SystemClock.elapsedRealtimeNanos(),System.currentTimeMillis(),0,
+                            measured == null ? 0 : measured);
+                    // Observe this stream separately. It must not silently refresh the map's old measurement.
+                    Diagnostics.record("navigation_state", "state", "sdk_position", "source", location.getLocationType(),
+                            "accuracy_m", location.getAccuracy(), "route_valid", location.isMatchNaviPath(),
+                            "measurement_age_ms", DiagnosticRecord.age(SystemClock.elapsedRealtimeNanos(),lastSdkFixNanos));
                 }
                 @Override public void onStopNavi(){if(active()&&engine==navi&&state.active(token))stop("SDK已结束导航。");}
                 @Override public void onArriveDestination(){if(active()&&engine==navi&&state.active(token))stop("已到达目的地。", NavigationFrame.ARRIVED);}
@@ -501,6 +526,7 @@ final class JourneyController {
         routePoints.clear(); plannedStart = null;
     }
     private void stopEngine() {
+        lastInstructionReceivedMs = -1; lastSdkFixNanos = 0; lastWaitingReason = null;
         nextRouteRetryMs = -1; retryRequestId = -1; retryFailures = 0; voicePlaying = false; settledRouteRequests.clear();
         state.cancel(); gpsWeak = false; icon(null); handler.removeCallbacks(watchdog);
         if (pendingLocation != null) handler.removeCallbacks(pendingLocation);

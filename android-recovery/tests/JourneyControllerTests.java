@@ -227,8 +227,33 @@ public class JourneyControllerTests {
             check(f.host.finished == 1, "permission error cannot be solved by endless network retries");
         }
     }
+    static void separateGuidanceStreams() throws Exception {
+        try (Fixture f = new Fixture()) {
+            AMapNavi engine = f.navigate();
+            engine.listener.onNaviInfoUpdate(new NaviInfo());
+            Handler.advance(16000);
+            engine.listener.onLocationChange(new AMapNaviLocation());
+            engine.listener.onNaviInfoUpdate(new NaviInfo());
+            check(f.host.message.contains("导航 SDK 仍在更新位置"),"fresh SDK position plus expired map stream is diagnosed distinctly");
+            check(f.controller.frame().mode()==NavigationFrame.WAITING,"SDK observation does not rewrite an old map fix timestamp");
+            Handler.advance(1); f.host.fixAt(30); engine.listener.onNaviInfoUpdate(new NaviInfo());
+            check(f.controller.frame().mode()==NavigationFrame.LIVE,"fresh map position and instruction recover normally");
+        }
+        try (Fixture f = new Fixture()) {
+            AMapNavi engine = f.navigate();
+            Handler.advance(16000); f.host.fixAt(30); f.controller.refreshGuidance();
+            check(f.host.message.contains("尚未返回引导指令"),"missing first instruction differs from location expiry");
+            engine.listener.onGpsSignalWeak(true);
+            check(f.host.message.contains("GPS 信号弱"),"SDK weak GPS has its own reason");
+        }
+        try (Fixture f = new Fixture()) {
+            AMapNavi engine = f.navigate();
+            engine.listener.onNaviInfoUpdate(new NaviInfo(){ @Override public int getCurStepRetainDistance(){return -1;} });
+            check(!engine.voice && f.controller.frame().mode()==NavigationFrame.WAITING,"invalid guidance cannot keep voice active");
+        }
+    }
     public static void main(String[] args) throws Exception {
-        drivingAndRerouting(); locationAndStartup(); failureAndDeadlines(); recoveredOriginAndVoice();
+        drivingAndRerouting(); locationAndStartup(); failureAndDeadlines(); recoveredOriginAndVoice(); separateGuidanceStreams();
         System.out.println("JourneyController: " + checks + " checks passed (SDK/UI doubles; not device validation)");
     }
 }
