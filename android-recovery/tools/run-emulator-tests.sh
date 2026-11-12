@@ -19,9 +19,17 @@ adb -s "$serial" shell settings put secure location_mode 3
 ) > emulator-evidence/gps-injection.txt 2>&1 &
 replay_pid=$!
 finish() {
+    result=$?
     kill "$replay_pid" 2>/dev/null || true
     wait "$replay_pid" 2>/dev/null || true
-    adb -s "$serial" pull /sdcard/Android/data/com.motonav.recovery/files/emulator-evidence emulator-evidence/app || true
+    mkdir -p emulator-evidence/app
+    # Android 11 scoped storage blocks shell access to Android/data. Export only
+    # this debug app's own test evidence through run-as, without changing storage permissions.
+    if adb -s "$serial" exec-out run-as com.motonav.recovery tar -C files/emulator-evidence -cf - . > emulator-evidence/app.tar; then
+        if ! tar -xf emulator-evidence/app.tar -C emulator-evidence/app; then result=1; fi
+    else result=1
+    fi
+    exit "$result"
 }
 trap finish EXIT
 adb -s "$serial" install -r app/build/outputs/apk/debug/app-debug.apk

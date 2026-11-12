@@ -32,8 +32,7 @@ public class NavigationRuntimeTest {
             android.os.Build.HARDWARE.contains("ranchu") || android.os.Build.HARDWARE.contains("goldfish"));
     }
     static File evidence(String name) {
-        File directory = InstrumentationRegistry.getInstrumentation().getTargetContext().getExternalFilesDir("emulator-evidence");
-        assertNotNull(directory);
+        File directory = new File(InstrumentationRegistry.getInstrumentation().getTargetContext().getFilesDir(),"emulator-evidence");
         assertTrue(directory.isDirectory() || directory.mkdirs());
         return new File(directory,name);
     }
