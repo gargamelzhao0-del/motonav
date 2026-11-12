@@ -1,6 +1,6 @@
 # App 与圆屏固件对接
 
-本目录由固件端独立维护。固件 0.2.2 保持 Android 0.7.x 的 NAV3 字节协议；固件改动不要求 App 修改导航算法。0.6.1 尚无真实导航 NAV3 发送链路。手机联调见 [PHONE_INTEGRATION.md](PHONE_INTEGRATION.md)，后续显示和数据需求见 [DISPLAY_PLAN.md](DISPLAY_PLAN.md)，其中扩展功能尚未实现。
+本目录由固件端独立维护。固件 0.2.3 保持 Android 0.7.x 的 NAV3 字节协议；固件改动不要求 App 修改导航算法。0.6.1 尚无真实导航 NAV3 发送链路。手机联调见 [PHONE_INTEGRATION.md](PHONE_INTEGRATION.md)，后续显示和数据需求见 [DISPLAY_PLAN.md](DISPLAY_PLAN.md)，其中扩展功能尚未实现。
 
 ## 连接顺序
 
@@ -10,7 +10,7 @@
 4. 向 RX `6e400002-b5a3-f393-e0a9-e50e24dcca9e` 发送有响应写入；RX 要求加密和身份验证。尚未订阅 TX 时写入被拒绝。
 5. 发送 HELLO，收到匹配 `NAV3` 的确认后，才能发送真实导航快照。断线后重新执行订阅和握手，不能直接续发旧序号。
 
-设备信息服务 `0x180A` 的 Firmware Revision `0x2A26` 返回固件版本字符串，例如 `0.2.2`。它是诊断信息；协议能力仍以 HELLO 的 `NAV3` 确认为准。
+设备信息服务 `0x180A` 的 Firmware Revision `0x2A26` 返回固件版本字符串，例如 `0.2.3`。它是诊断信息；协议能力仍以 HELLO 的 `NAV3` 确认为准。
 
 ## 消息与时效
 

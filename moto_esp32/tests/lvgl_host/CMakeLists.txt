@@ -22,3 +22,12 @@ enable_testing()
 add_test(NAME ui_normal COMMAND ui_preview "${CMAKE_CURRENT_BINARY_DIR}/preview-normal")
 add_test(NAME ui_all_workloads COMMAND ui_autorun_test "${CMAKE_CURRENT_BINARY_DIR}/preview-all")
 add_test(NAME ui_map_workload COMMAND ui_map_autorun_test "${CMAKE_CURRENT_BINARY_DIR}/preview-map")
+add_executable(ui_map_decoder_test preview.cpp ../../main/navigation_ui.cpp ../../main/route_map.cpp)
+target_include_directories(ui_map_decoder_test PRIVATE . ../../main)
+target_compile_definitions(ui_map_decoder_test PRIVATE MOTONAV_MAP_DECODER_ONLY=1)
+target_link_libraries(ui_map_decoder_test PRIVATE lvgl)
+add_test(NAME ui_decoder_fallback COMMAND ui_map_decoder_test "${CMAKE_CURRENT_BINARY_DIR}/preview-decoder")
+add_test(NAME ui_map_pixels_equal COMMAND ${CMAKE_COMMAND} -E compare_files
+    "${CMAKE_CURRENT_BINARY_DIR}/preview-normal/map-moving.ppm"
+    "${CMAKE_CURRENT_BINARY_DIR}/preview-decoder/map-moving.ppm")
+set_tests_properties(ui_map_pixels_equal PROPERTIES DEPENDS "ui_normal;ui_decoder_fallback")

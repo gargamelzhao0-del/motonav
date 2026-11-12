@@ -3,4 +3,5 @@
 
 namespace motonav {
 lv_display_t *start_display();
+void log_display_diagnostics();
 }

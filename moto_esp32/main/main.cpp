@@ -191,7 +191,6 @@ extern "C" void app_main() {
     std::snprintf(device_name, sizeof(device_name), "MotoNav-%02X%02X", mac[4], mac[5]);
     lv_display_t *display = motonav::start_display();
     ESP_ERROR_CHECK(display ? ESP_OK : ESP_FAIL);
-    ESP_ERROR_CHECK(bsp_display_brightness_set(70));
     ESP_ERROR_CHECK(bsp_display_lock(portMAX_DELAY));
     motonav::create_navigation_ui(display, device_name, read_snapshot);
     bsp_display_unlock();
@@ -211,6 +210,7 @@ extern "C" void app_main() {
     ESP_LOGI(Tag, "Firmware %s / NAV3 / %s", esp_app_get_description()->version, device_name);
     while (true) {
         vTaskDelay(pdMS_TO_TICKS(5000));
+        motonav::log_display_diagnostics();
         auto s = read_snapshot();
         ESP_LOGI(Tag, "state=%d link=%d secure=%d rx=%lu dup=%lu rejected=%lu heap=%lu internal=%lu",
             static_cast<int>(motonav::screen_mode(s)), s.linked, s.encrypted,

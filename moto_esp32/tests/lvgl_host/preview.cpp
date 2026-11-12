@@ -7,13 +7,17 @@
 static motonav::ScreenSnapshot snapshot;
 static uint64_t clock_ms;
 static std::array<uint16_t, 466 * 466> pixels;
-static std::array<uint16_t, 466 * 50> buffer;
+static std::array<uint16_t, 466 * 64> buffer;
+static unsigned rim_draws;
 int64_t esp_timer_get_time() { return static_cast<int64_t>(clock_ms * 1000); }
 void advance_host_clock(uint32_t milliseconds) { clock_ms += milliseconds; lv_tick_inc(milliseconds); }
 static void flush(lv_display_t *display, const lv_area_t *area, uint8_t *data) {
     auto input = reinterpret_cast<uint16_t *>(data);
     for (int y = area->y1; y <= area->y2; ++y)
-        for (int x = area->x1; x <= area->x2; ++x) pixels[y * 466 + x] = *input++;
+        for (int x = area->x1; x <= area->x2; ++x) {
+            uint16_t pixel = *input++;
+            pixels[y * 466 + x] = static_cast<uint16_t>((pixel << 8) | (pixel >> 8));
+        }
     lv_display_flush_ready(display);
 }
 static void save(lv_display_t *display, const std::filesystem::path &path) {
@@ -45,10 +49,15 @@ int main(int argc, char **argv) {
     std::filesystem::path directory(argv[1]); std::filesystem::create_directories(directory);
     lv_init();
     auto display = lv_display_create(466, 466);
-    lv_display_set_color_format(display, LV_COLOR_FORMAT_RGB565);
+    lv_display_set_color_format(display, LV_COLOR_FORMAT_RGB565_SWAPPED);
     lv_display_set_buffers(display, buffer.data(), nullptr, sizeof(buffer), LV_DISPLAY_RENDER_MODE_PARTIAL);
     lv_display_set_flush_cb(display, flush);
     motonav::create_navigation_ui(display, "MotoNav-1234", [] { return snapshot; });
+#if MOTONAV_AUTORUN_BENCH || MOTONAV_AUTORUN_MAP_BENCH
+    // Accidental touches must not silently truncate a timed hardware run.
+    lv_obj_send_event(lv_screen_active(), LV_EVENT_SHORT_CLICKED, nullptr);
+    lv_obj_send_event(lv_screen_active(), LV_EVENT_LONG_PRESSED, nullptr);
+#endif
 #if MOTONAV_AUTORUN_BENCH
     save(display, directory / "automatic-partial.ppm");
     require_label("PARTIAL HUD");
@@ -73,6 +82,7 @@ int main(int argc, char **argv) {
 #endif
     save(display, directory / "idle.ppm");
     auto normal_children = lv_obj_get_child_count(lv_screen_active());
+    lv_obj_add_event_cb(lv_obj_get_child(lv_screen_active(),0), [](lv_event_t *) { ++rim_draws; }, LV_EVENT_DRAW_MAIN, nullptr);
     snapshot.linked = snapshot.encrypted = snapshot.subscribed = snapshot.handshaken = true;
     snapshot.has_guidance = snapshot.stream_fresh = true;
     snapshot.guidance = {motonav::Live, 3, 250, 12000, 1000, 50};
@@ -96,8 +106,16 @@ int main(int argc, char **argv) {
     save(display, directory / "display-test.ppm");
     require_label("ROUTE MAP / SIMULATED");
     auto map_pixels = pixels;
+    constexpr uint16_t normal_background = ((0x09 >> 3) << 11) | ((0x0f >> 2) << 5) | (0x0c >> 3);
+    for (size_t edge : {size_t(233),size_t(233*466),size_t(233*466+465),size_t(465*466+233)}) {
+        if (pixels[edge] == normal_background) {
+            std::cerr << "Map does not cover the full round-screen edge\n"; return 1;
+        }
+    }
     clock_ms += 500; lv_tick_inc(500);
+    rim_draws=0;
     save(display, directory / "map-moving.ppm");
+    if (rim_draws) { std::cerr << "Hidden instrument background was redrawn under full-screen map\n"; return 1; }
     if (pixels == map_pixels) { std::cerr << "Map did not animate\n"; return 1; }
     snapshot.linked = snapshot.encrypted = snapshot.subscribed = snapshot.handshaken = true;
     snapshot.has_guidance = snapshot.stream_fresh = true;

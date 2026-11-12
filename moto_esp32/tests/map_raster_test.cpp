@@ -35,5 +35,29 @@ int main() {
     assert(storage==before);
     for(int i=0;i<guard;++i) assert(storage[i]==sentinel && storage[guard+stride*h+i]==sentinel);
     for(int y=0;y<h;++y) for(int x=w;x<stride;++x) assert(storage[guard+y*stride+x]==sentinel);
+    // Splitting the same scene into independently rendered strips must not
+    // introduce seams or rounding differences at global pixel boundaries.
+    auto paint=[](MapRaster &target) {
+        target.clear(0x2020);
+        for (int i=0;i<30;++i) {
+            ProjectedPoint a{-7.25f+i*17.3f,-10.75f}, b{465.5f-i*9.7f,480.25f};
+            target.line(a,b,1+i%16,static_cast<uint16_t>(i*123));
+            ProjectedPoint triangle[]{{50.5f+i,2.5f+i*12.7f},{300.25f,285.5f},{110.5f,460.25f}};
+            target.polygon(triangle,3,static_cast<uint16_t>(i*71));
+        }
+    };
+    std::vector<uint16_t> whole(466*466), strips(466*466);
+    MapRaster full(whole.data(),whole.size(),466,466,466); paint(full);
+    for (int y=0;y<466;y+=16) {
+        MapRaster strip(strips.data()+y*466,strips.size()-y*466,466,std::min(16,466-y),466,0,y);
+        assert(strip.valid()); paint(strip);
+    }
+    assert(whole==strips);
+    std::vector<uint16_t> clipped(173*101);
+    MapRaster tile(clipped.data(),clipped.size(),173,101,173,19,41); paint(tile);
+    for (int y=0;y<101;++y) for(int x=0;x<173;++x) assert(clipped[y*173+x]==whole[(y+41)*466+x+19]);
+    assert(!MapRaster(clipped.data(),clipped.size(),173,101,173,-1,41).valid());
+    assert(!MapRaster(clipped.data(),clipped.size(),173,101,173,300,41).valid());
     std::cout << "PASS: RGB565 raster geometry, stride, guards and 2000 clipped shapes\n";
+    std::cout << "PASS: full-screen and strip rendering are pixel-identical, including clipped tiles\n";
 }

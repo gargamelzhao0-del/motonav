@@ -1,6 +1,6 @@
 # 手机与圆屏 NAV3 联调
 
-设备为 COM21 对应的 `MotoNav-51CA`。0.2.2 继续使用 [APP_PROTOCOL.md](APP_PROTOCOL.md) 中的 NAV3，地图性能页只使用明确标记的模拟几何，不接收真实路线。App 源码目前核对到 0.7.4；实际手机安装版本须在 App 设置核对。
+设备为 COM21 对应的 `MotoNav-51CA`。0.2.3 继续使用 [APP_PROTOCOL.md](APP_PROTOCOL.md) 中的 NAV3，全屏地图性能页只使用明确标记的模拟几何，不接收真实路线。App 源码曾核对到 0.7.4；实际手机安装版本须在 App 设置核对。
 
 ## 准备
 

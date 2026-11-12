@@ -5,6 +5,7 @@
 #include "esp_log.h"
 #include "src/misc/cache/instance/lv_image_cache.h"
 #include <climits>
+#include <initializer_list>
 #ifndef MOTONAV_BENCH_SECONDS
 #define MOTONAV_BENCH_SECONDS 43
 #endif
@@ -29,13 +30,16 @@ uint64_t total_fps = 0;
 uint64_t map_render_us = 0, map_render_max_us = 0, map_frames = 0;
 
 const char *workload_name() {
-    return workload == Workload::Map ? "map320x300" : workload == Workload::Full ? "full" : "partial";
+    return workload == Workload::Map ? "map466x466" : workload == Workload::Full ? "full" : "partial";
 }
 void benchmark_layout() {
     bool map = testing && workload == Workload::Map;
     if (map && !map_canvas) {
-        map_canvas = create_route_map(lv_screen_active(), 320, 300);
-        if (map_canvas) lv_obj_set_pos(map_canvas, 72, 100);
+        map_canvas = create_route_map(lv_screen_active(), 466, 466);
+        if (map_canvas) {
+            lv_obj_set_pos(map_canvas, 0, 0);
+            lv_obj_move_to_index(map_canvas, 1); // Above the rim, behind every HUD label.
+        }
     } else if (!map && map_canvas) {
         lv_obj_delete(map_canvas); map_canvas = nullptr;
     }
@@ -45,10 +49,15 @@ void benchmark_layout() {
     lv_obj_set_flag(test_marker, LV_OBJ_FLAG_HIDDEN, !testing || map);
     lv_obj_set_y(title, map ? 78 : 88);
     lv_obj_set_style_text_font(title, map ? &lv_font_montserrat_20 : &lv_font_montserrat_28, 0);
-    lv_obj_set_y(number, map ? 405 : 266);
+    lv_obj_set_y(number, map ? 390 : 266);
     lv_obj_set_style_text_font(number, map ? &lv_font_montserrat_20 : &lv_font_montserrat_48, 0);
-    lv_obj_set_y(footer, map ? 434 : 405);
+    lv_obj_set_y(footer, map ? 422 : 405);
     lv_obj_set_width(footer, map ? 180 : 285);
+    for (auto *overlay : {top, title, number, footer}) {
+        lv_obj_set_style_bg_color(overlay, lv_color_hex(0x090f0c), 0);
+        lv_obj_set_style_bg_opa(overlay, map ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
+        lv_obj_set_style_radius(overlay, map ? 6 : 0, 0);
+    }
     last_icon = -1;
 }
 
@@ -134,12 +143,15 @@ void report_benchmark() {
         workload_name(), static_cast<unsigned long>(minimum_fps),
         static_cast<unsigned long>(total_fps / samples), static_cast<unsigned long>(samples),
         static_cast<unsigned long long>(milliseconds() - test_started - 2500));
-    if (map_frames) ESP_LOGI("map_profile", "frames=%llu draw_avg_us=%llu draw_max_us=%llu",
+    if (map_frames) ESP_LOGI("map_profile", "frames=%llu prepare_avg_us=%llu prepare_max_us=%llu",
         static_cast<unsigned long long>(map_frames), static_cast<unsigned long long>(map_render_us / map_frames),
         static_cast<unsigned long long>(map_render_max_us));
 }
 void set_test(bool enabled) {
-    if (!enabled && testing) report_benchmark();
+    if (!enabled && testing) {
+        report_benchmark();
+        ESP_LOGI("display_test", "stopped automatic=%d", automatic_test);
+    }
     testing = enabled;
     if (!enabled) automatic_test = false;
     if (enabled) reset_benchmark();
@@ -147,6 +159,10 @@ void set_test(bool enabled) {
     last_icon = -1;
 }
 void touch(lv_event_t *event) {
+    if (automatic_test) {
+        ESP_LOGI("display_test", "touch ignored during automatic workload");
+        return;
+    }
     ScreenSnapshot state = snapshot();
     if (lv_event_get_code(event) == LV_EVENT_LONG_PRESSED && may_test_display(state)) {
         automatic_test = false; set_test(!testing);
@@ -177,7 +193,7 @@ void refresh(lv_timer_t *) {
         text(top, "DISPLAY TEST / NOT NAVIGATION");
         bool map = workload == Workload::Map;
         text(title, map ? "ROUTE MAP / SIMULATED" : workload == Workload::Full ? "FULL FRAME" : "PARTIAL HUD");
-        text(footer, map ? "Tap next / Hold exit" : "Tap: workload  |  Hold: back");
+        text(footer, automatic_test ? "AUTO TEST" : map ? "Tap next / Hold exit" : "Tap: workload  |  Hold: back");
         if (map) {
             if (!map_canvas) { text(title, "MAP MEMORY ERROR"); return; }
             uint64_t begin = static_cast<uint64_t>(esp_timer_get_time());

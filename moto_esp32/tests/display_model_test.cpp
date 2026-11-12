@@ -1,5 +1,6 @@
 #include "../main/display_model.h"
 #include "../main/strip_stream.h"
+#include "../main/round_map_damage.h"
 #include <cassert>
 #include <iostream>
 #include <random>
@@ -17,6 +18,23 @@ static std::string send(NavigationReceiver &r, const std::string &wire, uint64_t
     return reply;
 }
 int main() {
+    constexpr auto bands = round_map_damage();
+    size_t updated_pixels=0;
+    for (const auto &band : bands) {
+        assert(band.left >= 0 && band.right <= 466 && band.left < band.right);
+        assert(band.top >= 0 && band.bottom <= 466 && band.top < band.bottom);
+        assert(!(band.left%2 || band.top%2 || band.right%2 || band.bottom%2));
+        updated_pixels += (band.right-band.left)*(band.bottom-band.top);
+    }
+    assert(updated_pixels < 466*466*9/10);
+    for (int y=0; y<466; ++y) for (int x=0; x<466; ++x) {
+        int dx=x*2-465, dy=y*2-465;
+        if (dx*dx+dy*dy > 471*471) continue;
+        bool covered=false;
+        for (const auto &band : bands)
+            covered |= x>=band.left && x<band.right && y>=band.top && y<band.bottom;
+        assert(covered);
+    }
     StripStream stream;
     assert(stream.begin(0, 0, 466, 50) == StripStream::Start); stream.submitted(50);
     assert(stream.begin(0, 50, 466, 100) == StripStream::Continue); stream.submitted(100);
