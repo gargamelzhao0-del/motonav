@@ -125,11 +125,16 @@ public class NavigationRuntimeTest {
             assertTrue("No framework GPS callbacks from the emulator console trace",received.await(45,TimeUnit.SECONDS));
             Location point = latest.get();
             assertEquals("gps",point.getProvider());
-            assertTrue(MapStartupPolicy.fresh(SystemClock.elapsedRealtimeNanos(),point.getElapsedRealtimeNanos()));
-            assertTrue(point.hasAccuracy());
+            long nowNanos = SystemClock.elapsedRealtimeNanos(), wallNow = System.currentTimeMillis();
+            long measured = MapStartupPolicy.fixTime(nowNanos,wallNow,point.getElapsedRealtimeNanos(),point.getTime());
+            String timing = "now_nanos="+nowNanos+"; elapsed_nanos="+point.getElapsedRealtimeNanos()
+                +"; wall_now="+wallNow+"; wall_fix="+point.getTime()+"; normalized_nanos="+measured;
             writeEvidence("framework-gps.txt","Received at least two real Android GPS provider callbacks from adb emu geo fix.\n"
-                +"Public fixture delivered, elapsed timestamp is fresh. Mock flag="+point.isFromMockProvider()
-                +"; accuracy="+point.getAccuracy()+"m.\nThis validates the virtual GPS pipeline, not physical GNSS or AMap online navigation.\n");
+                +"Public fixture delivered. "+timing+"\nMock flag="+point.isFromMockProvider()
+                +"; has_accuracy="+point.hasAccuracy()+"; accuracy="+point.getAccuracy()
+                +"m.\nThis validates the virtual GPS pipeline, not physical GNSS or AMap online navigation.\n");
+            assertTrue("GPS measurement rejected by production time normalization: "+timing,measured>0);
+            assertTrue("GPS provider omitted accuracy",point.hasAccuracy());
         } finally { instrumentation.runOnMainSync(() -> manager.removeUpdates(listener)); }
     }
     @Test public void realSdkInitializationCallbackIsRecordedWithoutAServiceKey() throws Exception {
