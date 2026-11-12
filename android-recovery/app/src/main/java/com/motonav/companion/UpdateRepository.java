@@ -18,6 +18,7 @@ import java.util.UUID;
 
 /** Update operations for background workers. No access to map config or navigation state. */
 final class UpdateRepository {
+    interface Progress extends UpdateTransport.Progress { void verifying(); }
     private final Context context;
     UpdateRepository(Context context) { this.context = context.getApplicationContext(); }
 
@@ -41,7 +42,7 @@ final class UpdateRepository {
         return release;
     }
 
-    File download(UpdatePolicy.Release release, UpdateTransport.Cancellation cancellation) throws Exception {
+    File download(UpdatePolicy.Release release, UpdateTransport.Cancellation cancellation, Progress progress) throws Exception {
         PackageInfo installed = installed();
         UpdatePolicy.validateRelease(release, installed.packageName, version(installed), Build.VERSION.SDK_INT);
         File directory = UpdateApkProvider.directory(context).getCanonicalFile();
@@ -55,11 +56,12 @@ final class UpdateRepository {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
             try (FileOutputStream file = new FileOutputStream(pending);
                  DigestOutputStream output = new DigestOutputStream(file, digest)) {
-                UpdateTransport.fetch(release.apkUrl, false, output, release.sizeBytes, cancellation);
+                UpdateTransport.fetch(release.apkUrl, false, output, release.sizeBytes, cancellation, progress);
                 output.flush();
                 file.getFD().sync();
             }
             cancellation.check();
+            progress.verifying();
             UpdatePolicy.validateHash(release.sha256, hex(digest.digest()));
             verifyArchive(pending, release);
             cancellation.check();

@@ -58,7 +58,7 @@ public final class AmapActivity extends Activity {
     };
     private final MapFixTracker<Location> fixes = new MapFixTracker<>();
     private AmapLocationFeed locationFeed;
-    private Button open;
+    private Button open, navigationButton;
     private TextureMapView map;
     private AlertDialog consentDialog;
     private boolean foreground, consent, sdkTouched;
@@ -95,7 +95,7 @@ public final class AmapActivity extends Activity {
         root.addView(keyInput);button("加密保存Key / 修改Key",this::applyKey);button("删除已存Key并撤回同意",this::clearKey);
         open=button("阅读并同意后打开地图",this::askConsent);open.setEnabled(keys.configured());
         button("高德隐私政策",()->policy(PRIVACY));button("高德服务条款",()->policy(TERMS));
-        label("摩托服务需高德授权。导航期间支持锁屏定位和已配对圆屏。",12);
+        label("摩托导航需高德授权。无需填写车牌和排量；不按这些车辆信息进行个性化限行判断。",12);
         label("Android Key绑定包名："+getPackageName()+"\n本安装签名SHA1："+certificateSha1(),12);
         button("应用更新",()->startActivity(new Intent(this,UpdateActivity.class)));
         button("定位诊断 / 实时日志",()->startActivity(new Intent(this,DiagnosticsActivity.class)));
@@ -114,11 +114,11 @@ public final class AmapActivity extends Activity {
         TextView waiting=new TextView(this);waiting.setText("MOTO / NAV\n等待地图配置");waiting.setGravity(android.view.Gravity.CENTER);waiting.setTextSize(18);waiting.setTextColor(0xff9da69a);frame.addView(waiting,new FrameLayout.LayoutParams(-1,-1));
         LinearLayout guidance=new LinearLayout(this);guidance.setGravity(android.view.Gravity.CENTER_VERTICAL);guidance.setPadding(dp(12),dp(12),dp(12),dp(12));guidance.setBackground(panel(0xff20271f));
         turnIcon=new ImageView(this);turnIcon.setContentDescription("SDK转向图标；文字指令见右侧");guidance.addView(turnIcon,new LinearLayout.LayoutParams(dp(56),dp(56)));
-        journeyStatus=new TextView(this);journeyStatus.setTextColor(0xffd4e2ba);journeyStatus.setTextSize(18);journeyStatus.setPadding(dp(12),0,0,0);journeyStatus.setText("选择目的地\n路线与导航信息只显示真实SDK结果");guidance.addView(journeyStatus,new LinearLayout.LayoutParams(0,-2,1));page.addView(guidance);
+        journeyStatus=new TextView(this);journeyStatus.setTextColor(0xffd4e2ba);journeyStatus.setTextSize(18);journeyStatus.setPadding(dp(12),0,0,0);journeyStatus.setText("输入目的地 → 开始导航\n当前位置自动获取");guidance.addView(journeyStatus,new LinearLayout.LayoutParams(0,-2,1));page.addView(guidance);
         LinearLayout actions=new LinearLayout(this);
-        actions.addView(action("目的地",()->{if(journey!=null)journey.searchDialog();else status.setText("请先完成地图Key与隐私设置。");}),new LinearLayout.LayoutParams(0,-2,1));
-        actions.addView(action("摩托算路",()->{if(journey!=null)journey.planDialog();else status.setText("请先完成地图设置。");}),new LinearLayout.LayoutParams(0,-2,1));
-        actions.addView(action("开始/结束",this::toggleNavigation),new LinearLayout.LayoutParams(0,-2,1));page.addView(actions);
+        actions.addView(action("输入目的地",()->{if(journey!=null)journey.searchDialog();else status.setText("请先完成地图设置。");}),new LinearLayout.LayoutParams(0,-2,1));
+        navigationButton = action("开始导航", this::toggleNavigation);
+        actions.addView(navigationButton,new LinearLayout.LayoutParams(0,-2,1));page.addView(actions);
         LinearLayout tools=new LinearLayout(this);
         tools.addView(action("定位/权限",()->locationPermission(true)),new LinearLayout.LayoutParams(0,-2,1));
         tools.addView(action("圆形/完整图",()->{dial.toggleShape();placeLogo();}),new LinearLayout.LayoutParams(0,-2,1));
@@ -133,7 +133,7 @@ public final class AmapActivity extends Activity {
     private void toggleNavigation() {
         if (journey == null) { status.setText("请先完成地图设置。"); return; }
         android.content.SharedPreferences prefs = getSharedPreferences("navigation_ui", MODE_PRIVATE);
-        if (journey.readyToStart() && Build.VERSION.SDK_INT >= 33
+        if (journey.canRequestStart() && Build.VERSION.SDK_INT >= 33
                 && checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
                 && !prefs.getBoolean("notification_asked", false)) {
             prefs.edit().putBoolean("notification_asked", true).apply();
@@ -207,7 +207,7 @@ public final class AmapActivity extends Activity {
     private void policy(String url){try{startActivity(new Intent(Intent.ACTION_VIEW,Uri.parse(url)));}catch(ActivityNotFoundException e){status.setText(getString(R.string.amap_no_browser,url));}}
     private void askConsent(){
         if(map!=null||!keys.configured()||!foreground||consentDialog!=null)return;
-        consentDialog=new AlertDialog.Builder(this).setTitle("启用高德联网地图？").setMessage("本应用使用高德地图、定位、搜索及导航SDK，联网时向高德提交Android Key、包信息及服务必需的网络、设备和位置信息，服务端可见IP。浏览地图时在前台定位。主动开始导航后，通过持续通知在锁屏或切换应用时继续定位，直到结束导航。主动搜索或规划路线时会把搜索词、起终点、车牌和排量提交高德；显式开始后提供GPS摩托导航，并向你选择并配对的ESP32发送转向、距离、车速和数据有效状态。圆屏连接通过系统蓝牙授权和配对。本次版本扩展了数据用途，因此需要重新同意一次。请先阅读页面中的隐私政策和条款。\n\nKey将用Android Keystore保护的AES-GCM加密保存于本应用私有存储，应用备份关闭。此次同意会保存，今后打开自动加载地图及定位；可在设置中删除Key并撤回同意。SDK自身缓存无法保证彻底清除。系统首次定位授权仍需本人操作。")
+        consentDialog=new AlertDialog.Builder(this).setTitle("启用高德联网地图？").setMessage("本应用使用高德地图、定位、搜索及导航SDK，联网时向高德提交Android Key、包信息及服务必需的网络、设备和位置信息，服务端可见IP。浏览地图时在前台定位。主动开始导航后，通过持续通知在锁屏或切换应用时继续定位，直到结束导航。主动搜索或规划路线时会把搜索词和起终点提交高德；显式开始后提供GPS摩托导航，并向你选择并配对的ESP32发送转向、距离、车速和数据有效状态。圆屏连接通过系统蓝牙授权和配对。本次版本扩展了数据用途，因此需要重新同意一次。请先阅读页面中的隐私政策和条款。\n\nKey将用Android Keystore保护的AES-GCM加密保存于本应用私有存储，应用备份关闭。此次同意会保存，今后打开自动加载地图及定位；可在设置中删除Key并撤回同意。SDK自身缓存无法保证彻底清除。系统首次定位授权仍需本人操作。")
             .setNegativeButton("不同意并关闭",(d,w)->{consent=false;dispose();boolean recorded=saved.consent(false);if(!recorded){saved.clear();keys.clear();open.setEnabled(false);}status.setText(recorded?"已撤回同意，不会自动联网定位":"已停止地图，但无法确认撤回记录已保存。请在系统中清除本测试应用数据后再使用。");})
             .setPositiveButton("同意并联网打开",(d,w)->{if(!foreground||isFinishing())return;if(!saved.consent(true)){status.setText("无法保存同意，请重试");return;}consent=true;initialize();}).create();
         consentDialog.setOnDismissListener(d->consentDialog=null);consentDialog.show();
@@ -241,7 +241,15 @@ public final class AmapActivity extends Activity {
                     MapFixTracker.Fix<Location> fix = navigationFix();
                     return fix == null ? 0 : fix.timeNanos();
                 }
-                public void report(String text) { journeyStatus.setText(text); }
+                public void refreshLocation() {
+                    locationPermission(false);
+                    if (foreground && consent && map != null && locationRequested && navigationFix() == null)
+                        locationFeed.maintain(true);
+                }
+                public void report(String text) {
+                    journeyStatus.setText(text);
+                    if (navigationButton != null && journey != null) navigationButton.setText(journey.actionLabel());
+                }
                 public void overview(){dial.setRound(false);placeLogo();}
                 public void icon(android.graphics.Bitmap bitmap) { turnIcon.setImageBitmap(bitmap); }
                 public void bleStatus(String text) { screenStatus.setText(text); }

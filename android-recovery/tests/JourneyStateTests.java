@@ -8,7 +8,16 @@ public class JourneyStateTests {
   for(double moved:new double[]{Double.NaN,Double.POSITIVE_INFINITY,-1,61}){long t=s.begin(true,true);check(s.ready(t,10));check(!s.start(true,20,moved));check(s.phase()==JourneyState.Phase.IDLE);}
   long t=s.begin(true,true);check(s.ready(t,100));check(!s.start(true,60101,0));t=s.begin(true,true);check(s.ready(t,100));check(!s.start(false,101,0));
   check(JourneyState.usableFix(true,false,10,100,99));check(!JourneyState.usableFix(false,false,10,100,99));check(!JourneyState.usableFix(true,true,10,100,99));check(!JourneyState.usableFix(true,false,101,100,99));check(!JourneyState.usableFix(true,false,Float.NaN,100,99));
-  check(JourneyState.displacement("150")==150);check(JourneyState.displacement("0")==0);check(JourneyState.displacement("-1")==0);check(JourneyState.displacement("10001")==0);check(JourneyState.displacement("bad")==0);
+  JourneyState oneTap = new JourneyState();
+  check(oneTap.locate(false) < 0);
+  long request = oneTap.locate(true); check(request > 0); check(oneTap.locating(request));
+  check(oneTap.locate(true) < 0); check(oneTap.begin(true,true) < 0);
+  check(!oneTap.plan(request-1,true)); check(!oneTap.plan(request,false));
+  check(oneTap.plan(request,true)); check(!oneTap.plan(request,true));
+  check(oneTap.ready(request,100)); check(oneTap.start(true,110,0)); check(oneTap.started(request));
+  oneTap.cancel(); check(!oneTap.active(request));
+  request = oneTap.locate(true); oneTap.cancel(); check(!oneTap.plan(request,true));
+  check(!oneTap.ready(request,200)); check(!oneTap.started(request));
   check(JourneyState.coordinate(30,120));check(!JourneyState.coordinate(Double.NaN,120));check(!JourneyState.coordinate(91,120));check(!JourneyState.coordinate(30,181));check(JourneyState.routeError(16).contains("权限不足"));
   check(JourneyState.maneuver(0).equals("请核对地图路线"));check(JourneyState.maneuver(1).equals("请核对地图路线"));check(JourneyState.maneuver(999).equals("请核对地图路线"));check(JourneyState.maneuver(2).equals("左转"));check(JourneyState.maneuver(3).equals("右转"));check(JourneyState.maneuver(9).equals("直行"));
   for(int i=0;i<1000;i++){long token=s.begin(true,true);s.cancel();check(!s.ready(token,i));check(!s.started(token));}

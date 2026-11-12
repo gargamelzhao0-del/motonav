@@ -113,6 +113,42 @@ public final class UpdateTests {
         yes(cancelled.isCancelled());
         rejects(() -> UpdateTransport.copyBounded(new ByteArrayInputStream(body), new ByteArrayOutputStream(), 10, 3, later, cancelled));
         rejects(() -> UpdateTransport.fetch("http://evil.test/a.apk", false, new ByteArrayOutputStream(), 3, new UpdateTransport.Cancellation()));
+        progress();
         System.out.println("PASS: " + checks + " updater policy/stream checks (no Android/device/network execution)");
+    }
+
+    private static void progress() throws Exception {
+        java.util.List<Long> received = new java.util.ArrayList<>();
+        java.util.List<Long> totals = new java.util.ArrayList<>();
+        UpdateTransport.Progress listener = (bytes, total) -> { received.add(bytes); totals.add(total); };
+        long deadline = System.nanoTime() + 10_000_000_000L;
+        java.io.InputStream slow = new ByteArrayInputStream(new byte[]{1,2,3}) {
+            @Override public synchronized int read(byte[] buffer, int offset, int length) {
+                try { Thread.sleep(210); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+                return super.read(buffer, offset, Math.min(length, 1));
+            }
+        };
+        yes(UpdateTransport.copyBounded(slow, new ByteArrayOutputStream(), 3, 3, deadline,
+                new UpdateTransport.Cancellation(), listener) == 3);
+        yes(received.equals(java.util.List.of(0L, 1L, 2L, 3L)));
+        yes(totals.equals(java.util.List.of(3L, 3L, 3L, 3L)));
+        received.clear(); totals.clear();
+        rejects(() -> UpdateTransport.copyBounded(new ByteArrayInputStream(new byte[]{1,2,3}),
+                new ByteArrayOutputStream(), 4, 4, deadline, new UpdateTransport.Cancellation(), listener));
+        yes(!received.contains(4L)); // A truncated stream never announces completed bytes.
+        received.clear(); totals.clear();
+        rejects(() -> UpdateTransport.copyBounded(new ByteArrayInputStream(new byte[]{1,2,3,4}),
+                new ByteArrayOutputStream(), 3, 3, deadline, new UpdateTransport.Cancellation(), listener));
+        yes(received.equals(java.util.List.of(0L)));
+        UpdateTransport.Cancellation token = new UpdateTransport.Cancellation();
+        ByteArrayOutputStream cancelledOutput = new ByteArrayOutputStream();
+        rejects(() -> UpdateTransport.copyBounded(new ByteArrayInputStream(new byte[]{1,2,3}), cancelledOutput,
+                3, 3, deadline, token, (bytes,total) -> token.cancel()));
+        yes(cancelledOutput.size() == 0);
+        received.clear(); totals.clear();
+        yes(UpdateTransport.copyBounded(new ByteArrayInputStream(new byte[]{1,2,3}), new ByteArrayOutputStream(),
+                3, -1, deadline, new UpdateTransport.Cancellation(), listener) == 3);
+        yes(received.get(0) == 0 && received.get(received.size()-1) == 3);
+        yes(totals.stream().allMatch(value -> value == -1));
     }
 }
