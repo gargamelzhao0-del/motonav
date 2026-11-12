@@ -22,6 +22,7 @@ java -cp "$build" MapStartupPolicyTests
 python3 tests/activity_contracts.py
 java -m jdk.compiler/com.sun.tools.javac.Main -encoding UTF-8 -source 17 -target 17 -cp "$build" -d "$build" app/src/main/java/com/motonav/companion/JourneyState.java tests/JourneyStateTests.java
 java -cp "$build" JourneyStateTests
+python3 -B tests/journey_controller_tests.py
 
 java -m jdk.compiler/com.sun.tools.javac.Main -encoding UTF-8 -source 17 -target 17 -cp "$build" -d "$build" app/src/main/java/com/motonav/companion/MapFixTracker.java tests/MapFixTests.java
 java -cp "$build" MapFixTests

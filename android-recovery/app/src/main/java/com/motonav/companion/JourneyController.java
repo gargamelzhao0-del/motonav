@@ -24,6 +24,7 @@ import com.amap.api.navi.NaviSetting;
 import com.amap.api.navi.SimpleNaviListener;
 import com.amap.api.navi.enums.NaviType;
 import com.amap.api.navi.enums.PathPlanningStrategy;
+import com.amap.api.navi.enums.ReCalculateRouteType;
 import com.amap.api.navi.model.AMapCarInfo;
 import com.amap.api.navi.model.AMapCalcRouteResult;
 import com.amap.api.navi.model.AMapNaviPath;
@@ -64,9 +65,10 @@ final class JourneyController {
     private int searchEpoch;
     private boolean destroyed, gpsWeak;
     private long startDeadlineMs;
+    private int startReplans;
     private Runnable pendingLocation;
     private final List<LatLng> routePoints = new ArrayList<>();
-    private String message = "选择目的地，然后规划摩托路线。";
+    private String message = "普通驾车导航 · 输入目的地后点击开始。";
     private android.graphics.Bitmap turnBitmap;
     private NavigationFrame frame = NavigationFrame.status(NavigationFrame.STOPPED);
     private final Runnable watchdog = new Runnable() {
@@ -130,6 +132,11 @@ final class JourneyController {
             stop("精确位置权限或系统定位已关闭，导航已结束。");
             return false;
         }
+        if (state.rerouteExpired(SystemClock.elapsedRealtime())) {
+            stop("路线更新超时，导航已结束。目的地已保留，请检查网络后重新开始。");
+            return false;
+        }
+        if (state.rerouting()) return false;
         JourneyState.Guidance guidance = state.guidance(SystemClock.elapsedRealtime(),
                 gpsWeak ? 0 : trustedFixTime(), newInstruction);
         if (newInstruction || frame.mode() == NavigationFrame.LIVE) Diagnostics.record("navigation_state", "state", guidance.name(), "gps_weak", gpsWeak, "fix_age_ms", DiagnosticRecord.age(SystemClock.elapsedRealtimeNanos(), trustedFixTime()));
@@ -177,7 +184,7 @@ final class JourneyController {
                         LatLng at=destinationPoint();if(destinationMarker!=null)destinationMarker.remove();
                         destinationMarker=map.addMarker(new MarkerOptions().position(at).title(destination.getTitle()));
                         cameraFollow(false);map.animateCamera(CameraUpdateFactory.newLatLngZoom(at,15));
-                        report("目的地："+destination.getTitle()+"\n点击「开始导航」，将自动获取当前位置并规划摩托车路线。");
+                        report("目的地："+destination.getTitle()+"\n点击「开始导航」，将自动获取当前位置并规划普通驾车路线。");
                     }).setNegativeButton("取消",null).create());
                 }
             });
@@ -217,8 +224,8 @@ final class JourneyController {
             return;
         }
         if (!state.plan(token, true)) return;
-        report("正在规划摩托车路线…\n路线就绪后自动开始导航。");
-        Diagnostics.record("route_action", "action", "plan_submit", "fix_age_ms", DiagnosticRecord.age(SystemClock.elapsedRealtimeNanos(), origin.getElapsedRealtimeNanos()));
+        report("正在规划普通驾车路线…\n路线就绪后自动开始导航。");
+        Diagnostics.record("route_action", "action", "plan_submit", "reason", "driving", "fix_age_ms", DiagnosticRecord.age(SystemClock.elapsedRealtimeNanos(), origin.getElapsedRealtimeNanos()));
         ++searchEpoch;
         plannedStart=new Location(origin);final LatLng target=destinationPoint();
         try{
@@ -231,31 +238,42 @@ final class JourneyController {
             listener=new SimpleNaviListener(){
                 @Override public void onInitNaviSuccess(){
                     if(!validPlan(token,engine)||submittedOnce[0])return;submittedOnce[0]=true;
-                    AMapCarInfo car=new AMapCarInfo();car.setCarType("11");engine.setCarInfo(car);
+                    AMapCarInfo car=new AMapCarInfo();car.setCarType("0");engine.setCarInfo(car);
                     boolean submitted=engine.calculateDriveRoute(Collections.singletonList(new NaviLatLng(plannedStart.getLatitude(),plannedStart.getLongitude())),
-                        Collections.singletonList(new NaviLatLng(target.latitude,target.longitude)),Collections.emptyList(),PathPlanningStrategy.MOTOR_MULTIPLE_DEFAULT);
+                        Collections.singletonList(new NaviLatLng(target.latitude,target.longitude)),Collections.emptyList(),PathPlanningStrategy.DRIVING_MULTIPLE_ROUTES_DEFAULT);
                     Diagnostics.record("route_action", "action", "sdk_request", "accepted", submitted);
-                    if(!submitted)stop("摩托算路请求未提交，请检查配置后重试。");
+                    if(!submitted)stop("驾车算路请求未提交，请检查配置后重试。");
                 }
                 @Override public void onInitNaviFailure(){if(validPlan(token,engine))stop("导航SDK初始化失败，未开始导航。");}
-                @Override public void onCalculateRouteFailure(AMapCalcRouteResult result){if(validPlan(token,engine)){Diagnostics.record("route_result", "state", "failed", "error", result==null?-1:result.getErrorCode());stop(JourneyState.routeError(result==null?-1:result.getErrorCode()));}}
+                @Override public void onCalculateRouteFailure(AMapCalcRouteResult result){
+                    boolean replanning = validReroute(token, engine, result);
+                    if (!validPlan(token, engine) && !replanning) return;
+                    Diagnostics.record("route_result", "state", replanning ? "reroute_failed" : "failed", "error", result==null?-1:result.getErrorCode());
+                    stop((replanning ? "路线更新失败，导航已结束。" : "") + JourneyState.routeError(result==null?-1:result.getErrorCode()));
+                }
                 @Override public void onCalculateRouteSuccess(AMapCalcRouteResult result){
+                    if (validReroute(token, engine, result)) {
+                        try {
+                            // During GPS navigation the SDK owns the active route. selectRouteId is pre-navigation only.
+                            if (!replaceRoute(engine.getNaviPath())) { stop("更新后的路线无效，导航已结束。"); return; }
+                            if (!state.rerouted(token, SystemClock.elapsedRealtime())) { stop("路线更新超时，请重新开始导航。"); return; }
+                            frame = NavigationFrame.status(NavigationFrame.WAITING); icon(null);
+                            drawRoute(false);
+                            Diagnostics.record("route_result", "state", "reroute_success", "count", result.getCalcRouteType());
+                            report("驾车路线已更新，等待新的位置和导航指令。");
+                        } catch (RuntimeException e) { stop("路线更新失败，请重新开始导航。"); }
+                        return;
+                    }
                     if(!validPlan(token,engine))return;
                     Diagnostics.record("route_result", "state", "sdk_success");
                     int[] ids=result==null?null:result.getRouteid();Map<Integer,AMapNaviPath> paths=engine.getNaviPaths();
-                    if(ids==null||ids.length==0||paths==null||paths.get(ids[0])==null){stop("高德未返回有效摩托路线。");return;}
-                    AMapNaviPath path=paths.get(ids[0]);List<NaviLatLng> coords=path.getCoordList();
-                    if(coords==null||coords.size()<2||path.getAllLength()<=0){stop("路线几何或距离无效，不能开始导航。");return;}
+                    if(ids==null||ids.length==0||paths==null||paths.get(ids[0])==null){stop("高德未返回有效驾车路线。");return;}
                     try{
+                        if (!replaceRoute(paths.get(ids[0]))) { stop("路线几何或距离无效，不能开始导航。"); return; }
                         if (!engine.selectRouteId(ids[0])) { stop("高德路线选择失败。"); return; }
-                        routePoints.clear();
-                        for (NaviLatLng point : coords) {
-                            if (point == null || !JourneyState.coordinate(point.getLatitude(), point.getLongitude())) { stop("路线坐标无效。"); return; }
-                            routePoints.add(new LatLng(point.getLatitude(), point.getLongitude()));
-                        }
                         drawRoute(true);
                         if(state.ready(token,SystemClock.elapsedRealtime())) {
-                            report("摩托车路线已就绪，正在启动导航…");
+                            report("驾车路线已就绪，正在启动导航…");
                             if (!usableFix()) host.refreshLocation();
                             awaitLocation(token, true);
                         }
@@ -286,8 +304,8 @@ final class JourneyController {
                 }
                 @Override public void onStopNavi(){if(active()&&engine==navi&&state.active(token))stop("SDK已结束导航。");}
                 @Override public void onArriveDestination(){if(active()&&engine==navi&&state.active(token))stop("已到达目的地。", NavigationFrame.ARRIVED);}
-                @Override public void onReCalculateRouteForYaw(){if(active()&&engine==navi&&state.active(token))stop("检测到偏航，导航已停止；请停车后手动重新规划。");}
-                @Override public void onReCalculateRouteForTrafficJam(){if(active()&&engine==navi&&state.active(token))stop("路线需要更新，导航已停止；请停车后重新规划。");}
+                @Override public void onReCalculateRouteForYaw(){beginReroute(token,engine,"yaw","已偏离路线，正在自动重新规划…");}
+                @Override public void onReCalculateRouteForTrafficJam(){beginReroute(token,engine,"traffic","前方路况变化，正在自动更新路线…");}
                 @Override public void onGpsSignalWeak(boolean weak) {
                     if (!active() || engine != navi || !state.active(token)) return;
                     gpsWeak = weak;
@@ -295,13 +313,38 @@ final class JourneyController {
                     if (weak && state.phase() == JourneyState.Phase.NAVIGATING) guidanceReady(false);
                 }
             };
-            report("正在规划摩托车路线…");
+            report("正在规划普通驾车路线…");
             engine.addAMapNaviListener(listener);
             handler.postDelayed(()->{if(validPlan(token,engine))stop("算路超时，目的地已保留。请检查网络或服务授权后再次点击开始。");},
                     Math.max(1, Math.min(30000, startDeadlineMs - SystemClock.elapsedRealtime())));
         }catch(Exception|LinkageError e){stop("导航SDK初始化失败，请核对新包名/签名、Key和SDK配置。");}
     }
     private boolean validPlan(long token,AMapNavi engine){return active()&&engine==navi&&state.planning(token);}
+    private boolean validReroute(long token, AMapNavi engine, AMapCalcRouteResult result) {
+        return active() && engine == navi && state.active(token) && state.phase() == JourneyState.Phase.NAVIGATING
+                && (result == null ? state.rerouting() : result.getCalcRouteType() != ReCalculateRouteType.ROUTE_TYPE_COMMON);
+    }
+    private void beginReroute(long token, AMapNavi engine, String reason, String text) {
+        if (!active() || engine != navi || !state.reroute(token, SystemClock.elapsedRealtime())) return;
+        frame = NavigationFrame.status(NavigationFrame.WAITING); icon(null);
+        // Hide the outdated line while the SDK recalculates; keep the destination and foreground service.
+        if (line != null) { line.remove(); line = null; }
+        routePoints.clear();
+        Diagnostics.record("route_action", "action", "reroute", "reason", reason);
+        report(text);
+    }
+    private boolean replaceRoute(AMapNaviPath path) {
+        if (path == null || path.getAllLength() <= 0) return false;
+        List<NaviLatLng> coordinates = path.getCoordList();
+        if (coordinates == null || coordinates.size() < 2) return false;
+        List<LatLng> next = new ArrayList<>();
+        for (NaviLatLng point : coordinates) {
+            if (point == null || !JourneyState.coordinate(point.getLatitude(), point.getLongitude())) return false;
+            next.add(new LatLng(point.getLatitude(), point.getLongitude()));
+        }
+        routePoints.clear(); routePoints.addAll(next);
+        return true;
+    }
     private static String safeName(String name){return name==null||name.trim().isEmpty()?"等待道路信息":name;}
     void startOrStop(){
         Diagnostics.record("route_action", "action", "start_or_stop", "phase", state.phase().name(), "eligible", usableFix());
@@ -313,6 +356,7 @@ final class JourneyController {
         long token = state.locate(true);
         if (token < 0) return;
         startDeadlineMs = SystemClock.elapsedRealtime() + 60000;
+        startReplans = 0;
         Diagnostics.record("route_action", "action", "start_requested", "phase", state.phase().name(), "destination", true);
         if (!usableFix()) host.refreshLocation();
         awaitLocation(token, false);
@@ -328,24 +372,42 @@ final class JourneyController {
         }
         double moved = plannedStart.distanceTo(current);
         if (!state.start(true, SystemClock.elapsedRealtime(), moved)) {
-            stop("起点位置已变化，请再次点击开始导航。目的地已保留。");
+            if (!Double.isFinite(moved) || moved < 0 || startReplans >= 2
+                    || SystemClock.elapsedRealtime() >= startDeadlineMs) {
+                stop("当前位置持续变化或启动超时，目的地已保留。请定位稳定后再点开始。");
+                return;
+            }
+            ++startReplans;
+            Diagnostics.record("route_action", "action", "origin_changed", "moved_m", moved, "count", startReplans);
+            stopEngine(); clearRoute();
+            long next = state.locate(true);
+            if (next > 0) awaitLocation(next, false);
             return;
         }
-        report("正在启动摩托车导航…");
+        report("正在启动普通驾车导航…");
         final long token=state.epoch();
-        boolean accepted = host.beginNavigation(() -> {
-            if (!active() || state.epoch() != token || state.phase() != JourneyState.Phase.STARTING) return;
-            if (SystemClock.elapsedRealtime() >= startDeadlineMs) { stop("启动导航超时，请再次点击开始。"); return; }
-            if (!host.navigationAllowed() || !usableFix()) { stop("启动导航前定位已失效，请等待新定位。"); return; }
-            try {
-                if (!navi.startNavi(NaviType.GPS)) { stop("GPS导航启动请求被拒绝。"); return; }
-                handler.postDelayed(() -> {
-                    if (active() && state.epoch() == token && state.phase() == JourneyState.Phase.STARTING)
-                        stop("GPS导航未成功启动，请重新规划后重试。");
-                }, Math.max(1, Math.min(10000, startDeadlineMs - SystemClock.elapsedRealtime())));
-            } catch (RuntimeException | LinkageError e) { stop("GPS导航启动失败。"); }
-        });
+        boolean accepted = host.beginNavigation(() -> startEngine(token));
         if (!accepted) stop("后台导航启动失败，请检查精确定位权限后重试。");
+    }
+    private void startEngine(long token) {
+        if (!active() || state.epoch() != token || state.phase() != JourneyState.Phase.STARTING) return;
+        if (SystemClock.elapsedRealtime() >= startDeadlineMs) { stop("启动导航超时，请再次点击开始。目的地已保留。"); return; }
+        if (!host.navigationAllowed()) { stop("精确位置权限或系统定位已关闭，未启动导航。"); return; }
+        if (!usableFix()) {
+            // The foreground service already owns continuous location. Keep the route while it recovers.
+            report("正在等待当前位置恢复，恢复后自动启动导航…");
+            pendingLocation = () -> startEngine(token);
+            handler.postDelayed(pendingLocation, 1000);
+            return;
+        }
+        pendingLocation = null;
+        try {
+            if (!navi.startNavi(NaviType.GPS)) { stop("GPS导航启动请求被拒绝。"); return; }
+            handler.postDelayed(() -> {
+                if (active() && state.epoch() == token && state.phase() == JourneyState.Phase.STARTING)
+                    stop("GPS导航未成功启动，请重新规划后重试。");
+            }, Math.max(1, Math.min(10000, startDeadlineMs - SystemClock.elapsedRealtime())));
+        } catch (RuntimeException | LinkageError e) { stop("GPS导航启动失败。"); }
     }
     private void cameraFollow(boolean follow) {
         if (map != null) map.setMyLocationStyle(new MyLocationStyle().myLocationType(
