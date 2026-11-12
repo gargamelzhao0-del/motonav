@@ -28,7 +28,7 @@
 
 本地：在 `android-recovery` 中运行 `sh tests/run.sh`。控制器回放新增“SDK 位置与指令正常、地图位置已过期”的复现场景，验证它进入 WAITING，并在新的地图位置与指令到达后恢复。
 
-实际 Android：`.github/workflows/android-emulator.yml` 在临时 GitHub Linux runner 上创建 Android 11 AVD，安装 APK 并执行 `connectedDebugAndroidTest`。不会更改开发电脑的虚拟化设置或已连接的其他 ADB 设备。
+实际 Android：`.github/workflows/android-emulator.yml` 在临时 GitHub Linux runner 上创建 Android 11 AVD，安装 APK 并执行 `connectedDebugAndroidTest`。外部脚本通过 `adb emu geo fix` 每秒送入公开测试点，Android GPS provider 测试必须实际收到至少两条新回调。脚本与测试都检查模拟器身份，不操作任意已连接设备。不会更改开发电脑的虚拟化设置或已连接的其他 ADB 设备。
 
 下载该 workflow 的 `motonav-android-emulator-evidence` artifact，可查看 JUnit 报告、Android fingerprint/ABI、App 页面截图、确定性回放结果和高德初始化实际结果。`init_failure` 与 `init_success` 都必须如实记录；初始化回调到达不等于线上导航成功。CI 没有用户有效 Key，也不持有正式签名私钥，使用故意无效的测试 Key，不会把未执行的线上算路写成通过。
 

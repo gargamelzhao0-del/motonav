@@ -38,12 +38,7 @@ jobs:
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot-save -camera-back none
           script: |
-            mkdir -p android-recovery/emulator-evidence
-            adb shell getprop ro.build.fingerprint > android-recovery/emulator-evidence/runtime.txt
-            adb shell getprop ro.product.cpu.abilist >> android-recovery/emulator-evidence/runtime.txt
-            adb shell getprop ro.dalvik.vm.native.bridge >> android-recovery/emulator-evidence/runtime.txt
-            gradle -p android-recovery --no-daemon connectedDebugAndroidTest
-            adb pull /sdcard/Android/data/com.motonav.recovery/files/emulator-evidence android-recovery/emulator-evidence/app
+            bash android-recovery/tools/run-emulator-tests.sh
       - uses: actions/upload-artifact@v4
         if: always()
         with:

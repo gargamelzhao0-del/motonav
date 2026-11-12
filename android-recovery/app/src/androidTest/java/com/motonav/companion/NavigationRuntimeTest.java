@@ -20,12 +20,17 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.Test;
+import org.junit.Before;
 import org.junit.runner.RunWith;
 import static org.junit.Assert.*;
 
 /** Actual Android runtime and real SDK classes; online route entitlement is a separate phone test. */
 @RunWith(AndroidJUnit4.class)
 public class NavigationRuntimeTest {
+    @Before public void requireDisposableEmulator() {
+        assertTrue("These tests must run only on a disposable Android AVD",
+            android.os.Build.HARDWARE.contains("ranchu") || android.os.Build.HARDWARE.contains("goldfish"));
+    }
     static File evidence(String name) {
         File directory = InstrumentationRegistry.getInstrumentation().getTargetContext().getExternalFilesDir("emulator-evidence");
         assertNotNull(directory);
@@ -95,6 +100,36 @@ public class NavigationRuntimeTest {
         clone.setLocationType(AMapLocation.LOCATION_TYPE_LAST_LOCATION_CACHE);
         assertFalse(MapFixTracker.isLiveSource(AmapLocationSample.source(clone)));
     }
+    @Test public void frameworkGpsReceivesActualEmulatorConsoleFixes() throws Exception {
+        android.app.Instrumentation instrumentation = InstrumentationRegistry.getInstrumentation();
+        android.content.Context context = instrumentation.getTargetContext();
+        instrumentation.getUiAutomation().grantRuntimePermission(context.getPackageName(),android.Manifest.permission.ACCESS_COARSE_LOCATION);
+        instrumentation.getUiAutomation().grantRuntimePermission(context.getPackageName(),android.Manifest.permission.ACCESS_FINE_LOCATION);
+        android.location.LocationManager manager = context.getSystemService(android.location.LocationManager.class);
+        CountDownLatch received = new CountDownLatch(2);
+        AtomicReference<Location> latest = new AtomicReference<>();
+        android.location.LocationListener listener = new android.location.LocationListener() {
+            @Override public void onLocationChanged(Location point) {
+                if (Math.abs(point.getLatitude()-39.989614)<0.00001 && Math.abs(point.getLongitude()-116.481763)<0.00001) {
+                    latest.set(new Location(point)); received.countDown();
+                }
+            }
+            @Override public void onProviderEnabled(String provider) { }
+            @Override public void onProviderDisabled(String provider) { }
+            @Override public void onStatusChanged(String provider,int status,android.os.Bundle extras) { }
+        };
+        try {
+            instrumentation.runOnMainSync(() -> manager.requestLocationUpdates(android.location.LocationManager.GPS_PROVIDER,0,0,listener,android.os.Looper.getMainLooper()));
+            assertTrue("No framework GPS callbacks from the emulator console trace",received.await(45,TimeUnit.SECONDS));
+            Location point = latest.get();
+            assertEquals("gps",point.getProvider());
+            assertTrue(MapStartupPolicy.fresh(SystemClock.elapsedRealtimeNanos(),point.getElapsedRealtimeNanos()));
+            assertTrue(point.hasAccuracy());
+            writeEvidence("framework-gps.txt","Received at least two real Android GPS provider callbacks from adb emu geo fix.\n"
+                +"Public fixture delivered, elapsed timestamp is fresh. Mock flag="+point.isFromMockProvider()
+                +"; accuracy="+point.getAccuracy()+"m.\nThis validates the virtual GPS pipeline, not physical GNSS or AMap online navigation.\n");
+        } finally { instrumentation.runOnMainSync(() -> manager.removeUpdates(listener)); }
+    }
     @Test public void realSdkInitializationCallbackIsRecordedWithoutAServiceKey() throws Exception {
         CountDownLatch completed = new CountDownLatch(1);
         AtomicReference<String> outcome = new AtomicReference<>();
@@ -128,16 +163,29 @@ public class NavigationRuntimeTest {
             scenario.onActivity(activity -> {
                 activity.startTest();
                 assertFalse(NavigationService.navigating);
+                assertTrue(allText(activity.getWindow().getDecorView()).contains("保存 Android Key"));
             });
             InstrumentationRegistry.getInstrumentation().waitForIdleSync();
             scenario.onActivity(activity -> capture(activity,"sdk-simulation-unconfigured.png"));
             scenario.recreate();
             scenario.onActivity(activity -> {
                 NavigationService.navigating = true;
-                try { activity.startTest(); assertTrue(NavigationService.navigating); }
+                try {
+                    activity.startTest(); assertTrue(NavigationService.navigating);
+                    assertTrue(allText(activity.getWindow().getDecorView()).contains("请先结束真实导航"));
+                }
                 finally { NavigationService.navigating = false; }
             });
         }
+    }
+    private static String allText(View view) {
+        StringBuilder text = new StringBuilder();
+        if (view instanceof android.widget.TextView) text.append(((android.widget.TextView)view).getText());
+        if (view instanceof android.view.ViewGroup) {
+            android.view.ViewGroup group = (android.view.ViewGroup)view;
+            for (int i=0;i<group.getChildCount();i++) text.append(allText(group.getChildAt(i)));
+        }
+        return text.toString();
     }
     @Test public void waitingReasonSeparatesActualSdkAndMapStreams() {
         long now = SystemClock.elapsedRealtime();
