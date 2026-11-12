@@ -24,4 +24,10 @@ finish() {
     adb -s "$serial" pull /sdcard/Android/data/com.motonav.recovery/files/emulator-evidence emulator-evidence/app || true
 }
 trap finish EXIT
-gradle --no-daemon connectedDebugAndroidTest
+adb -s "$serial" install -r app/build/outputs/apk/debug/app-debug.apk
+adb -s "$serial" install -r app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+# Keep the packages installed until evidence is pulled. Gradle's connected test task
+# uninstalls them at teardown, which also removes the app-owned screenshot directory.
+adb -s "$serial" shell am instrument -w -r com.motonav.recovery.test/androidx.test.runner.AndroidJUnitRunner \
+    | tee emulator-evidence/instrumentation.txt
+python3 tools/check-instrumentation.py emulator-evidence/instrumentation.txt emulator-evidence/junit.xml
