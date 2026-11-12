@@ -6,10 +6,11 @@ public final class JourneyState {
     public enum Guidance { LIVE, WAITING }
     private long epoch, readyAt;
     private long lastInstructionMs, waitingSinceMs = -1;
+    private long rerouteSinceMs = -1;
     private Phase phase=Phase.IDLE;
     public Phase phase(){return phase;}
     public long epoch(){return epoch;}
-    public long cancel(){phase=Phase.IDLE;readyAt=0;waitingSinceMs=-1;return ++epoch;}
+    public long cancel(){phase=Phase.IDLE;readyAt=0;waitingSinceMs=-1;rerouteSinceMs=-1;return ++epoch;}
     public long locate(boolean destination) {
         if (!destination || phase != Phase.IDLE) return -1;
         cancel(); phase = Phase.LOCATING; return epoch;
@@ -35,10 +36,29 @@ public final class JourneyState {
     public void startGuidance(long nowMs) {
         lastInstructionMs = nowMs;
         waitingSinceMs = -1;
+        rerouteSinceMs = -1;
+    }
+    public boolean reroute(long token, long nowMs) {
+        if (token != epoch || phase != Phase.NAVIGATING || nowMs < 0) return false;
+        // Repeated SDK notices cannot extend the deadline indefinitely.
+        if (rerouteSinceMs < 0) rerouteSinceMs = nowMs;
+        waitingSinceMs = nowMs;
+        return true;
+    }
+    public boolean rerouting() { return rerouteSinceMs >= 0; }
+    public boolean rerouteExpired(long nowMs) {
+        return rerouting() && nowMs - rerouteSinceMs >= 30_000;
+    }
+    public boolean rerouted(long token, long nowMs) {
+        if (token != epoch || phase != Phase.NAVIGATING || nowMs < 0 || rerouteExpired(nowMs)) return false;
+        rerouteSinceMs = -1;
+        // Route geometry alone is not a live instruction. Require a subsequent fix and instruction.
+        waitingSinceMs = nowMs;
+        return true;
     }
 
     public Guidance guidance(long nowMs, long trustedFixNanos, boolean newInstruction) {
-        if (phase != Phase.NAVIGATING) return Guidance.WAITING;
+        if (phase != Phase.NAVIGATING || rerouting()) return Guidance.WAITING;
         if (trustedFixNanos > 0 && newInstruction
                 && (waitingSinceMs < 0 || trustedFixNanos / 1_000_000L > waitingSinceMs)) {
             lastInstructionMs = nowMs;
@@ -67,7 +87,10 @@ public final class JourneyState {
         }
     }
     public static String routeError(int code){
-        if(code==16)return "摩托车服务权限不足（16）。请在高德为当前 Android Key 开通摩托车路径规划/导航服务后，再点击开始导航。";
-        return "摩托算路失败（"+code+"）。请检查网络、定位和高德应用配置；本次未生成可导航路线。";
+        if(code==16)return "驾车导航服务权限不足（16）。请核对当前 Android Key 的导航服务权限、包名及安装签名。";
+        if(code==13||code==22)return "高德应用鉴权失败（"+code+"）。请核对 Android Key、包名及本安装签名 SHA1。";
+        if(code==17)return "高德服务调用额度不足（17）。请检查此 Key 的配额后重试。";
+        if(code==2)return "驾车算路连接失败（2）。请检查手机网络后重试，目的地已保留。";
+        return "驾车算路失败（"+code+"）。请检查网络、定位和高德应用配置；本次未生成可导航路线。";
     }
 }

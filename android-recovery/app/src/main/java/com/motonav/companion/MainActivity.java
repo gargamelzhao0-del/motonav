@@ -151,8 +151,8 @@ public final class MainActivity extends Activity implements BleLink.Listener {
         heading("05 / SYSTEM","风格在外，边界清楚。");
         body.addView(text("地图提供者",18,WHITE));
         copy("● DEMO / 已启用\n本地虚构城区、目的地搜索和固定路线。无需联网或密钥。");
-        copy("○ 高德地图 SDK / 已集成，可在手机输入Key\n真实地图需匹配包名和签名的Android Key，可在地图页输入，仅本次会话保存，并单独同意隐私说明。独立真实定位面板不等于真实导航。官方Link可作为后续授权接入路径；本版本不抓屏、不使用无障碍提取导航。");
-        body.addView(button("查看高德接入边界",false,()->new AlertDialog.Builder(this).setTitle("高德接入状态：SDK已集成 / 服务未验证").setMessage("本版已编译接入官方地图组合SDK，独立地图页可直接输入自己的Android Key，无需电脑重编译；Key仅本次会话内存保存，无Key或未同意不会初始化。未集成导航工作流，导航不可用。后续可使用官方Link SDK获取经授权的高德App导航信息。需审核Key、SDK与数据结构，以及摩托车和车载外屏的专项许可；完成隐私流程与定位权限。不能用自行车/汽车路线冒充摩托车路线。\n\n外部地图搜索只是打开地图 App，不会回传路线；v1只支持固定模拟路线；v2只发送经过校验的虚构局部路网，不接收真实GPS或高德路线。").setPositiveButton("明白",null).show()));
+        copy("○ 高德地图 SDK / 已集成，可在手机输入Key\n真实地图页提供普通驾车导航。Android Key 在本机加密保存，需匹配包名和安装签名，并同意隐私说明。此模拟页面保持虚构数据，不发送真实路线。");
+        body.addView(button("查看高德接入边界",false,()->new AlertDialog.Builder(this).setTitle("高德接入状态：SDK已集成 / 服务未验证").setMessage("真实地图页已提供地点搜索、自动定位和普通驾车导航，无需填写车牌、排量。普通驾车路线不含摩托车禁限行避让。Android Key 在本机加密保存；导航服务仍需匹配有效的 Key、包名与安装签名。\n\n本页面的模拟功能使用虚构路线，和真实导航分开。真实导航页可连接圆屏，通过 BLE v3 发送转向、距离、车速及有效状态。").setPositiveButton("明白",null).show()));
         body.addView(button("真实地图 App 搜索",false,this::externalMap));
         Switch north=new Switch(this);north.setText("地图跟随行驶方向");north.setTextColor(WHITE);north.setChecked(headingUp);north.setPadding(0,dp(18),0,dp(18));north.setOnCheckedChangeListener((v,checked)->{headingUp=checked;getPreferences(MODE_PRIVATE).edit().putBoolean("heading_up",checked).apply();});body.addView(north);
         body.addView(text("隐私与运行",18,WHITE));
