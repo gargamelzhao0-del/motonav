@@ -2,7 +2,7 @@ package com.motonav.companion;
 
 /** Single-flight route/navigation state. Epochs invalidate asynchronous results after dismissal. */
 public final class JourneyState {
-    public enum Phase { IDLE, PLANNING, READY, STARTING, NAVIGATING }
+    public enum Phase { IDLE, LOCATING, PLANNING, READY, STARTING, NAVIGATING }
     public enum Guidance { LIVE, WAITING }
     private long epoch, readyAt;
     private long lastInstructionMs, waitingSinceMs = -1;
@@ -10,8 +10,17 @@ public final class JourneyState {
     public Phase phase(){return phase;}
     public long epoch(){return epoch;}
     public long cancel(){phase=Phase.IDLE;readyAt=0;waitingSinceMs=-1;return ++epoch;}
+    public long locate(boolean destination) {
+        if (!destination || phase != Phase.IDLE) return -1;
+        cancel(); phase = Phase.LOCATING; return epoch;
+    }
+    public boolean locating(long token) { return token == epoch && phase == Phase.LOCATING; }
+    public boolean plan(long token, boolean goodFix) {
+        if (!locating(token) || !goodFix) return false;
+        phase = Phase.PLANNING; return true;
+    }
     public long begin(boolean goodFix,boolean destination){
-        if(!goodFix||!destination||phase==Phase.PLANNING||phase==Phase.STARTING||phase==Phase.NAVIGATING)return -1;
+        if(!goodFix||!destination||phase==Phase.LOCATING||phase==Phase.PLANNING||phase==Phase.STARTING||phase==Phase.NAVIGATING)return -1;
         cancel();phase=Phase.PLANNING;return epoch;
     }
     public boolean planning(long token){return token==epoch&&phase==Phase.PLANNING;}
@@ -45,7 +54,6 @@ public final class JourneyState {
 
     public static boolean coordinate(double latitude,double longitude){return Double.isFinite(latitude)&&Double.isFinite(longitude)&&Math.abs(latitude)<=90&&Math.abs(longitude)<=180;}
     public static boolean usableFix(boolean fine,boolean mock,float accuracy,long now,long fix){return fine&&!mock&&MapStartupPolicy.navigationAccuracy(accuracy)&&MapStartupPolicy.fresh(now,fix);}
-    public static int displacement(String text){try{int cc=Integer.parseInt(text.trim());return cc>=1&&cc<=10000?cc:0;}catch(RuntimeException e){return 0;}}
     /** Official AMap IconType values; unknown is never interpreted as straight. */
     public static String maneuver(int type){
         switch(type){
@@ -59,7 +67,7 @@ public final class JourneyState {
         }
     }
     public static String routeError(int code){
-        if(code==16)return "摩托算路失败（16）：高德服务访问权限不足。请核对新包名/签名绑定并申请本Key的摩托车服务权限；普通地图/搜索权限不等于摩托授权。不会改用汽车或自行车路线。";
+        if(code==16)return "摩托车服务权限不足（16）。请在高德为当前 Android Key 开通摩托车路径规划/导航服务后，再点击开始导航。";
         return "摩托算路失败（"+code+"）。请检查网络、定位和高德应用配置；本次未生成可导航路线。";
     }
 }

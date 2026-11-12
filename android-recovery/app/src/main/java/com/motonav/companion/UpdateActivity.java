@@ -14,11 +14,14 @@ import android.os.Handler;
 import android.os.Looper;
 import android.provider.Settings;
 import android.view.WindowManager;
+import android.view.View;
 import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
+import android.widget.ProgressBar;
 import java.io.File;
+import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -32,6 +35,8 @@ public final class UpdateActivity extends Activity {
     private UpdatePolicy.Release release;
     private File ready;
     private TextView status;
+    private TextView progressText;
+    private ProgressBar progressBar;
     private Button check, download, install, cancel, reminders;
     private boolean foreground, destroyed, returningFromSettings, checkFromNotification;
     private AlertDialog permissionDialog;
@@ -58,6 +63,11 @@ public final class UpdateActivity extends Activity {
         text(page, "可手动检查，或开启新版提醒。开启后，Android 会在联网时定期查看 MotoNav 的 GitHub 发布，发现新版会发送通知。下载和安装需由你确认。", 15);
         text(page, "检查只访问更新发布源。临时签名测试包与正式签名不同时，无法覆盖安装。", 15);
         status = text(page, "尚未联网检查。", 16);
+        progressBar = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
+        progressBar.setMax(100);
+        page.addView(progressBar, new LinearLayout.LayoutParams(-1, -2));
+        progressText = text(page, "", 15);
+        hideProgress();
         check = button(page, "检查更新", this::checkForUpdate);
         reminders = button(page, "开启新版提醒", this::toggleReminders);
         download = button(page, "下载并验证", this::downloadUpdate);
@@ -140,10 +150,42 @@ public final class UpdateActivity extends Activity {
     private void downloadUpdate() {
         if (!foreground || operation != null || release == null || ready != null) return;
         final UpdatePolicy.Release selected = release;
-        runWork("正在下载并验证 APK…离开本页或点取消会停止。", token -> repository.download(selected, token), file -> {
+        runWork("正在连接下载服务…请停留在此页。", token -> repository.download(selected, token,
+                new UpdateRepository.Progress() {
+                    @Override public void transferred(long bytes, long total) { downloadProgress(token, bytes, total, false); }
+                    @Override public void verifying() { downloadProgress(token, selected.sizeBytes, selected.sizeBytes, true); }
+                }), file -> {
             ready = file;
-            status.setText("下载及包名、版本、SHA-256、当前签名验证通过。仍需你点击下方按钮，并在 Android 安装器中确认。");
+            progressBar.setVisibility(View.VISIBLE); progressBar.setIndeterminate(false); progressBar.setProgress(100);
+            progressText.setVisibility(View.VISIBLE); progressText.setText("下载与校验完成 · 等待安装");
+            status.setText("安装包已验证，请点击「交给系统安装」，再按系统提示完成更新。");
         }, false);
+    }
+
+    private void downloadProgress(UpdateTransport.Cancellation token, long bytes, long total, boolean verifying) {
+        main.post(() -> {
+            if (destroyed || !foreground || operation != token || token.isCancelled()) return;
+            progressBar.setVisibility(View.VISIBLE);
+            progressText.setVisibility(View.VISIBLE);
+            if (verifying) {
+                progressBar.setIndeterminate(true);
+                status.setText("下载完成，正在校验安装包…");
+                progressText.setText("请稍候，校验完成后可安装。");
+                return;
+            }
+            int percent = total > 0 ? (int) Math.min(100, bytes * 100 / total) : 0;
+            progressBar.setIndeterminate(total <= 0); progressBar.setProgress(percent);
+            status.setText("正在下载更新…离开本页或点取消会停止。");
+            progressText.setText(total > 0 ? String.format(Locale.getDefault(), "已下载 %.1f / %.1f MB · %d%%",
+                    bytes / 1_000_000.0, total / 1_000_000.0, percent)
+                    : String.format(Locale.getDefault(), "已下载 %.1f MB", bytes / 1_000_000.0));
+        });
+    }
+
+    private void hideProgress() {
+        progressBar.setVisibility(View.GONE);
+        progressText.setVisibility(View.GONE);
+        progressText.setText("");
     }
     private void requestInstall() {
         if (!foreground || operation != null || ready == null || release == null) return;
@@ -187,6 +229,7 @@ public final class UpdateActivity extends Activity {
             // Keep the immutable file until normal cache expiry, even if this activity is destroyed.
             // Starting the installer is NOT evidence that the user accepted or installation succeeded.
             ready = null; release = null;
+            hideProgress();
             status.setText("已交给 Android 安装器；是否安装由你和系统决定。这里不把打开安装器视为安装成功。");
         } catch (ActivityNotFoundException | SecurityException e) {
             status.setText("系统安装器不可用或拒绝请求。未确认任何安装。");
@@ -199,6 +242,9 @@ public final class UpdateActivity extends Activity {
         if (!foreground || destroyed || operation != null) return;
         UpdateTransport.Cancellation token = new UpdateTransport.Cancellation();
         operation = token;
+        progressBar.setVisibility(View.VISIBLE); progressBar.setIndeterminate(true);
+        progressText.setVisibility(View.GONE);
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         status.setText(message); refreshButtons();
         worker.execute(() -> {
             T value = null; Exception failure = null;
@@ -211,6 +257,8 @@ public final class UpdateActivity extends Activity {
                     return;
                 }
                 operation = null;
+                getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+                hideProgress();
                 if (error != null) {
                     if (invalidateOnFailure) discardReady();
                     status.setText(failureMessage(error));
@@ -232,6 +280,8 @@ public final class UpdateActivity extends Activity {
     private void cancelOperation(String message) {
         if (operation != null) {
             operation.cancel(); operation = null;
+            getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+            hideProgress();
             status.setText(message);
         }
         refreshButtons();

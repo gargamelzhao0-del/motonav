@@ -11,6 +11,8 @@ import javax.net.ssl.HttpsURLConnection;
 public final class UpdateTransport {
     private UpdateTransport() {}
 
+    public interface Progress { void transferred(long downloaded, long expected); }
+
     public static final class Cancellation {
         private final AtomicBoolean cancelled = new AtomicBoolean();
         private volatile HttpsURLConnection connection;
@@ -27,6 +29,11 @@ public final class UpdateTransport {
 
     public static void fetch(String origin, boolean manifest, OutputStream output, long expectedBytes,
                              Cancellation cancellation) throws IOException {
+        fetch(origin, manifest, output, expectedBytes, cancellation, null);
+    }
+
+    public static void fetch(String origin, boolean manifest, OutputStream output, long expectedBytes,
+                             Cancellation cancellation, Progress progress) throws IOException {
         if (!UpdatePolicy.isOfficialAsset(origin, manifest)) throw new IOException("untrusted_source");
         final long max = manifest ? UpdatePolicy.MAX_MANIFEST_BYTES : UpdatePolicy.MAX_APK_BYTES;
         if (!manifest && (expectedBytes <= 0 || expectedBytes > max)) throw new IOException("manifest_size");
@@ -63,7 +70,7 @@ public final class UpdateTransport {
                 long length = connection.getContentLengthLong();
                 if (length > max || (expectedBytes > 0 && length >= 0 && length != expectedBytes)) throw new IOException("download_size");
                 try (InputStream input = connection.getInputStream()) {
-                    copyBounded(input, output, max, expectedBytes, deadline, cancellation);
+                    copyBounded(input, output, max, expectedBytes, deadline, cancellation, progress);
                 }
                 return;
             } finally {
@@ -77,8 +84,17 @@ public final class UpdateTransport {
     /** Also used by host tests: reject empty, truncated, oversized and cancelled streams. */
     public static long copyBounded(InputStream input, OutputStream output, long max, long expected,
                                    long deadlineNanos, Cancellation cancellation) throws IOException {
+        return copyBounded(input, output, max, expected, deadlineNanos, cancellation, null);
+    }
+
+    public static long copyBounded(InputStream input, OutputStream output, long max, long expected,
+                                   long deadlineNanos, Cancellation cancellation, Progress progress) throws IOException {
         long total = 0;
         byte[] buffer = new byte[32768];
+        cancellation.check();
+        checkDeadline(deadlineNanos);
+        long lastProgress = System.nanoTime();
+        if (progress != null) progress.transferred(0, expected);
         while (true) {
             cancellation.check();
             checkDeadline(deadlineNanos);
@@ -90,8 +106,16 @@ public final class UpdateTransport {
             if (read > max - total || (expected > 0 && read > expected - total)) throw new IOException("download_size");
             output.write(buffer, 0, read);
             total += read;
+            long now = System.nanoTime();
+            // Bound UI work to five updates per second. Report 100% only after valid EOF.
+            if (progress != null && (expected <= 0 || total < expected) && now - lastProgress >= 200_000_000L) {
+                progress.transferred(total, expected);
+                lastProgress = now;
+            }
         }
         if (total == 0 || (expected > 0 && total != expected)) throw new IOException("download_size");
+        if (progress != null) progress.transferred(total, expected);
+        cancellation.check();
         return total;
     }
 

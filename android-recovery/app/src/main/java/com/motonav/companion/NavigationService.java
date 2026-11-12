@@ -34,7 +34,7 @@ public final class NavigationService extends Service implements JourneyControlle
     static volatile boolean navigating;
 
     interface View extends JourneyController.Ui {
-        Location fix(); long fixNanos(); void bleStatus(String message); void found(BluetoothDevice device);
+        Location fix(); long fixNanos(); void refreshLocation(); void bleStatus(String message); void found(BluetoothDevice device);
     }
     public final class LocalBinder extends Binder { NavigationService service() { return NavigationService.this; } }
     private final LocalBinder binder = new LocalBinder();
@@ -142,6 +142,7 @@ public final class NavigationService extends Service implements JourneyControlle
     @Override public boolean active() { return !destroyed && saved.consent() && keys.configured(); }
     @Override public boolean navigationAllowed() { return active() && precisePermission() && locationEnabled(); }
     @Override public String key() { return keys.sdkValue(); }
+    @Override public void refreshLocation() { if (view != null) view.refreshLocation(); }
     @Override public Location fix() {
         if (!navigating) return view == null ? null : view.fix();
         MapFixTracker.Fix<Location> fix = fixes.navigation(SystemClock.elapsedRealtimeNanos(), precisePermission(), locationEnabled());
