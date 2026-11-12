@@ -18,6 +18,8 @@
 4. `route_action` / `route_result`：区分 UI 拦截、提交时失效、SDK 拒绝、SDK 返回错误和成功。
 5. `lifecycle` / `environment`：对照页面暂停、服务启停、系统定位开关、网络与省电状态。
 
+从 0.7.3 起，`location_callback` 的 `owner=shared` 表示地图与导航共用的定位请求；`location_decision` 仍分别标记 `map` 和 `navigation`，其中 `source` 是验证可信度后解析的原始来源。`location_start` 的 `measurement_stalled` / `recreate_after_stall` / `manual_retry` 区分自动重启、重建客户端和手动重试，`observation_age_ms` 表示距离收到新有效测量的时长。SDK 持续返回错误或旧数据时不会重置这个恢复计时器。
+
 记录不含坐标、目的地、车牌、道路名、Key、设备唯一标识或 SDK 原始异常消息。不得为了诊断把这些信息追加到自由文本字段。`DiagnosticRecord` 与接收器分别执行字段白名单；跨语言测试覆盖实际 Java 编码数据。
 
 App 在断网时仅保留有限内存队列，进程退出不会持续上传；本地记录可导出。Java 崩溃记录采用尽力写入，不能保证进程被强杀、系统 ANR 或原生崩溃时还能上传最后一条记录。调试电脑和临时通道必须保持运行。诊断连接过期后需要重新创建并提供新连接。

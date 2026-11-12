@@ -25,6 +25,9 @@ java -cp "$build" JourneyStateTests
 
 java -m jdk.compiler/com.sun.tools.javac.Main -encoding UTF-8 -source 17 -target 17 -cp "$build" -d "$build" app/src/main/java/com/motonav/companion/MapFixTracker.java tests/MapFixTests.java
 java -cp "$build" MapFixTests
+java -m jdk.compiler/com.sun.tools.javac.Main -encoding UTF-8 -source 17 -target 17 -cp "$build" -d "$build" app/src/main/java/com/motonav/companion/LocationRecovery.java tests/LocationRecoveryTests.java
+java -cp "$build" LocationRecoveryTests
+python3 -B tests/location_feed_tests.py
 
 java -m jdk.compiler/com.sun.tools.javac.Main -encoding UTF-8 -source 17 -target 17 -cp "$build" -d "$build" app/src/main/java/com/motonav/companion/UpdatePolicy.java app/src/main/java/com/motonav/companion/UpdateTransport.java tests/UpdateTests.java
 java -cp "$build" UpdateTests
