@@ -237,8 +237,10 @@ public final class NavigationService extends Service implements JourneyControlle
         fix.setAccuracy(location.getAccuracy()); fix.setTime(location.getTime()); fix.setElapsedRealtimeNanos(time);
         if (location.hasSpeed()) fix.setSpeed(location.getSpeed());
         if (location.hasBearing()) fix.setBearing(location.getBearing());
-        boolean accepted = fixes.offer(fix, time, location.getAccuracy(), location.getLocationType(), precisePermission());
-        Diagnostics.record("location_decision", "owner", "navigation", "accepted", accepted, "reason", accepted ? "accepted" : "source_or_order_rejected");
+        int source = AmapLocationSample.source(location);
+        boolean accepted = fixes.offer(fix, time, location.getAccuracy(), source, precisePermission());
+        Diagnostics.record("location_decision", "owner", "navigation", "accepted", accepted, "source", source,
+                "reason", accepted ? "accepted" : "source_or_order_rejected");
     }
 
     @Override public void finished() {

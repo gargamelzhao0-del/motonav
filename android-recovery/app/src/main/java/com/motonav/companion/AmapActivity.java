@@ -372,7 +372,7 @@ public final class AmapActivity extends Activity {
         } else {
             long time = MapStartupPolicy.fixTime(SystemClock.elapsedRealtimeNanos(), System.currentTimeMillis(),
                     location.getElapsedRealtimeNanos(), location.getTime());
-            int source = location.getLocationType();
+            int source = AmapLocationSample.source(location);
             if (time == 0 || !MapFixTracker.isLiveSource(source)) {
                 decision = time == 0 ? "measurement_expired_or_invalid_time" : "cached_or_unsupported_source";
                 locationProblem = "收到缓存、过期或无法确认来源的位置，正在等待新定位。";
@@ -381,7 +381,8 @@ public final class AmapActivity extends Activity {
                 locationProblem = null;
             }
         }
-        Diagnostics.record("location_decision", "owner", "map", "reason", decision, "accepted", accepted);
+        Diagnostics.record("location_decision", "owner", "map", "reason", decision, "accepted", accepted,
+                "source", location == null ? 0 : AmapLocationSample.source(location));
         renderLocation(precise);
     }
 
@@ -407,9 +408,10 @@ public final class AmapActivity extends Activity {
         if (displayed == null) {
             locationFeed.show(null);
             setLocationDot(false);
-            status.setText(locationProblem != null ? locationProblem
+            long age = fixes.observationAgeMillis(now);
+            status.setText((age >= 0 ? "距上次有效定位 " + age / 1000 + " 秒，正在自动重新获取。\n" : "") + (locationProblem != null ? locationProblem
                     : precise ? "正在获取新定位。室内精度可能较低，移动到开阔处可帮助接收卫星信号。"
-                    : "当前只有大致位置权限。点「定位/权限」开启精确位置。");
+                    : "当前只有大致位置权限。点「定位/权限」开启精确位置。"));
             return;
         }
 
@@ -422,6 +424,7 @@ public final class AmapActivity extends Activity {
         else if (reliable == null) summary += " · 暂不足以算路，持续获取中";
         else if (reliable != reported) summary += " · 保留最近可用位置，正在获取更准的位置";
         else summary += " · 可用于算路";
+        summary += " · " + Math.max(0, (now - reported.timeNanos()) / 1000000000L) + " 秒前更新";
         if (locationProblem != null) summary += "\n" + locationProblem;
         status.setText(summary);
     }
@@ -460,7 +463,7 @@ public final class AmapActivity extends Activity {
                 map.getMap().setMyLocationStyle(new com.amap.api.maps.model.MyLocationStyle()
                         .myLocationType(com.amap.api.maps.model.MyLocationStyle.LOCATION_TYPE_FOLLOW));
             }
-            if (!locationFeed.maintain() && locationProblem == null) {
+            if (!locationFeed.maintain(userRetry) && locationProblem == null) {
                 locationProblem = "定位暂未启动，App 会自动重试。";
             }
             renderLocation(precise);

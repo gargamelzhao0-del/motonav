@@ -42,9 +42,19 @@ public class MapFixTests {
         check(tracker.latest(start + 19 * second) == null);
         check(tracker.navigation(start + 19 * second, true, true) == null);
 
-        check(MapStartupPolicy.locationNeedsStart(100, -1));
-        check(!MapStartupPolicy.locationNeedsStart(30_099, 100));
-        check(MapStartupPolicy.locationNeedsStart(30_100, 100));
+        // A fresh, highly trusted stationary recheck retains its original source.
+        check(MapFixTracker.resolveSource(2, MapFixTracker.WIFI, true) == MapFixTracker.WIFI);
+        check(MapFixTracker.resolveSource(2, MapFixTracker.WIFI, false) == 2);
+        for (int unknown : new int[]{0, 2, 4, 8, 9, 99}) check(MapFixTracker.resolveSource(2, unknown, true) == 2);
+        check(MapFixTracker.resolveSource(4, MapFixTracker.WIFI, true) == 4);
+        check(tracker.offer("stationary wifi", start, 25, MapFixTracker.resolveSource(2, MapFixTracker.WIFI, true), true));
+        check(tracker.navigation(start + second, true, true) != null);
+        check(tracker.navigation(start + 16 * second, true, true) == null);
+        check(!tracker.offer("duplicate recheck", start, 25, MapFixTracker.resolveSource(2, MapFixTracker.WIFI, true), true));
+        tracker.clear();
+        check(tracker.offer("stationary cell", start, 10, MapFixTracker.resolveSource(2, MapFixTracker.CELL, true), true));
+        check(tracker.navigation(start, true, true) == null);
+        check(!tracker.offer("unknown stationary origin", start + second, 10, MapFixTracker.resolveSource(2, 0, true), true));
         System.out.println("MapFix: "+count+" checks passed");
     }
 }

@@ -13,6 +13,13 @@ public final class MapFixTracker<T> {
     private Fix<T> latest;
     private Fix<T> navigation;
 
+    public static int resolveSource(int source, int original, boolean highlyTrusted) {
+        // SAME_REQ (2) is also returned after a stationary sensor/network recheck.
+        // Cache-only, unknown-origin and low-trust results remain rejected. Measurement
+        // age is independently checked by fixTime; this never changes a timestamp.
+        return source == 2 && highlyTrusted && isLiveSource(original) ? original : source;
+    }
+
     public static boolean isLiveSource(int source) {
         return switch (source) {
             case SATELLITE, WIFI, CELL, APPROXIMATE, SYSTEM_NETWORK -> true;
