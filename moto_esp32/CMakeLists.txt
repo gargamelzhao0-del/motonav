@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-set(PROJECT_VER "0.3.1")
+set(PROJECT_VER "0.3.2")
 option(MOTONAV_NAV_METRICS "Log real navigation display FPS without synthetic input" OFF)
 option(MOTONAV_DEVICE_TESTS "Include removable on-device test screens" OFF)
 option(MOTONAV_AUTORUN_BENCH "Run all display workloads once at boot" OFF)

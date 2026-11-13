@@ -1,6 +1,8 @@
 # MotoNav 1.75C 导航接收固件
 
-固件版本 **0.3.1**，配套支持 NAV3 的 Android 0.7.0 及以后版本，将真实转向、距离、预计时间及车速显示在 Waveshare ESP32-S3-Touch-AMOLED-1.75C 上。本地开发以 ESP-IDF 5.5.4、官方 BSP 3.0.0、LVGL 9.5.0 为基线，依赖版本由 `dependencies.lock` 记录。界面当前使用英文，支持左右转、斜转、急转、直行及保持左/右方向的箭头，其他转向以明确文字表示。
+固件版本 **0.3.2**，配套支持 NAV3 的 Android 0.7.0 及以后版本，将真实转向、距离、预计时间及车速显示在 Waveshare ESP32-S3-Touch-AMOLED-1.75C 上。本地开发以 ESP-IDF 5.5.4、官方 BSP 3.0.0、LVGL 9.5.0 为基线，依赖版本由 `dependencies.lock` 记录。界面当前使用英文，支持左右转、斜转、急转、直行及保持左/右方向的箭头，其他转向以明确文字表示。
+
+0.3.2 修正 Android 服务指示的确认支持，以及已配对手机恢复旧 NAV3 订阅时抢占 NAV4 的问题。首个经过认证的 RX 写入选择协议通道。显示驱动沿用 0.2.7；连接诊断、复现证据与实测范围见 [蓝牙联调记录](BLE_SUBSCRIPTION_2026-11-13.md)。
 
 0.3.1 整合已验证的 0.2.7 RGB332 显示驱动与 NAV4 路线输入，保留 40 MHz、双 64 行 DMA 缓冲和原有驱动边界。当前集成版本的手机联调与真实导航并发帧率需要独立记录，不能直接沿用模拟地图的 58/60 FPS。
 
@@ -29,6 +31,8 @@
 在 ESP-IDF 5.5 环境中进入本目录，执行 `idf.py set-target esp32s3` 和 `idf.py build`。依赖由 IDF Component Manager 下载。GitHub Actions 同时构建 Android APK 和本固件，产物分别为 `motonav-recovery-parking-test` 和 `motonav-175c-navigation-test`。
 
 本机 Windows 可执行 `pwsh -File tools/build.ps1`，默认 RGB332 正常版；增加 `-ColorMode RGB565` 切回完整配色，`-LegacyQspi` 使用厂商 RGB565 IO。该脚本只编译，不访问串口或刷写，并显式关闭未请求的测试选项。独立主机测试：`python tests/run_host_tests.py`，不需要手机、串口或 Android SDK。
+
+沿用旧 `sdkconfig` 时，须在 `menuconfig` 开启 `CONFIG_BT_NIMBLE_ROLE_CENTRAL` 和 `CONFIG_BT_NIMBLE_GATT_CLIENT`；默认配置只对首次生成生效。ESP-IDF 5.5 将 GATT 客户端支持依赖于 Central 配置，圆屏仍只广播并接收手机连接，不主动连接其他设备。缺少该能力时编译会明确报错。
 
 `tests/lvgl_host` 可用 CMake 和桌面 C/C++ 编译器构建真实 LVGL 界面的离屏预览：先完成 IDF 配置下载依赖，再执行 `cmake -S tests/lvgl_host -B build-host`、`cmake --build build-host`，最后执行 `ctest --test-dir build-host --output-on-failure`；也可以运行 `ui_preview <输出目录>`。它验证状态布局以及有效导航自动打断性能页，不模拟硬件 FPS；输出 PPM 可转换为 PNG 查看。
 

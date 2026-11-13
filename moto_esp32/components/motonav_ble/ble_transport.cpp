@@ -1,7 +1,12 @@
 #include "motonav/drivers/ble_transport.h"
+#include "channel_state.h"
 #include "esp_random.h"
 #include "esp_log.h"
+#include "sdkconfig.h"
 #include <cstring>
+#ifndef CONFIG_BT_NIMBLE_GATT_CLIENT
+#error "Enable CONFIG_BT_NIMBLE_ROLE_CENTRAL and CONFIG_BT_NIMBLE_GATT_CLIENT to confirm Android indications"
+#endif
 extern "C" {
 #include "nimble/nimble_port.h"
 #include "nimble/nimble_port_freertos.h"
@@ -16,10 +21,10 @@ namespace motonav::drivers {
 namespace {
 constexpr const char *Tag = "motonav";
 BleCallbacks callbacks;
-bool subscribed = false, secure = false;
+bool secure = false;
 char revision[33];
 uint16_t connection_handle = BLE_HS_CONN_HANDLE_NONE, tx_handle, map_tx_handle;
-unsigned active_protocol=0;
+BleChannelState channels;
 uint8_t address_type;
 char device_name[20];
 ble_npl_callout advertising_retry;
@@ -43,14 +48,20 @@ int read_revision(uint16_t, uint16_t, ble_gatt_access_ctxt *ctx, void *) {
     return os_mbuf_append(ctx->om, version, std::strlen(version)) ? BLE_ATT_ERR_INSUFFICIENT_RES : 0;
 }
 
-int write_bytes(uint16_t connection, uint16_t, ble_gatt_access_ctxt *ctx, void *channel) {
+int write_bytes(uint16_t connection, uint16_t, ble_gatt_access_ctxt *ctx, void *channel_arg) {
     if (ctx->op != BLE_GATT_ACCESS_OP_WRITE_CHR) return BLE_ATT_ERR_WRITE_NOT_PERMITTED;
-    if (connection != connection_handle || !subscribed || !secure
-            || active_protocol!=reinterpret_cast<uintptr_t>(channel)) return BLE_ATT_ERR_UNLIKELY;
+    if (connection != connection_handle || !secure) return BLE_ATT_ERR_UNLIKELY;
     uint8_t bytes[512];
     uint16_t length = OS_MBUF_PKTLEN(ctx->om);
     if (!length || length > sizeof(bytes) || ble_hs_mbuf_to_flat(ctx->om, bytes, sizeof(bytes), nullptr))
         return BLE_ATT_ERR_INVALID_ATTR_VALUE_LEN;
+    unsigned channel = reinterpret_cast<uintptr_t>(channel_arg);
+    bool first_write = channels.active() == 0;
+    if (!channels.select(channel)) return BLE_ATT_ERR_UNLIKELY;
+    if (first_write) {
+        ESP_LOGI(Tag, "BLE selected NAV%u from authenticated RX", channel);
+        emit(BleEventType::Protocol, channel); emit(BleEventType::Subscription, 1);
+    }
     switch (callbacks.receive(callbacks.context, bytes, length)) {
         case BleReceiveResult::Accepted: return 0;
         case BleReceiveResult::NoMemory: return BLE_ATT_ERR_INSUFFICIENT_RES;
@@ -86,8 +97,8 @@ const ble_gatt_svc_def services[] = {
 void advertise();
 void reset_connection() {
     connection_handle = BLE_HS_CONN_HANDLE_NONE;
-    subscribed = secure = false;
-    active_protocol=0;
+    secure = false;
+    channels.reset();
     emit(BleEventType::Disconnected);
 }
 
@@ -96,8 +107,8 @@ int gap_event(ble_gap_event *event, void *) {
         case BLE_GAP_EVENT_CONNECT:
             if (event->connect.status) { advertise(); return 0; }
             connection_handle = event->connect.conn_handle;
-            subscribed = secure = false;
-            active_protocol=0;
+            secure = false;
+            channels.reset();
             emit(BleEventType::Connected);
             ESP_LOGI(Tag, "Phone connected"); return 0;
         case BLE_GAP_EVENT_DISCONNECT:
@@ -106,14 +117,13 @@ int gap_event(ble_gap_event *event, void *) {
         case BLE_GAP_EVENT_ADV_COMPLETE:
             advertise(); return 0;
         case BLE_GAP_EVENT_SUBSCRIBE:
+            ESP_LOGI(Tag, "BLE subscription: handle=%u notify=%u indicate=%u reason=%u",
+                     event->subscribe.attr_handle, event->subscribe.cur_notify,
+                     event->subscribe.cur_indicate, event->subscribe.reason);
             if (event->subscribe.attr_handle == tx_handle || event->subscribe.attr_handle == map_tx_handle) {
                 unsigned channel=event->subscribe.attr_handle==map_tx_handle?4:3;
-                if(event->subscribe.cur_notify && !active_protocol) {
-                    active_protocol=channel; subscribed=true;
-                    emit(BleEventType::Protocol,channel); emit(BleEventType::Subscription,1);
-                } else if(!event->subscribe.cur_notify && active_protocol==channel) {
-                    subscribed=false; active_protocol=0; emit(BleEventType::Subscription,0);
-                }
+                if (channels.subscription(channel, event->subscribe.cur_notify))
+                    emit(BleEventType::Subscription, 0);
             }
             return 0;
         case BLE_GAP_EVENT_PASSKEY_ACTION: {
@@ -127,6 +137,9 @@ int gap_event(ble_gap_event *event, void *) {
             ble_gap_conn_desc peer{};
             secure = event->enc_change.status == 0 && ble_gap_conn_find(event->enc_change.conn_handle, &peer) == 0
                 && peer.sec_state.encrypted && peer.sec_state.authenticated;
+            ESP_LOGI(Tag, "BLE security: status=%d encrypted=%u authenticated=%u bonded=%u",
+                     event->enc_change.status, peer.sec_state.encrypted,
+                     peer.sec_state.authenticated, peer.sec_state.bonded);
             emit(BleEventType::Security, secure);
             return 0;
         }
@@ -163,6 +176,7 @@ void advertise() {
 }
 void ble_synced() {
     ESP_ERROR_CHECK(ble_hs_id_infer_auto(0, &address_type));
+    ESP_LOGI(Tag, "BLE handles: NAV3_TX=%u NAV4_TX=%u", tx_handle, map_tx_handle);
     // NimBLE persists this indication for bonded peers that are not connected.
     // Tell phones about newly installed services before advertising after boot.
     ble_svc_gatt_changed(1,0xffff);
@@ -198,11 +212,11 @@ esp_err_t ble_start(const char *name, const char *version, const BleCallbacks &h
 }
 esp_err_t ble_notify(const uint8_t *data, size_t length) {
     if (!data || !length || length > 512) return ESP_ERR_INVALID_ARG;
-    if (connection_handle == BLE_HS_CONN_HANDLE_NONE || !subscribed || !secure) return ESP_ERR_INVALID_STATE;
+    if (connection_handle == BLE_HS_CONN_HANDLE_NONE || !channels.subscribed(channels.active()) || !secure) return ESP_ERR_INVALID_STATE;
     if (length > static_cast<size_t>(ble_att_mtu(connection_handle) - 3)) return ESP_ERR_INVALID_SIZE;
     os_mbuf *packet = ble_hs_mbuf_from_flat(data, length);
     if (!packet) return ESP_ERR_NO_MEM;
     // NimBLE consumes the packet even on failure.
-    return ble_gatts_notify_custom(connection_handle, active_protocol==4?map_tx_handle:tx_handle, packet) ? ESP_FAIL : ESP_OK;
+    return ble_gatts_notify_custom(connection_handle, channels.active()==4?map_tx_handle:tx_handle, packet) ? ESP_FAIL : ESP_OK;
 }
 } // namespace motonav::drivers

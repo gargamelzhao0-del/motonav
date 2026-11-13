@@ -15,7 +15,11 @@ CONFIG_FREERTOS_HZ=1000
 CONFIG_SPI_MASTER_IN_IRAM=y
 CONFIG_BT_ENABLED=y
 CONFIG_BT_NIMBLE_ENABLED=y
-CONFIG_BT_NIMBLE_ROLE_CENTRAL=n
+# NimBLE ties GATT-client support to this role. Android sends Service Changed
+# indications even while it is our GAP central; these must receive confirmation.
+# MotoNav still only advertises/accepts connections; it never initiates one.
+CONFIG_BT_NIMBLE_ROLE_CENTRAL=y
+CONFIG_BT_NIMBLE_GATT_CLIENT=y
 CONFIG_BT_NIMBLE_ROLE_PERIPHERAL=y
 CONFIG_BT_NIMBLE_MAX_CONNECTIONS=1
 CONFIG_BT_NIMBLE_SECURITY_ENABLE=y
