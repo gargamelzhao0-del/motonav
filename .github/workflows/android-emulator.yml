@@ -1,7 +1,7 @@
 name: Android emulator navigation tests
 on:
   push:
-    branches: ['codex/navigation-simulation', 'codex/device-route-map']
+    branches: ['codex/navigation-simulation', 'codex/device-route-map', 'codex/app-experience']
     paths: ['android-recovery/**', '.github/workflows/android-emulator.yml']
   workflow_dispatch:
 permissions:

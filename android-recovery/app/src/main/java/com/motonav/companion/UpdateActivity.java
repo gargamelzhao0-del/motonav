@@ -60,23 +60,11 @@ public final class UpdateActivity extends Activity {
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);
         repository = new UpdateRepository(this);
         checkFromNotification = state == null && getIntent().getBooleanExtra(UpdateCheckJob.CHECK_FROM_NOTIFICATION, false);
-        LinearLayout page = new LinearLayout(this);
-        page.setOrientation(LinearLayout.VERTICAL);
-        int pad = Math.round(20 * getResources().getDisplayMetrics().density);
-        page.setPadding(pad, pad, pad, pad);
-        ScrollView scroll = new ScrollView(this);
-        scroll.setFillViewport(true);
-        scroll.addView(page);
-        if (android.os.Build.VERSION.SDK_INT >= 30) scroll.setOnApplyWindowInsetsListener((view, insets) -> {
-            android.graphics.Insets bars = insets.getInsets(android.view.WindowInsets.Type.systemBars());
-            view.setPadding(bars.left, bars.top, bars.right, bars.bottom);
-            return insets;
-        });
-        text(page, "应用更新", 24);
-        text(page, "当前版本 " + BuildConfig.VERSION_NAME, 16);
-        text(page, "可手动检查，或开启新版提醒。开启后，Android 会在联网时定期查看 MotoNav 的 GitHub 发布，发现新版会发送通知。下载和安装需由你确认。", 15);
-        text(page, "检查只访问更新发布源。临时签名测试包与正式签名不同时，无法覆盖安装。", 15);
-        status = text(page, "尚未联网检查。", 16);
+        LinearLayout page=AppUi.page(this,"应用更新","获取最新改进，下载可在后台继续。");
+        ScrollView scroll=AppUi.scroll(this,page);
+        LinearLayout version=AppUi.card(this);version.addView(AppUi.text(this,"当前安装",13,AppUi.MUTED));
+        TextView number=AppUi.text(this,BuildConfig.VERSION_NAME,36,AppUi.ACCENT);number.setTypeface(null,android.graphics.Typeface.BOLD);AppUi.add(version,number,4);AppUi.add(page,version,20);
+        status=text(page,"点击检查，查看是否有新版本。",17);
         progressBar = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
         progressBar.setMax(100);
         page.addView(progressBar, new LinearLayout.LayoutParams(-1, -2));
@@ -87,18 +75,16 @@ public final class UpdateActivity extends Activity {
         download = button(page, "下载并验证", this::downloadUpdate);
         install = button(page, "交给系统安装", this::requestInstall);
         cancel = button(page, "暂停下载 / 取消操作", () -> { if (downloader != null && downloader.snapshot().busy()) { downloader.pause(); refreshDownload(); } else cancelOperation("已取消。未安装任何更新。"); });
-        button(page, "返回地图", this::finish);
+        text(page,"开启新版提醒后，Android 会联网检查官方发布并发送通知。安装前会校验完整性和签名，最后由系统安装器确认。",13);
         setContentView(scroll);
         refreshButtons();
     }
 
     private TextView text(LinearLayout parent, String value, int size) {
-        TextView view = new TextView(this); view.setText(value); view.setTextSize(size);
-        view.setPadding(0, 10, 0, 10); parent.addView(view); return view;
+        TextView view=AppUi.text(this,value,size,size>=16?AppUi.TEXT:AppUi.MUTED);AppUi.add(parent,view,16);return view;
     }
     private Button button(LinearLayout parent, String value, Runnable action) {
-        Button view = new Button(this); view.setText(value); view.setAllCaps(false);
-        view.setOnClickListener(v -> action.run()); parent.addView(view); return view;
+        Button view=AppUi.button(this,value,value.equals("检查更新")||value.equals("下载并验证")||value.equals("交给系统安装"),action);AppUi.add(parent,view,10);return view;
     }
     private void refreshButtons() {
         if (check == null) return;
@@ -109,6 +95,12 @@ public final class UpdateActivity extends Activity {
         install.setEnabled(idle && ready != null);
         cancel.setEnabled(foreground && (operation != null || downloading));
         reminders.setEnabled(idle);
+        download.setVisibility(release!=null&&ready==null&&!downloading?View.VISIBLE:View.GONE);
+        install.setVisibility(ready!=null?View.VISIBLE:View.GONE);
+        cancel.setVisibility(operation!=null||downloading?View.VISIBLE:View.GONE);
+        check.setVisibility(!downloading&&operation==null?View.VISIBLE:View.GONE);
+        reminders.setVisibility(!downloading&&operation==null?View.VISIBLE:View.GONE);
+        cancel.setText(downloading?"暂停下载":"取消检查");
         boolean enabled = UpdateCheckJob.enabled(this);
         reminders.setText(enabled ? "关闭新版提醒" : "开启新版提醒");
         reminders.setContentDescription(enabled && !UpdateCheckJob.canNotify(this)

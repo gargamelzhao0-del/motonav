@@ -280,8 +280,45 @@ public class JourneyControllerTests {
             check(!engine.voice && f.controller.frame().mode()==NavigationFrame.WAITING,"invalid guidance cannot keep voice active");
         }
     }
+    static void presentationAndSearch() throws Exception {
+        check(NavigationUiModel.duration(61).equals("2 分钟"),"duration rounds up instead of showing zero minutes");
+        check(NavigationUiModel.duration(3600).equals("1 小时"),"hours remain readable");
+        check(NavigationUiModel.distance(1250).equals("1.3 km"),"distance uses stable decimal separator");
+        try(Fixture f=new Fixture()) {
+            AMapNavi engine=f.navigate();engine.listener.onNaviInfoUpdate(new NaviInfo());
+            check(f.controller.presentation().live()&&f.controller.presentation().turnDistance().equals("60 m"),"presentation consumes valid guidance");
+            check(f.controller.presentation().speed().equals("—"),"unknown speed never displays a fabricated zero");
+            Handler.advance(16001);
+            check(!f.controller.presentation().live()&&f.controller.presentation().turnDistance().isEmpty(),"expired instruction clears the card metrics");
+        }
+        try(Fixture f=new Fixture()) {
+            f.controller.searchDialog();DestinationSearchDialog previous=DestinationSearchDialog.latest;previous.deferDismiss=true;
+            previous.submit.accept("杭州 西湖");com.amap.api.services.poisearch.PoiSearch old=com.amap.api.services.poisearch.PoiSearch.latest;
+            f.controller.searchDialog();DestinationSearchDialog replacement=DestinationSearchDialog.latest;
+            old.listener.onPoiSearched(new com.amap.api.services.poisearch.PoiResult(),1000);Handler.advance(0);
+            check(replacement.labels==null,"replacing a dialog immediately invalidates the old search");
+            replacement.submit.accept("杭州 广场");previous.dismissed.run();
+            com.amap.api.services.poisearch.PoiSearch.latest.listener.onPoiSearched(new com.amap.api.services.poisearch.PoiResult(),1000);Handler.advance(0);
+            check(replacement.labels!=null&&!replacement.busy,"delayed old dismissal cannot clear the new search dialog");
+        }
+        try(Fixture f=new Fixture()) {
+            f.controller.searchDialog();DestinationSearchDialog first=DestinationSearchDialog.latest;
+            first.submit.accept("杭州 西湖");com.amap.api.services.poisearch.PoiSearch old=com.amap.api.services.poisearch.PoiSearch.latest;
+            first.dismiss();old.listener.onPoiSearched(new com.amap.api.services.poisearch.PoiResult(),1000);Handler.advance(0);
+            check(first.labels==null,"cancelled search cannot show late results");
+            f.controller.searchDialog();DestinationSearchDialog next=DestinationSearchDialog.latest;next.submit.accept("杭州 广场");
+            com.amap.api.services.poisearch.PoiSearch current=com.amap.api.services.poisearch.PoiSearch.latest;
+            Handler.advance(15000);check(next.failure!=null&&!next.busy,"search timeout permits retry in the same dialog");
+            current.listener.onPoiSearched(new com.amap.api.services.poisearch.PoiResult(),1000);Handler.advance(0);
+            check(next.labels==null,"late timed-out search does not replace retry state");
+            next.submit.accept("杭州 广场");current=com.amap.api.services.poisearch.PoiSearch.latest;
+            current.listener.onPoiSearched(new com.amap.api.services.poisearch.PoiResult(),1000);Handler.advance(0);
+            check(next.labels.length==1&&!next.busy,"successful retry returns selectable results");next.select.accept(0);
+            check(!next.visible&&f.controller.canRequestStart()&&AMapNavi.instances==0,"selecting a destination waits for explicit start");
+        }
+    }
     public static void main(String[] args) throws Exception {
-        drivingAndRerouting(); locationAndStartup(); failureAndDeadlines(); recoveredOriginAndVoice(); separateGuidanceStreams();
+        drivingAndRerouting(); locationAndStartup(); failureAndDeadlines(); recoveredOriginAndVoice(); separateGuidanceStreams();presentationAndSearch();
         System.out.println("JourneyController: " + checks + " checks passed (SDK/UI doubles; not device validation)");
     }
 }

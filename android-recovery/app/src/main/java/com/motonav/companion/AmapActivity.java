@@ -34,8 +34,17 @@ public final class AmapActivity extends Activity {
     private LinearLayout root;
     private FrameLayout frame;
     private MapDial dial;
-    private TextView status, journeyStatus;
-    private ImageView turnIcon;
+    private TextView status, destinationLabel, destinationHint, settingsFeedback;
+    private NavigationCard guidanceCard;
+    private Button mapShapeButton;
+    private AlertDialog settingsDialog, endDialog;
+    private String journeyMessage="自动定位当前位置，选择目的地后开始导航。";
+    private LinearLayout content;
+    private ScrollView mainScroll;
+    private View destinationEntry;
+    private boolean guidanceFocused;
+    private TextView scanHint;
+    private int scanGeneration;
     private JourneyController journey;
     private NavigationService navigationService;
     private NavigationService.View navigationView;
@@ -53,7 +62,7 @@ public final class AmapActivity extends Activity {
         }
         @Override public void onServiceDisconnected(android.content.ComponentName name) {
             navigationService = null; journey = null;
-            if (journeyStatus != null) journeyStatus.setText("导航服务已停止，请重新规划路线。");
+            renderJourney("导航连接暂时中断，请重新打开地图。");
         }
     };
     private final MapFixTracker<Location> fixes = new MapFixTracker<>();
@@ -74,6 +83,7 @@ public final class AmapActivity extends Activity {
         @Override public void run() {
             if (!foreground || map == null) return;
             locationPermission(false);
+            renderJourney(null);
             handler.postDelayed(this, 2000);
         }
     };
@@ -83,61 +93,111 @@ public final class AmapActivity extends Activity {
         saved=new SavedMapConfig(this);
         try{keys.replace(saved.load());consent=saved.consent();}catch(Exception e){consent=false;}
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);
-        root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);root.setBackgroundColor(0xff101411);root.setPadding(20,16,20,16);
-        label("MOTO / NAV · 独立恢复测试",22);label("普通驾车导航与圆屏连接测试",13);
-        status=label("首次填写Android Key并阅读政策。保存后在本机加密存储，重启后自动载入；开始导航后可锁屏继续定位。新包名须单独绑定，不会读取旧App数据。",14);
-        keyInput=new EditText(this);keyInput.setHint("Android Key · 32位字符");keyInput.setTextColor(0xffeef3e6);keyInput.setHintTextColor(0xffaab3a7);
+        LinearLayout shell=AppUi.column(this);AppUi.insets(this,shell);
+        LinearLayout header=new LinearLayout(this);header.setGravity(android.view.Gravity.CENTER_VERTICAL);header.setPadding(dp(20),dp(10),dp(16),dp(6));
+        LinearLayout brand=AppUi.column(this);
+        TextView name=AppUi.text(this,"MOTONAV",24,AppUi.TEXT);name.setTypeface(null,android.graphics.Typeface.BOLD);name.setLetterSpacing(.1f);brand.addView(name);
+        brand.addView(AppUi.text(this,"普通驾车导航 · 停车测试版",12,AppUi.MUTED));
+        header.addView(brand,new LinearLayout.LayoutParams(0,-2,1));
+        Button settings=action("设置",this::showSettings);settings.setTag("map_settings");header.addView(settings,new LinearLayout.LayoutParams(-2,-2));shell.addView(header);
+        LinearLayout page=AppUi.column(this);content=page;page.setPadding(dp(16),dp(10),dp(16),dp(20));
+        ScrollView screen=new ScrollView(this);screen.setFillViewport(true);screen.setClipToPadding(false);screen.addView(page);
+        mainScroll=screen;shell.addView(screen,new LinearLayout.LayoutParams(-1,0,1));
+        LinearLayout search=AppUi.card(this);search.setFocusable(true);search.setClickable(true);search.setTag("destination_entry");
+        destinationLabel=AppUi.text(this,"搜索目的地",20,AppUi.TEXT);destinationLabel.setTypeface(null,android.graphics.Typeface.BOLD);search.addView(destinationLabel);
+        destinationHint=AppUi.text(this,"输入城市或地点，选择后即可开始",13,AppUi.MUTED);AppUi.add(search,destinationHint,4);
+        destinationEntry=search;search.setOnClickListener(v->openDestination());page.addView(search);
+        LinearLayout position=new LinearLayout(this);position.setGravity(android.view.Gravity.CENTER_VERTICAL);position.setPadding(dp(4),dp(10),0,dp(4));
+        status=AppUi.text(this,"完成地图设置后，自动获取当前位置。",13,AppUi.MUTED);status.setMaxLines(3);status.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        status.setOnClickListener(v->new AlertDialog.Builder(this).setTitle("当前位置").setMessage(status.getText()).setPositiveButton("知道了",null).show());
+        status.setTooltipText("轻触查看完整定位说明");position.addView(status,new LinearLayout.LayoutParams(0,-2,1));
+        position.addView(action("定位",()->{if(map==null)showSettings();else locationPermission(true);}),new LinearLayout.LayoutParams(-2,-2));page.addView(position);
+        dial=new MapDial(this);dial.setRound(getSharedPreferences("navigation_ui",MODE_PRIVATE).getBoolean("round_map",false));frame=dial.mapFrame;
+        int mapHeight=Math.max(220,Math.min(360,Math.round(getResources().getConfiguration().screenHeightDp*.42f)));
+        page.addView(dial,new LinearLayout.LayoutParams(-1,dp(mapHeight)));showMapPlaceholder();
+        LinearLayout mapTools=new LinearLayout(this);mapTools.setGravity(android.view.Gravity.END);
+        mapShapeButton=action(dial.round?"切换完整地图":"圆屏视图",()->{dial.toggleShape();getSharedPreferences("navigation_ui",MODE_PRIVATE).edit().putBoolean("round_map",dial.round).apply();updateMapShape();placeLogo();});
+        mapTools.addView(mapShapeButton,new LinearLayout.LayoutParams(-2,-2));page.addView(mapTools);
+        guidanceCard=new NavigationCard(this);guidanceCard.setTag("navigation_card");AppUi.add(page,guidanceCard,12);
+        LinearLayout device=AppUi.card(this),deviceHeading=new LinearLayout(this);deviceHeading.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        TextView deviceTitle=AppUi.text(this,"圆屏设备",17,AppUi.TEXT);deviceTitle.setTypeface(null,android.graphics.Typeface.BOLD);deviceHeading.addView(deviceTitle,new LinearLayout.LayoutParams(0,-2,1));
+        deviceHeading.addView(action("连接",this::chooseScreen),new LinearLayout.LayoutParams(-2,-2));device.addView(deviceHeading);
+        screenStatus=AppUi.text(this,"未连接 · 手机导航可独立使用",13,AppUi.MUTED);AppUi.add(device,screenStatus,4);AppUi.add(page,device,12);
+        LinearLayout dock=AppUi.column(this);dock.setPadding(dp(16),dp(10),dp(16),dp(12));dock.setBackgroundColor(AppUi.SURFACE);
+        navigationButton=AppUi.button(this,"设置地图",true,this::primaryAction);navigationButton.setTag("navigation_primary");dock.addView(navigationButton,new LinearLayout.LayoutParams(-1,-2));
+        TextView routeType=AppUi.text(this,"普通驾车路线，不含摩托车禁限行避让",12,AppUi.MUTED);routeType.setGravity(android.view.Gravity.CENTER);AppUi.add(dock,routeType,6);shell.addView(dock);
+        buildSettings();frame.addOnLayoutChangeListener((v,l,t,r,b,ol,ot,or,ob)->placeLogo());setContentView(shell);renderJourney(null);
+    }
+    private void buildSettings() {
+        root=AppUi.column(this);root.setPadding(dp(20),dp(16),dp(20),dp(20));root.setBackgroundColor(AppUi.BG);
+        label("地图与偏好",24);label("MotoNav "+BuildConfig.VERSION_NAME,13);
+        label("地图服务",18);label("首次使用需要 Android Key。配置仅在本机加密保存。",14);
+        settingsFeedback=label(keys.configured()?"已保存地图配置":"尚未配置地图服务",13);
+        keyInput=new EditText(this);AppUi.field(keyInput,"Android Key · 32 位字符");
         keyInput.setInputType(InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_VARIATION_PASSWORD);keyInput.setSingleLine(true);
         keyInput.setImeOptions(EditorInfo.IME_ACTION_DONE|EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING);
         keyInput.setImportantForAutofill(View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS);keyInput.setSaveEnabled(false);keyInput.setSaveFromParentEnabled(false);keyInput.setFreezesText(false);keyInput.setLongClickable(false);keyInput.setTextIsSelectable(false);
         keyInput.setCustomSelectionActionModeCallback(new android.view.ActionMode.Callback(){public boolean onCreateActionMode(android.view.ActionMode m,android.view.Menu n){return false;}public boolean onPrepareActionMode(android.view.ActionMode m,android.view.Menu n){return false;}public boolean onActionItemClicked(android.view.ActionMode m,android.view.MenuItem i){return false;}public void onDestroyActionMode(android.view.ActionMode m){}});
         keyInput.setCustomInsertionActionModeCallback(new android.view.ActionMode.Callback(){public boolean onCreateActionMode(android.view.ActionMode m,android.view.Menu n){return false;}public boolean onPrepareActionMode(android.view.ActionMode m,android.view.Menu n){return false;}public boolean onActionItemClicked(android.view.ActionMode m,android.view.MenuItem i){return false;}public void onDestroyActionMode(android.view.ActionMode m){}});
-        root.addView(keyInput);button("加密保存Key / 修改Key",this::applyKey);button("删除已存Key并撤回同意",this::clearKey);
-        open=button("阅读并同意后打开地图",this::askConsent);open.setEnabled(keys.configured());
-        button("高德隐私政策",()->policy(PRIVACY));button("高德服务条款",()->policy(TERMS));
-        label("使用普通汽车驾车路线，不避让摩托车禁限行。无需填写车牌和排量；不提供车牌限行判断。",12);
-        Switch voice=new Switch(this);voice.setText("导航语音播报");voice.setTextColor(0xffeef3e6);
-        android.content.SharedPreferences navigationPrefs=getSharedPreferences("navigation_ui",MODE_PRIVATE);
-        voice.setChecked(navigationPrefs.getBoolean("voice_enabled",true));
-        voice.setOnCheckedChangeListener((v,on)->{navigationPrefs.edit().putBoolean("voice_enabled",on).apply();if(journey!=null)journey.refreshGuidance();});root.addView(voice);
-        label("Android Key绑定包名："+getPackageName()+"\n本安装签名SHA1："+certificateSha1(),12);
+        AppUi.add(root,keyInput,12);button("加密保存地图配置",this::applyKey);
+        open=button("阅读并同意后启用地图",this::askConsent);open.setEnabled(keys.configured());
+        label("导航偏好",18);
+        android.content.SharedPreferences prefs=getSharedPreferences("navigation_ui",MODE_PRIVATE);
+        Switch voice=new Switch(this);voice.setText("导航语音播报");voice.setTextColor(AppUi.TEXT);voice.setMinHeight(dp(56));voice.setChecked(prefs.getBoolean("voice_enabled",true));
+        voice.setOnCheckedChangeListener((v,on)->{prefs.edit().putBoolean("voice_enabled",on).apply();if(journey!=null)journey.refreshGuidance();});root.addView(voice);
+        Switch daylight=new Switch(this);daylight.setText("使用日间地图");daylight.setTextColor(AppUi.TEXT);daylight.setMinHeight(dp(56));daylight.setChecked(prefs.getBoolean("day_map",false));
+        daylight.setOnCheckedChangeListener((v,on)->{prefs.edit().putBoolean("day_map",on).apply();applyMapTheme();});root.addView(daylight);
+        label("更新与帮助",18);
         button("应用更新",()->startActivity(new Intent(this,UpdateActivity.class)));
-        button("定位诊断 / 实时日志",()->startActivity(new Intent(this,DiagnosticsActivity.class)));
-        button("SDK 模拟导航测试",()->{
-            if (NavigationService.navigating) { status.setText("请先结束真实导航，再运行 SDK 模拟测试。"); return; }
-            startActivity(new Intent(this,SdkReplayActivity.class));
-        });
-        button("返回模拟功能（非真实导航）", () -> {
-            if (NavigationService.navigating) { status.setText("请先结束当前导航，再进入模拟功能。"); return; }
-            if (navigationService != null) navigationService.disconnectScreen();
-            startActivity(new Intent(this, MainActivity.class));
-        });
-        LinearLayout page=new LinearLayout(this);page.setOrientation(LinearLayout.VERTICAL);page.setBackgroundColor(0xff101411);page.setPadding(dp(16),dp(12),dp(16),dp(16));
-        ScrollView screen=new ScrollView(this);screen.setFillViewport(true);screen.addView(page);
-        if(Build.VERSION.SDK_INT>=30)screen.setOnApplyWindowInsetsListener((v,insets)->{Insets bars=insets.getInsets(WindowInsets.Type.systemBars());v.setPadding(bars.left,bars.top,bars.right,bars.bottom);return insets;});
-        TextView brand=new TextView(this);brand.setText("MOTO / NAV");brand.setTextSize(21);brand.setLetterSpacing(0.14f);brand.setTextColor(0xffe9eddf);brand.setTypeface(null,android.graphics.Typeface.BOLD);page.addView(brand);
-        TextView warning=new TextView(this);warning.setText("RECOVERY " + BuildConfig.VERSION_NAME + " ·  仅停车测试，不用于骑行");warning.setTextSize(12);warning.setTextColor(0xffc6a988);warning.setPadding(0,dp(4),0,dp(12));page.addView(warning);
-        TextView routeType=new TextView(this);routeType.setText("普通驾车 · 不含摩托车禁限行避让");routeType.setTextSize(13);routeType.setTextColor(0xffd4e2ba);routeType.setPadding(0,0,0,dp(8));page.addView(routeType);
-        root.removeView(status);status.setTextSize(13);status.setPadding(dp(12),dp(10),dp(12),dp(10));status.setBackground(panel(0xff1a211c));page.addView(status);
-        dial=new MapDial(this);frame=dial.mapFrame;page.addView(dial,new LinearLayout.LayoutParams(-1,dp(380)));
-        TextView waiting=new TextView(this);waiting.setText("MOTO / NAV\n等待地图配置");waiting.setGravity(android.view.Gravity.CENTER);waiting.setTextSize(18);waiting.setTextColor(0xff9da69a);frame.addView(waiting,new FrameLayout.LayoutParams(-1,-1));
-        LinearLayout guidance=new LinearLayout(this);guidance.setGravity(android.view.Gravity.CENTER_VERTICAL);guidance.setPadding(dp(12),dp(12),dp(12),dp(12));guidance.setBackground(panel(0xff20271f));
-        turnIcon=new ImageView(this);turnIcon.setContentDescription("SDK转向图标；文字指令见右侧");guidance.addView(turnIcon,new LinearLayout.LayoutParams(dp(56),dp(56)));
-        journeyStatus=new TextView(this);journeyStatus.setTextColor(0xffd4e2ba);journeyStatus.setTextSize(18);journeyStatus.setPadding(dp(12),0,0,0);journeyStatus.setText("输入目的地 → 开始导航\n当前位置自动获取");guidance.addView(journeyStatus,new LinearLayout.LayoutParams(0,-2,1));page.addView(guidance);
-        LinearLayout actions=new LinearLayout(this);
-        actions.addView(action("输入目的地",()->{if(journey!=null)journey.searchDialog();else status.setText("请先完成地图设置。");}),new LinearLayout.LayoutParams(0,-2,1));
-        navigationButton = action("开始导航", this::toggleNavigation);
-        actions.addView(navigationButton,new LinearLayout.LayoutParams(0,-2,1));page.addView(actions);
-        LinearLayout tools=new LinearLayout(this);
-        tools.addView(action("定位/权限",()->locationPermission(true)),new LinearLayout.LayoutParams(0,-2,1));
-        tools.addView(action("圆形/完整图",()->{dial.toggleShape();placeLogo();}),new LinearLayout.LayoutParams(0,-2,1));
-        tools.addView(action("地图设置",()->controls.setVisibility(controls.getVisibility()==View.VISIBLE?View.GONE:View.VISIBLE)),new LinearLayout.LayoutParams(0,-2,1));page.addView(tools);
-        screenStatus = new TextView(this); screenStatus.setText("圆屏尚未连接");
-        screenStatus.setTextColor(0xffaab3a7); screenStatus.setPadding(dp(12), dp(8), dp(12), dp(4)); page.addView(screenStatus);
-        page.addView(action("连接圆屏", this::chooseScreen));
-        controls=new ScrollView(this);controls.addView(root);page.addView(controls,new LinearLayout.LayoutParams(-1,-2));
-        frame.addOnLayoutChangeListener((v,l,t,r,b,ol,ot,or,ob)->placeLogo());setContentView(screen);
-        if(keys.configured()&&consent)controls.setVisibility(View.GONE);
+        button("定位诊断与实时日志",()->startActivity(new Intent(this,DiagnosticsActivity.class)));
+        button("SDK 模拟导航测试",()->{if(NavigationService.navigating){configurationMessage("请先结束真实导航，再运行模拟测试。");return;}startActivity(new Intent(this,SdkReplayActivity.class));});
+        button("功能演示 · 模拟数据",()->{if(NavigationService.navigating){configurationMessage("请先结束当前导航，再进入功能演示。");return;}if(navigationService!=null)navigationService.disconnectScreen();startActivity(new Intent(this,MainActivity.class));});
+        label("隐私与地图绑定",18);button("高德隐私政策",()->policy(PRIVACY));button("高德服务条款",()->policy(TERMS));
+        label("绑定包名："+getPackageName()+"\n本安装签名 SHA1："+certificateSha1(),12);
+        Button clear=button("清除地图配置并撤回同意",()->new AlertDialog.Builder(this).setTitle("清除地图配置？").setMessage("将结束当前导航、断开圆屏并删除本机保存的 Key。之后需要重新配置地图。").setNegativeButton("保留配置",null).setPositiveButton("清除配置",(d,w)->clearKey()).show());clear.setTextColor(AppUi.DANGER);
+        controls=new ScrollView(this);controls.setFillViewport(true);controls.addView(root);
+    }
+    private void configurationMessage(String text) { AppUi.setText(status,text);AppUi.setText(settingsFeedback,text);renderJourney(null); }
+    private void showSettings() {
+        if(settingsDialog!=null)return;
+        settingsDialog=new AlertDialog.Builder(this).setView(controls).setPositiveButton("完成",null).create();
+        settingsDialog.setOnDismissListener(d->{if(controls.getParent() instanceof android.view.ViewGroup parent)parent.removeView(controls);settingsDialog=null;keyInput.getText().clear();});
+        settingsDialog.show();
+        if(settingsDialog.getWindow()!=null){settingsDialog.getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);settingsDialog.getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);}
+    }
+    private void showMapPlaceholder() {
+        if(map!=null)return;frame.removeAllViews();
+        LinearLayout placeholder=AppUi.column(this);placeholder.setGravity(android.view.Gravity.CENTER);placeholder.setPadding(dp(24),dp(24),dp(24),dp(24));
+        TextView mark=AppUi.text(this,"◎",52,AppUi.PURPLE);mark.setGravity(android.view.Gravity.CENTER);placeholder.addView(mark);
+        TextView title=AppUi.text(this,"地图准备就绪后\n在这里查看你的路线",17,AppUi.TEXT);title.setGravity(android.view.Gravity.CENTER);AppUi.add(placeholder,title,8);
+        TextView detail=AppUi.text(this,"自动定位 · 搜索目的地 · 开始导航",12,AppUi.MUTED);detail.setGravity(android.view.Gravity.CENTER);AppUi.add(placeholder,detail,12);frame.addView(placeholder,new FrameLayout.LayoutParams(-1,-1));
+    }
+    private void updateMapShape(){if(mapShapeButton!=null)mapShapeButton.setText(dial.round?"切换完整地图":"圆屏视图");}
+    private void applyMapTheme(){if(map!=null)map.getMap().setMapType(getSharedPreferences("navigation_ui",MODE_PRIVATE).getBoolean("day_map",false)?com.amap.api.maps.AMap.MAP_TYPE_NORMAL:com.amap.api.maps.AMap.MAP_TYPE_NIGHT);}
+    private void openDestination(){if(journey!=null)journey.searchDialog();else if(!keys.configured())showSettings();else if(!consent)askConsent();else {initialize();status.setText("地图正在准备，请稍后搜索目的地。");}}
+    private void primaryAction(){
+        if(!keys.configured()){showSettings();return;}if(!consent){askConsent();return;}if(map==null){initialize();return;}if(journey==null)return;
+        if(journey.presentation().navigating()){
+            if(endDialog!=null)return;
+            endDialog=new AlertDialog.Builder(this).setTitle("结束本次导航？").setMessage("目的地会保留，随时可以重新开始。").setNegativeButton("继续导航",null).setPositiveButton("结束导航",(d,w)->{if(journey!=null)journey.end();}).create();
+            endDialog.setOnDismissListener(d->endDialog=null);endDialog.show();return;
+        }
+        toggleNavigation();
+    }
+    private void renderJourney(String notice){
+        if(guidanceCard==null)return;if(notice!=null)journeyMessage=notice;
+        NavigationUiModel model=journey==null?NavigationUiModel.create(JourneyState.Phase.IDLE,NavigationFrame.status(NavigationFrame.STOPPED),"","",journeyMessage):journey.presentation();
+        guidanceCard.render(model);AppUi.setText(destinationLabel,model.destination().isEmpty()?"搜索目的地":model.destination());
+        boolean focus=model.navigating()||model.busy();
+        destinationEntry.setVisibility(focus?View.GONE:View.VISIBLE);
+        if(focus!=guidanceFocused){
+            guidanceFocused=focus;android.view.ViewGroup.LayoutParams params=guidanceCard.getLayoutParams();content.removeView(guidanceCard);
+            content.addView(guidanceCard,focus?0:content.getChildCount()-1,params);
+            mainScroll.post(()->mainScroll.smoothScrollTo(0,0));
+        }
+        AppUi.setText(destinationHint,model.destination().isEmpty()?"输入城市或地点，选择后即可开始":model.navigating()?"当前目的地":"轻触更换目的地");
+        String action=!keys.configured()?"设置地图":!consent?"启用地图":map==null?"重试打开地图":journey==null?"正在准备地图…":model.destination().isEmpty()?"选择目的地":journey.actionLabel();
+        AppUi.setText(navigationButton,action);navigationButton.setEnabled(!keys.configured()||!consent||map==null||journey!=null);navigationButton.setAlpha(navigationButton.isEnabled()?1:.6f);
     }
     private void toggleNavigation() {
         if (journey == null) { status.setText("请先完成地图设置。"); return; }
@@ -173,15 +233,21 @@ public final class AmapActivity extends Activity {
         }
         screens.clear();
         screenAdapter = new ArrayAdapter<>(this, android.R.layout.simple_list_item_1);
-        screenDialog = new AlertDialog.Builder(this).setTitle("选择你的 MotoNav 圆屏")
+        LinearLayout scanTitle=AppUi.column(this);scanTitle.setPadding(dp(24),dp(20),dp(24),dp(12));
+        scanTitle.addView(AppUi.text(this,"连接圆屏",22,AppUi.TEXT));scanHint=AppUi.text(this,"正在寻找附近的 MotoNav 设备…",14,AppUi.MUTED);AppUi.add(scanTitle,scanHint,8);
+        screenDialog = new AlertDialog.Builder(this).setCustomTitle(scanTitle)
                 .setAdapter(screenAdapter, (dialog, which) -> {
                     if (navigationService != null && which < screens.size()) navigationService.connect(screens.get(which));
                 }).setNeutralButton("断开圆屏", (dialog, which) -> {
                     if (navigationService != null) navigationService.disconnectScreen();
-                }).setNegativeButton("取消", null).create();
-        screenDialog.setOnDismissListener(dialog -> screenDialog = null);
+                }).setNegativeButton("取消", null).setPositiveButton("重新扫描",null).create();
+        screenDialog.setOnDismissListener(dialog -> {screenDialog = null;scanHint=null;++scanGeneration;});
         screenDialog.show();
-        navigationService.scan();
+        screenDialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v->scanScreens());scanScreens();
+    }
+    private void scanScreens(){
+        if(navigationService==null||screenDialog==null)return;screens.clear();screenAdapter.clear();scanHint.setText("正在寻找附近的 MotoNav 设备…");navigationService.scan();
+        AlertDialog target=screenDialog;int generation=++scanGeneration;handler.postDelayed(()->{if(screenDialog==target&&generation==scanGeneration&&scanHint!=null&&screens.isEmpty())scanHint.setText("未发现圆屏。请确认设备已开机、蓝牙可用，并靠近后重新扫描。");},10000);
     }
 
     private void addScreen(android.bluetooth.BluetoothDevice device) {
@@ -189,13 +255,14 @@ public final class AmapActivity extends Activity {
         try {
             String name = device.getName();
             screens.add(device);
-            screenAdapter.add((name == null ? "MotoNav 圆屏" : name) + " · " + device.getAddress());
+            String address=device.getAddress();screenAdapter.add((name == null ? "MotoNav 圆屏" : name) + " · " + address.substring(Math.max(0,address.length()-5)));
+            if(scanHint!=null)scanHint.setText("找到 "+screens.size()+" 台设备 · 点击后按圆屏提示完成配对");
         } catch (SecurityException e) { screenStatus.setText("蓝牙权限已撤回。"); }
     }
 
     private int dp(int value){return Math.round(value*getResources().getDisplayMetrics().density);}
     private android.graphics.drawable.GradientDrawable panel(int color){android.graphics.drawable.GradientDrawable d=new android.graphics.drawable.GradientDrawable();d.setColor(color);d.setCornerRadius(dp(12));return d;}
-    private Button action(String text,Runnable run){Button b=new Button(this);b.setText(text);b.setTextSize(13);b.setAllCaps(false);b.setMinHeight(dp(48));b.setTextColor(0xffdce5d2);b.setBackgroundTintList(android.content.res.ColorStateList.valueOf(0xff293228));b.setOnClickListener(v->run.run());return b;}
+    private Button action(String text,Runnable run){return AppUi.button(this,text,false,run);}
     private void placeLogo(){
         if(map==null)return;
         // Keep the SDK's unscaled attribution inside the circular viewport, never draw over it.
@@ -211,8 +278,8 @@ public final class AmapActivity extends Activity {
             for(byte value:digest){if(text.length()>0)text.append(':');text.append(String.format(Locale.ROOT,"%02X",value&255));}return text.toString();
         }catch(Exception e){return "无法读取，请用构建记录核实";}
     }
-    private TextView label(String value,int size){TextView v=new TextView(this);v.setText(value);v.setTextColor(0xffeef3e6);v.setTextSize(size);v.setPadding(0,4,0,4);root.addView(v);return v;}
-    private Button button(String text,Runnable action){Button b=new Button(this);b.setText(text);b.setAllCaps(false);b.setOnClickListener(v->action.run());root.addView(b);return b;}
+    private TextView label(String value,int size){TextView v=AppUi.text(this,value,size,size>=18?AppUi.TEXT:AppUi.MUTED);if(size>=18)v.setTypeface(null,android.graphics.Typeface.BOLD);AppUi.add(root,v,size>=18?18:8);return v;}
+    private Button button(String text,Runnable action){Button button=AppUi.button(this,text,false,action);AppUi.add(root,button,10);return button;}
     private void policy(String url){try{startActivity(new Intent(Intent.ACTION_VIEW,Uri.parse(url)));}catch(ActivityNotFoundException e){status.setText(getString(R.string.amap_no_browser,url));}}
     private void askConsent(){
         if(map!=null||!keys.configured()||!foreground||consentDialog!=null)return;
@@ -236,7 +303,7 @@ public final class AmapActivity extends Activity {
             locationFeed = new AmapLocationFeed(this, this::handleLocation);
             map.getMap().setLocationSource(locationFeed);
             map.getMap().setMyLocationEnabled(false);map.getMap().getUiSettings().setMyLocationButtonEnabled(false);
-            map.getMap().setMapType(com.amap.api.maps.AMap.MAP_TYPE_NIGHT);
+            applyMapTheme();
             map.getMap().getUiSettings().setZoomControlsEnabled(false);
             map.getMap().getUiSettings().setCompassEnabled(false);
             map.getMap().getUiSettings().setScaleControlsEnabled(false);
@@ -256,16 +323,15 @@ public final class AmapActivity extends Activity {
                         locationFeed.maintain(true);
                 }
                 public void report(String text) {
-                    journeyStatus.setText(text);
-                    if (navigationButton != null && journey != null) navigationButton.setText(journey.actionLabel());
+                    renderJourney(text);
                 }
-                public void overview(){dial.setRound(false);placeLogo();}
-                public void icon(android.graphics.Bitmap bitmap) { turnIcon.setImageBitmap(bitmap); }
-                public void bleStatus(String text) { screenStatus.setText(text); }
+                public void overview(){dial.setRound(false);updateMapShape();placeLogo();}
+                public void icon(android.graphics.Bitmap bitmap) { guidanceCard.icon(bitmap); }
+                public void bleStatus(String text) { AppUi.setText(screenStatus,text); }
                 public void found(android.bluetooth.BluetoothDevice device) { addScreen(device); }
             };
             serviceBound = bindService(new Intent(this, NavigationService.class), navigationConnection, BIND_AUTO_CREATE);
-            if (!serviceBound) journeyStatus.setText("导航服务启动失败，请重新打开地图。");
+            if (!serviceBound) renderJourney("导航服务启动失败，请重新打开地图。");
             final TextureMapView activeMap = map;
             map.getMap().setOnMapLoadedListener(() -> {
                 if (map != activeMap) return;
@@ -274,7 +340,7 @@ public final class AmapActivity extends Activity {
             });
             map.onResume();
             open.setEnabled(false);
-            controls.setVisibility(View.GONE);
+            if(settingsDialog!=null)settingsDialog.dismiss();
             checkLocationNow();
         }catch(RuntimeException|LinkageError e){dispose();status.setText(R.string.amap_failed);}
     }
@@ -294,18 +360,20 @@ public final class AmapActivity extends Activity {
         if(map!=null){TextureMapView old=map;map=null;try{old.getMap().setOnMapLoadedListener(null);old.getMap().setLocationSource(null);}catch(RuntimeException|LinkageError ignored){}try{old.onPause();}catch(RuntimeException|LinkageError ignored){}try{old.onDestroy();}catch(RuntimeException|LinkageError ignored){}frame.removeAllViews();}
         if(sdkTouched && !NavigationService.navigating){sdkTouched=false;try{MapsInitializer.updatePrivacyAgree(this,false);com.amap.api.location.AMapLocationClient.updatePrivacyAgree(this,false);}catch(RuntimeException|LinkageError ignored){}try{MapsInitializer.setApiKey("");}catch(RuntimeException|LinkageError ignored){}}
         if(open!=null)open.setEnabled(keys.configured());
+        showMapPlaceholder();renderJourney(null);
     }
     private void applyKey(){
         if(!foreground)return;
         if(consentDialog!=null){consentDialog.dismiss();consentDialog=null;}
         boolean valid=AmapAccess.configured(keyInput.getText().toString());
-        if(valid){try{saved.save(keyInput.getText().toString());dispose();keys.replace(keyInput.getText().toString());}catch(Exception e){status.setText("无法安全保存Key，未启用地图；请检查设备安全存储后重试");return;}}keyInput.getText().clear();keyInput.clearFocus();
+        if(!valid){keyInput.setError("请输入有效的 32 位 Android Key");configurationMessage("配置格式不正确，原有配置未改变。");return;}keyInput.setError(null);
+        if(valid){try{saved.save(keyInput.getText().toString());dispose();keys.replace(keyInput.getText().toString());}catch(Exception e){configurationMessage("无法安全保存Key，未启用地图；请检查设备安全存储后重试");return;}}keyInput.getText().clear();keyInput.clearFocus();
         InputMethodManager ime=(InputMethodManager)getSystemService(INPUT_METHOD_SERVICE);if(ime!=null)ime.hideSoftInputFromWindow(keyInput.getWindowToken(),0);
-        open.setEnabled(keys.configured());status.setText(valid?"Key已加密保存，格式检查不代表鉴权通过":"Key格式无效，原有配置未改变");if(valid&&consent)initialize();
+        open.setEnabled(keys.configured());configurationMessage(valid?"Key已加密保存，格式检查不代表鉴权通过":"Key格式无效，原有配置未改变");if(valid&&consent)initialize();
     }
     private void clearKey(){
         if(consentDialog!=null){consentDialog.dismiss();consentDialog=null;}
-        consent=false;dispose();keys.clear();boolean removed=saved.clear();if(keyInput!=null){keyInput.getText().clear();keyInput.clearFocus();InputMethodManager ime=(InputMethodManager)getSystemService(INPUT_METHOD_SERVICE);if(ime!=null)ime.hideSoftInputFromWindow(keyInput.getWindowToken(),0);}if(open!=null)open.setEnabled(false);if(status!=null)status.setText(removed?"已删除本App保存的Key并撤回同意；SDK缓存可能仍存在":"地图已停止，但本地删除未完全成功。请在系统中清除本测试应用数据后再使用。");controls.setVisibility(View.VISIBLE);
+        consent=false;dispose();keys.clear();boolean removed=saved.clear();if(keyInput!=null){keyInput.getText().clear();keyInput.clearFocus();InputMethodManager ime=(InputMethodManager)getSystemService(INPUT_METHOD_SERVICE);if(ime!=null)ime.hideSoftInputFromWindow(keyInput.getWindowToken(),0);}if(open!=null)open.setEnabled(false);if(status!=null)configurationMessage(removed?"已删除本App保存的Key并撤回同意；SDK缓存可能仍存在":"地图已停止，但本地删除未完全成功。请在系统中清除本测试应用数据后再使用。");showMapPlaceholder();renderJourney(null);
     }
     private boolean systemLocationEnabled(){
         android.location.LocationManager manager=(android.location.LocationManager)getSystemService(LOCATION_SERVICE);
@@ -435,7 +503,7 @@ public final class AmapActivity extends Activity {
             long age = fixes.observationAgeMillis(now);
             status.setText((age >= 0 ? "距上次有效定位 " + age / 1000 + " 秒，正在自动重新获取。\n" : "") + (locationProblem != null ? locationProblem
                     : precise ? "正在获取新定位。室内精度可能较低，移动到开阔处可帮助接收卫星信号。"
-                    : "当前只有大致位置权限。点「定位/权限」开启精确位置。"));
+                    : "当前只有大致位置权限。点「定位」开启精确位置。"));
             return;
         }
 
@@ -502,7 +570,7 @@ public final class AmapActivity extends Activity {
                     android.Manifest.permission.ACCESS_FINE_LOCATION}, 71);
         } else {
             status.setText(approximate ? "当前只有大致位置权限。请在系统设置开启精确位置。"
-                    : "定位未授权。可浏览地图，点「定位/权限」进入应用设置。");
+                    : "定位未授权。可浏览地图，点「定位」进入应用设置。");
             if (userRetry) startActivity(new Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
                     Uri.parse("package:" + getPackageName())));
         }
@@ -523,7 +591,7 @@ public final class AmapActivity extends Activity {
             map.onResume();
             checkLocationNow();
         }
-        attachNavigation();
+        attachNavigation();renderJourney(null);
         if (scanAfterPermission) { scanAfterPermission = false; if (blePermissions()) chooseScreen(); }
         if (startAfterPermission) { startAfterPermission = false; toggleNavigation(); }
     }
@@ -539,6 +607,8 @@ public final class AmapActivity extends Activity {
             consentDialog.dismiss();
             consentDialog = null;
         }
+        if(settingsDialog!=null)settingsDialog.dismiss();
+        if(endDialog!=null)endDialog.dismiss();
         if (map != null) map.onPause();
         super.onPause();
     }
