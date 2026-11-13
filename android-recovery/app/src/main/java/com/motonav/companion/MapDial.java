@@ -17,7 +17,7 @@ final class MapDial extends FrameLayout {
     private final float density;
     MapDial(Context context){
         super(context);density=getResources().getDisplayMetrics().density;setWillNotDraw(false);
-        mapFrame=new FrameLayout(context);mapFrame.setBackgroundColor(0xff1a211c);
+        mapFrame=new FrameLayout(context);mapFrame.setBackgroundColor(AppUi.SURFACE);
         mapFrame.setOutlineProvider(new ViewOutlineProvider(){public void getOutline(View v,Outline outline){
             if(round)outline.setOval(0,0,v.getWidth(),v.getHeight());else outline.setRoundRect(0,0,v.getWidth(),v.getHeight(),12*density);
         }});mapFrame.setClipToOutline(true);addView(mapFrame);
@@ -35,9 +35,9 @@ final class MapDial extends FrameLayout {
     }
     @Override protected void onDraw(Canvas canvas){
         super.onDraw(canvas);float cx=getWidth()/2f,cy=getHeight()/2f,radius=mapFrame.getMeasuredWidth()/2f+5*density;
-        paint.setStyle(Paint.Style.STROKE);paint.setStrokeWidth(8*density);paint.setColor(0xff282d28);
+        paint.setStyle(Paint.Style.STROKE);paint.setStrokeWidth(8*density);paint.setColor(AppUi.RAISED);
         if(round)canvas.drawCircle(cx,cy,radius,paint);else {paint.setStrokeWidth(density);paint.setColor(AppUi.BORDER);canvas.drawRoundRect(mapFrame.getLeft()-density,mapFrame.getTop()-density,mapFrame.getRight()+density,mapFrame.getBottom()+density,13*density,13*density,paint);return;}
-        paint.setStrokeWidth(density);paint.setColor(0xff65715b);
+        paint.setStrokeWidth(density);paint.setColor(AppUi.BORDER);
         if(round)canvas.drawCircle(cx,cy,radius+4*density,paint);else canvas.drawRoundRect(cx-radius-4*density,cy-radius-4*density,cx+radius+4*density,cy+radius+4*density,20*density,20*density,paint);
     }
     @Override public boolean dispatchTouchEvent(MotionEvent e){

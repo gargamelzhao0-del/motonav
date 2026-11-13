@@ -61,7 +61,8 @@ public class ExperienceRuntimeTest {
                 scroll(activity.getWindow().getDecorView()).fullScroll(View.FOCUS_DOWN);});
             idle();scenario.onActivity(activity->{visibleAction(activity);activity.getWindow().getDecorView().findViewWithTag("map_settings").performClick();});
             idle();scenario.onActivity(activity->{AlertDialog dialog=(AlertDialog)field(activity,"settingsDialog");assertTrue(dialog.isShowing());
-                capture(dialog.getWindow().getDecorView(),"settings-"+suffix(activity)+".png");dialog.dismiss();
+                capture(dialog.getWindow().getDecorView(),"settings-"+suffix(activity)+".png");dialog.dismiss();});
+            idle();scenario.onActivity(activity->{assertNull(field(activity,"settingsDialog"));
                 activity.getWindow().getDecorView().findViewWithTag("map_settings").performClick();assertTrue(((AlertDialog)field(activity,"settingsDialog")).isShowing());
                 ((AlertDialog)field(activity,"settingsDialog")).dismiss();});
             scenario.recreate();idle();scenario.onActivity(ExperienceRuntimeTest::visibleAction);
@@ -93,7 +94,8 @@ public class ExperienceRuntimeTest {
                 sheet.get().results(new String[]{"西湖文化广场 · 测试地点\n杭州市拱墅区 · 仅用于界面验证","同名地点 · 测试\n请核对城市及地址"},choice::set);
             });
             idle();scenario.onActivity(activity->{AlertDialog dialog=(AlertDialog)field(sheet.get(),"dialog");capture(dialog.getWindow().getDecorView(),"search-fixture-"+suffix(activity)+".png");
-                dialog.getWindow().getDecorView().findViewWithTag("destination_result").performClick();assertEquals(0,choice.get());sheet.get().dismiss();assertEquals(1,dismissed.get());assertFalse(NavigationService.navigating);});
+                dialog.getWindow().getDecorView().findViewWithTag("destination_result").performClick();assertEquals(0,choice.get());sheet.get().dismiss();assertFalse(NavigationService.navigating);});
+            idle();assertEquals("Dismiss listener runs on the following main-loop turn",1,dismissed.get());
         }
     }
     @Test public void navigationCardHidesExpiredMetricsAndFullMapUsesAvailableWidth() {

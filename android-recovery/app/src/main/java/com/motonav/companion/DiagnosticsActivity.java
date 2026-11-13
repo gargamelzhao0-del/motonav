@@ -21,7 +21,7 @@ public final class DiagnosticsActivity extends Activity {
     private TextView state, result;
     private EditText link;
     private final Runnable refresh = new Runnable() {
-        @Override public void run() { state.setText(Diagnostics.status()); main.postDelayed(this, 1000); }
+        @Override public void run() { AppUi.setText(state,Diagnostics.status()); main.postDelayed(this, 1000); }
     };
     @Override public void onCreate(Bundle saved) {
         super.onCreate(saved);
@@ -29,13 +29,13 @@ public final class DiagnosticsActivity extends Activity {
         LinearLayout page=AppUi.page(this,"问题诊断","遇到定位或导航异常时，记录一次复现过程。");
         ScrollView scroll=AppUi.scroll(this,page);
         LinearLayout summary=AppUi.card(this);state=AppUi.text(this,Diagnostics.status(),15,AppUi.ACCENT);summary.addView(state);AppUi.add(page,summary,18);
-        text(page, "记录定位来源、精度、数据年龄、权限、省电状态、算路阶段和错误码。不会记录经纬度、目的地、车牌或高德 Key。", 15);
-        text(page, "粘贴本次诊断连接后，点击开始。日志将经 HTTPS 和 Cloudflare 临时通道发送到调试电脑。返回地图后继续记录，可随时停止；默认记录 1 小时，可选 4 小时；接收连接仍须在有效期内。未确认上传的记录会保留在本机，重新连接时自动补传；进程退出后需手动重新开启。", 15);
+        text(page, "仅记录定位质量、权限和错误等诊断信息，不含经纬度、目的地、车牌或高德 Key。", 13);
+        text(page, "主动开始后，日志加密发送到本次连接的调试电脑。默认持续 1 小时，可随时停止；也可仅在手机记录。", 13);
         link = new EditText(this); AppUi.field(link,"本次诊断连接（含连接凭证）"); link.setSingleLine(true);
         link.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
         link.setSaveEnabled(false); link.setSaveFromParentEnabled(false);
         link.setImportantForAutofill(android.view.View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS);
-        page.addView(link);
+        AppUi.add(page,link,14);
         button(page, "粘贴诊断连接", () -> {
             ClipboardManager clipboard = getSystemService(ClipboardManager.class);
             if (clipboard != null && clipboard.hasPrimaryClip() && clipboard.getPrimaryClip().getItemCount() > 0) {
@@ -44,12 +44,14 @@ public final class DiagnosticsActivity extends Activity {
             }
         });
         android.widget.Switch extended = new android.widget.Switch(this); extended.setText("本次诊断持续 4 小时");extended.setTextColor(AppUi.TEXT);extended.setMinHeight(AppUi.dp(this,56));page.addView(extended);
+        result = text(page, "默认不记录、不上传。只在本次主动开启后生效。", 13);
+        result.setAccessibilityLiveRegion(android.view.View.ACCESSIBILITY_LIVE_REGION_POLITE);
         button(page, "开始实时诊断", () -> {
             try {
                 DiagnosticEndpoint endpoint = DiagnosticEndpoint.parse(link.getText().toString());
-                Diagnostics.start(endpoint, extended.isChecked()); link.getText().clear();
+                Diagnostics.start(endpoint, extended.isChecked()); link.getText().clear();link.setError(null);
                 result.setText("已开始。请返回地图复现问题；看到异常时可回来标记。");
-            } catch (IllegalArgumentException error) { result.setText("连接格式无效，请粘贴完整的本次诊断连接。"); }
+            } catch (IllegalArgumentException error) { link.setError("请粘贴完整的本次诊断连接");link.requestFocus();result.setText("连接格式无效，请粘贴完整的本次诊断连接。"); }
         });
         button(page, "仅在手机记录", () -> { Diagnostics.start(null, extended.isChecked()); result.setText("本地诊断已开始，稍后可以导出。"); });
         button(page, "标记：刚刚出现问题", () -> {
@@ -64,7 +66,11 @@ public final class DiagnosticsActivity extends Activity {
             catch (android.content.ActivityNotFoundException error) { result.setText("系统文件保存器不可用。"); }
         });
         button(page, "返回地图复现问题", this::finish);
-        result = text(page, "默认不记录、不上传。只在本次主动开启后生效。", 14);
+        TextView details=AppUi.text(this,"记录定位来源、精度、数据年龄、权限、省电状态、算路阶段和错误码。日志经 HTTPS 和 Cloudflare 临时通道发送，连接须在有效期内。返回地图后继续记录；未确认上传的记录保留在本机，重新连接时自动补传；进程退出后需手动重新开启。",13,AppUi.MUTED);
+        details.setVisibility(android.view.View.GONE);
+        Button explanation=AppUi.button(this,"查看记录与上传说明",false,()->{});
+        explanation.setOnClickListener(view->{boolean show=details.getVisibility()!=android.view.View.VISIBLE;details.setVisibility(show?android.view.View.VISIBLE:android.view.View.GONE);explanation.setText(show?"收起记录与上传说明":"查看记录与上传说明");});
+        AppUi.add(page,explanation,16);AppUi.add(page,details,10);
         setContentView(scroll);
     }
     private TextView text(LinearLayout page, String value, int size) {
