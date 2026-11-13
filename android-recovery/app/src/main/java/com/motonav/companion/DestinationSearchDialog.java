@@ -71,8 +71,12 @@ final class DestinationSearchDialog {
     void results(String[] labels,IntConsumer selected) {
         finished();results.removeAllViews();status.setTextColor(AppUi.MUTED);status.setText("找到 "+labels.length+" 个地点 · 请核对地址");search.setText("搜索地点");
         for(int i=0;i<labels.length;i++) {
-            final int choice=i;Button row=AppUi.button(input.getContext(),labels[i],false,()->selected.accept(choice));
-            row.setGravity(android.view.Gravity.START|android.view.Gravity.CENTER_VERTICAL);row.setTextSize(15);row.setTag("destination_result");AppUi.add(results,row,8);
+            final int choice=i;Context context=input.getContext();LinearLayout row=AppUi.card(context);
+            row.setBackground(new android.graphics.drawable.RippleDrawable(android.content.res.ColorStateList.valueOf(0x337f94a5),AppUi.surface(context,AppUi.RAISED,16),null));
+            row.setMinimumHeight(AppUi.dp(context,56));row.setFocusable(true);row.setContentDescription(labels[i]);
+            String[] parts=labels[i].split("\n",2);TextView title=AppUi.text(context,parts[0],16,AppUi.TEXT);title.setTypeface(null,android.graphics.Typeface.BOLD);row.addView(title);
+            if(parts.length>1)AppUi.add(row,AppUi.text(context,parts[1],13,AppUi.MUTED),4);
+            row.setOnClickListener(view->selected.accept(choice));row.setTag("destination_result");AppUi.add(results,row,8);
         }
     }
     void dismiss() { dialog.dismiss(); }

@@ -29,13 +29,24 @@ final class NavigationCard extends LinearLayout {
         progress=new ProgressBar(context);top.addView(progress,new LinearLayout.LayoutParams(AppUi.dp(context,28),AppUi.dp(context,28)));addView(top);
         detail=AppUi.text(context,"自动定位当前位置，选择目的地后开始导航。",14,AppUi.MUTED);AppUi.add(this,detail,10);
         metrics=new LinearLayout(context);metrics.setBaselineAligned(false);
+        boolean stacked=context.getResources().getConfiguration().fontScale>1.2f||context.getResources().getConfiguration().screenWidthDp<360;
+        metrics.setOrientation(stacked?VERTICAL:HORIZONTAL);
         speed=metric(metrics,"车速 km/h");remaining=metric(metrics,"剩余距离");duration=metric(metrics,"预计用时");AppUi.add(this,metrics,18);
         render(NavigationUiModel.create(JourneyState.Phase.IDLE,NavigationFrame.status(NavigationFrame.STOPPED),"","",""));
     }
     private TextView metric(LinearLayout parent,String label) {
-        LinearLayout group=AppUi.column(getContext());group.setPadding(AppUi.dp(getContext(),4),0,AppUi.dp(getContext(),4),0);
-        TextView value=AppUi.text(getContext(),"—",20,AppUi.TEXT);value.setTypeface(null,Typeface.BOLD);group.addView(value);
-        group.addView(AppUi.text(getContext(),label,12,AppUi.MUTED));parent.addView(group,new LinearLayout.LayoutParams(0,-2,1));return value;
+        LinearLayout group=AppUi.column(getContext());boolean stacked=parent.getOrientation()==VERTICAL;
+        group.setPadding(AppUi.dp(getContext(),4),0,AppUi.dp(getContext(),4),stacked?AppUi.dp(getContext(),10):0);
+        TextView value=AppUi.text(getContext(),"—",20,AppUi.TEXT);value.setTypeface(null,Typeface.BOLD);
+        TextView caption=AppUi.text(getContext(),label,12,AppUi.MUTED);
+        if(stacked){
+            group.setOrientation(HORIZONTAL);group.setGravity(Gravity.CENTER_VERTICAL);value.setGravity(Gravity.END);
+            group.addView(caption,new LinearLayout.LayoutParams(0,-2,1));group.addView(value,new LinearLayout.LayoutParams(0,-2,1.3f));
+            parent.addView(group,new LinearLayout.LayoutParams(-1,-2));
+        }else{
+            group.addView(value);group.addView(caption);parent.addView(group,new LinearLayout.LayoutParams(0,-2,1));
+        }
+        return value;
     }
     void icon(Bitmap bitmap) { icon.setImageBitmap(bitmap); }
     void render(NavigationUiModel state) {

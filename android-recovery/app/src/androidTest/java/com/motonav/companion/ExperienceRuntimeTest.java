@@ -105,7 +105,9 @@ public class ExperienceRuntimeTest {
                 NavigationFrame fresh=new NavigationFrame(NavigationFrame.LIVE,3,120,4800,660,36,now,now);
                 card.render(NavigationUiModel.create(JourneyState.Phase.NAVIGATING,fresh,"测试目的地","测试道路 · 前方右转",""));
                 int width=AppUi.dp(activity,320);card.measure(View.MeasureSpec.makeMeasureSpec(width,View.MeasureSpec.EXACTLY),View.MeasureSpec.makeMeasureSpec(0,View.MeasureSpec.UNSPECIFIED));
-                card.layout(0,0,card.getMeasuredWidth(),card.getMeasuredHeight());capture(card,"guidance-fixture-"+suffix(activity)+".png");
+                card.layout(0,0,card.getMeasuredWidth(),card.getMeasuredHeight());
+                assertEquals("Short duration stays on one line at supported font sizes",1,((TextView)field(card,"duration")).getLayout().getLineCount());
+                capture(card,"guidance-fixture-"+suffix(activity)+".png");
                 assertEquals("36",((TextView)field(card,"speed")).getText().toString());
                 card.render(NavigationUiModel.create(JourneyState.Phase.NAVIGATING,fresh.at(now+16000),"测试目的地","旧道路","正在重新获取定位"));
                 assertEquals(View.GONE,((View)field(card,"metrics")).getVisibility());assertEquals(View.GONE,((View)field(card,"icon")).getVisibility());
