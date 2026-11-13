@@ -35,6 +35,7 @@ public final class BleLink {
     private ScanCallback activeScanCallback;
     private boolean ready;
     private boolean scanning;
+    private int serviceChanges;
     private record Pending(int sequence,int helloVersion) { }
     private Pending pending;
     private Runnable completion;
@@ -102,6 +103,7 @@ public final class BleLink {
         if(oldScanner!=null&&oldCallback!=null)try{oldScanner.stopScan(oldCallback);}catch(SecurityException|IllegalStateException ignored){}
     }
     public void connect(BluetoothDevice device){
+        serviceChanges=0;
         disconnect(); listener.status("正在连接设备…");
         if (navigation != null) {
             try {
@@ -208,6 +210,12 @@ public final class BleLink {
         }
     }
     private final BluetoothGattCallback callback=new BluetoothGattCallback(){
+        @Override public void onServiceChanged(BluetoothGatt g){handler.post(()->{
+            if(g!=gatt)return;
+            if(++serviceChanges>1){fail("圆屏服务反复变化，请重新连接。");return;}
+            BluetoothDevice device=g.getDevice();
+            disconnect();listener.status("圆屏固件已更新，正在重新发现路线地图服务…");openGatt(device);
+        });}
         @Override public void onConnectionStateChange(BluetoothGatt g,int status,int state){handler.post(()->{
             if(g!=gatt)return;
             if(status!=BluetoothGatt.GATT_SUCCESS||state==BluetoothProfile.STATE_DISCONNECTED){fail("设备已断开（"+status+"）。");return;}

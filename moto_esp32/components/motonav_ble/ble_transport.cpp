@@ -79,8 +79,8 @@ const ble_gatt_chr_def info_characteristics[] = {
 };
 const ble_gatt_svc_def services[] = {
     {.type = BLE_GATT_SVC_TYPE_PRIMARY, .uuid = &service_uuid.u, .characteristics = characteristics},
-    {.type = BLE_GATT_SVC_TYPE_PRIMARY, .uuid = &map_service_uuid.u, .characteristics = map_characteristics},
-    {.type = BLE_GATT_SVC_TYPE_PRIMARY, .uuid = &info_uuid.u, .characteristics = info_characteristics}, {}
+    {.type = BLE_GATT_SVC_TYPE_PRIMARY, .uuid = &info_uuid.u, .characteristics = info_characteristics},
+    {.type = BLE_GATT_SVC_TYPE_PRIMARY, .uuid = &map_service_uuid.u, .characteristics = map_characteristics}, {}
 };
 
 void advertise();
@@ -161,7 +161,13 @@ void advertise() {
         ble_npl_callout_reset(&advertising_retry, ble_npl_time_ms_to_ticks32(1000));
     }
 }
-void ble_synced() { ESP_ERROR_CHECK(ble_hs_id_infer_auto(0, &address_type)); advertise(); }
+void ble_synced() {
+    ESP_ERROR_CHECK(ble_hs_id_infer_auto(0, &address_type));
+    // NimBLE persists this indication for bonded peers that are not connected.
+    // Tell phones about newly installed services before advertising after boot.
+    ble_svc_gatt_changed(1,0xffff);
+    advertise();
+}
 void ble_reset(int reason) { reset_connection(); ESP_LOGW(Tag, "Bluetooth host reset; reason=%d", reason); }
 void ble_task(void *) { nimble_port_run(); nimble_port_freertos_deinit(); }
 } // namespace
