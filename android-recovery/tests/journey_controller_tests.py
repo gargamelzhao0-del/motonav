@@ -21,11 +21,11 @@ public class AlertDialog implements android.content.DialogInterface {
     "com/motonav/companion/DestinationSearchDialog.java": '''package com.motonav.companion;
 public class DestinationSearchDialog {
  public static DestinationSearchDialog latest;public java.util.function.Consumer<String> submit;public java.util.function.IntConsumer select;
- public Runnable dismissed;public String failure;public boolean visible,busy;public String[] labels;
+ public Runnable dismissed;public String failure;public boolean visible,busy,deferDismiss;public String[] labels;
  public DestinationSearchDialog(android.app.Activity a,String q,java.util.function.Consumer<String> s,Runnable d){latest=this;submit=s;dismissed=d;}
  public void show(){visible=true;}public void searching(){busy=true;}public void failure(String s){failure=s;busy=false;}
  public void results(String[] s,java.util.function.IntConsumer c){labels=s;select=c;busy=false;}
- public void dismiss(){if(visible){visible=false;dismissed.run();}}
+ public void dismiss(){if(visible){visible=false;if(!deferDismiss)dismissed.run();}}
 }''',
     "android/graphics/Bitmap.java": 'package android.graphics; public class Bitmap {}',
     "android/widget/EditText.java": 'package android.widget; public class EditText {public EditText(android.app.Activity a){} public void setHint(String s){} public void setSingleLine(boolean b){} public void setSaveEnabled(boolean b){} public String getText(){return "";}}',

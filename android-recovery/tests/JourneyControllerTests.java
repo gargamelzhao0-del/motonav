@@ -292,6 +292,16 @@ public class JourneyControllerTests {
             check(!f.controller.presentation().live()&&f.controller.presentation().turnDistance().isEmpty(),"expired instruction clears the card metrics");
         }
         try(Fixture f=new Fixture()) {
+            f.controller.searchDialog();DestinationSearchDialog previous=DestinationSearchDialog.latest;previous.deferDismiss=true;
+            previous.submit.accept("杭州 西湖");com.amap.api.services.poisearch.PoiSearch old=com.amap.api.services.poisearch.PoiSearch.latest;
+            f.controller.searchDialog();DestinationSearchDialog replacement=DestinationSearchDialog.latest;
+            old.listener.onPoiSearched(new com.amap.api.services.poisearch.PoiResult(),1000);Handler.advance(0);
+            check(replacement.labels==null,"replacing a dialog immediately invalidates the old search");
+            replacement.submit.accept("杭州 广场");previous.dismissed.run();
+            com.amap.api.services.poisearch.PoiSearch.latest.listener.onPoiSearched(new com.amap.api.services.poisearch.PoiResult(),1000);Handler.advance(0);
+            check(replacement.labels!=null&&!replacement.busy,"delayed old dismissal cannot clear the new search dialog");
+        }
+        try(Fixture f=new Fixture()) {
             f.controller.searchDialog();DestinationSearchDialog first=DestinationSearchDialog.latest;
             first.submit.accept("杭州 西湖");com.amap.api.services.poisearch.PoiSearch old=com.amap.api.services.poisearch.PoiSearch.latest;
             first.dismiss();old.listener.onPoiSearched(new com.amap.api.services.poisearch.PoiResult(),1000);Handler.advance(0);

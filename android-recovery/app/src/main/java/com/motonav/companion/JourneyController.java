@@ -63,6 +63,7 @@ final class JourneyController {
     private PoiItem destination;
     private Location plannedStart;
     private int searchEpoch;
+    private long searchDialogGeneration;
     private boolean destroyed, gpsWeak;
     private long startDeadlineMs;
     private int startReplans;
@@ -193,8 +194,12 @@ final class JourneyController {
         if(!active() || activity == null)return;
         if(state.phase()==JourneyState.Phase.NAVIGATING||state.phase()==JourneyState.Phase.STARTING){report("请先结束导航并停车，再更换目的地。");return;}
         if (state.phase() != JourneyState.Phase.IDLE) stop("已取消当前启动请求，请选择新的目的地。");
+        final long generation=++searchDialogGeneration;
+        ++searchEpoch;
         if(dialog!=null)dialog.dismiss();
-        dialog=new DestinationSearchDialog(activity,lastSearch,this::search,()->{++searchEpoch;dialog=null;});
+        dialog=new DestinationSearchDialog(activity,lastSearch,this::search,()->{
+            if(generation==searchDialogGeneration){++searchEpoch;dialog=null;}
+        });
         dialog.show();
     }
     private void searchFailure(String text) { if(dialog!=null)dialog.failure(text); }
