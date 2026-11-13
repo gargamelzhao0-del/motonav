@@ -12,6 +12,33 @@
 
 namespace motonav::drivers {
 namespace {
+portMUX_TYPE health_guard = portMUX_INITIALIZER_UNLOCKED;
+DisplayStatus health;
+void change_state(DisplayState expected, DisplayState next) {
+    portENTER_CRITICAL(&health_guard);
+    if (health.state == expected) health.state = next;
+    portEXIT_CRITICAL(&health_guard);
+}
+void latch_fault(DisplayFault reason, esp_err_t error) {
+    portENTER_CRITICAL(&health_guard);
+    const bool first = health.state != DisplayState::Faulted;
+    if (first) health = {DisplayState::Faulted, reason, error};
+    portEXIT_CRITICAL(&health_guard);
+    if (first)
+        ESP_LOGE("display", "runtime fault=%u error=%d; rendering stopped, application restart required",
+                 static_cast<unsigned>(reason), error);
+}
+[[noreturn]] void park_renderer() {
+    // Do not return to the adapter: it treats a failed flush as flush_ready.
+    // DMA may still own a buffer. Only the independent application supervisor
+    // may restart; neither a late completion nor another call clears the fault.
+    for (;;) vTaskDelay(pdMS_TO_TICKS(1000));
+}
+void IRAM_ATTR require_transfer(esp_err_t error, DisplayFault reason) {
+    if (error == ESP_OK) return;
+    latch_fault(reason, error);
+    park_renderer();
+}
 struct PanelStream {
     esp_lcd_panel_io_handle_t io;
     esp_lcd_panel_handle_t panel;
@@ -53,18 +80,25 @@ esp_err_t create_panel_on_ui_core(const bsp_display_config_t &config,
     vSemaphoreDelete(request.done);
     return created == pdPASS ? request.result : ESP_ERR_NO_MEM;
 }
-void IRAM_ATTR wait_transfer(lv_display_t *) {
-    if (!panel_stream.pending) return;
+bool IRAM_ATTR drain_transfer() {
+    if (display_status().state == DisplayState::Faulted) return false;
+    if (!panel_stream.pending) return true;
     uint32_t begin = panel_stream.metrics_enabled ? static_cast<uint32_t>(esp_timer_get_time()) : 0;
     // Keep ownership until the actual DMA callback. A timeout reports a fault;
     // it must never pretend completion or reuse a buffer still owned by SPI.
-    while (xSemaphoreTake(panel_stream.done, pdMS_TO_TICKS(1000)) != pdTRUE)
-        ESP_LOGE("display", "waiting for SPI DMA completion");
+    if (xSemaphoreTake(panel_stream.done, pdMS_TO_TICKS(250)) != pdTRUE) {
+        latch_fault(DisplayFault::DmaTimeout, ESP_ERR_TIMEOUT);
+        return false;
+    }
     if (panel_stream.metrics_enabled) {
         panel_stream.metrics.wait_us += static_cast<uint32_t>(esp_timer_get_time()) - begin;
         panel_stream.metrics.transfer_us += panel_stream.completed_us - panel_stream.submitted_us;
     }
     panel_stream.pending = false;
+    return true;
+}
+void IRAM_ATTR wait_transfer(lv_display_t *) {
+    if (!drain_transfer()) park_renderer();
 }
 bool IRAM_ATTR transfer_done(esp_lcd_panel_io_handle_t, esp_lcd_panel_io_event_data_t *, void *context) {
     if (panel_stream.metrics_enabled) panel_stream.completed_us = static_cast<uint32_t>(esp_timer_get_time());
@@ -88,14 +122,14 @@ esp_err_t IRAM_ATTR draw_strip(lv_display_t *, esp_lcd_panel_handle_t, int x1, i
     if (!pixels || x1 < 0 || y1 < 0 || x2 > BSP_LCD_H_RES || y2 > BSP_LCD_V_RES ||
         x1 >= x2 || y1 >= y2 || ((x1 | y1 | x2 | y2) & 1) ||
         static_cast<size_t>(x2-x1) * (y2-y1) * 2 > stream.buffer_bytes)
-        return ESP_ERR_INVALID_ARG;
+        require_transfer(ESP_ERR_INVALID_ARG, DisplayFault::InvalidBuffer);
     size_t bytes = static_cast<size_t>(x2 - x1) * (y2 - y1) * 2;
     if (stream.color == DisplayColor::Rgb332) {
         const uint32_t begin = stream.metrics_enabled ? static_cast<uint32_t>(esp_timer_get_time()) : 0;
         // LVGL owns this buffer and has finished drawing. The previous DMA
         // was drained above; compact only this buffer before handing it to SPI.
         bytes = PixelPack::rgb332(static_cast<uint8_t *>(const_cast<void *>(pixels)), bytes / 2);
-        if (!bytes) return ESP_ERR_INVALID_ARG;
+        if (!bytes) require_transfer(ESP_ERR_INVALID_ARG, DisplayFault::InvalidBuffer);
         if (stream.metrics_enabled)
             stream.metrics.convert_us += static_cast<uint32_t>(esp_timer_get_time()) - begin;
     }
@@ -110,8 +144,8 @@ esp_err_t IRAM_ATTR draw_strip(lv_display_t *, esp_lcd_panel_handle_t, int x1, i
         const uint8_t columns[]{static_cast<uint8_t>(left >> 8), static_cast<uint8_t>(left),
                                 static_cast<uint8_t>(right >> 8), static_cast<uint8_t>(right)};
         const uint8_t rows[]{static_cast<uint8_t>(y1 >> 8), static_cast<uint8_t>(y1), 0x01, 0xd1};
-        ESP_RETURN_ON_ERROR(esp_lcd_panel_io_tx_param(stream.io, 0x02002a00, columns, sizeof(columns)), "display", "columns");
-        ESP_RETURN_ON_ERROR(esp_lcd_panel_io_tx_param(stream.io, 0x02002b00, rows, sizeof(rows)), "display", "rows");
+        require_transfer(esp_lcd_panel_io_tx_param(stream.io, 0x02002a00, columns, sizeof(columns)), DisplayFault::ControlTransfer);
+        require_transfer(esp_lcd_panel_io_tx_param(stream.io, 0x02002b00, rows, sizeof(rows)), DisplayFault::ControlTransfer);
         if (stream.metrics_enabled) {
             stream.metrics.command_us += static_cast<uint32_t>(esp_timer_get_time()) - begin;
             stream.metrics.window_commands += 2;
@@ -123,8 +157,7 @@ esp_err_t IRAM_ATTR draw_strip(lv_display_t *, esp_lcd_panel_handle_t, int x1, i
     stream.pending = true;
     if (stream.metrics_enabled) stream.submitted_us = static_cast<uint32_t>(esp_timer_get_time());
     esp_err_t result = esp_lcd_panel_io_tx_color(stream.io, command, pixels, bytes);
-    if (result != ESP_OK) stream.pending = false;
-    ESP_RETURN_ON_ERROR(result, "display", "pixels");
+    require_transfer(result, DisplayFault::ColorTransfer);
     if (stream.metrics_enabled) {
         stream.metrics.submit_us += static_cast<uint32_t>(esp_timer_get_time()) - stream.submitted_us;
         stream.metrics.bytes += bytes;
@@ -209,43 +242,81 @@ esp_err_t display_init(lv_display_t **out, const DisplayConfig &options) {
     // Panel commands must finish before the UI task starts submitting SPI DMA.
     ESP_RETURN_ON_ERROR(esp_lcd_panel_co5300_set_brightness(panel, options.brightness_percent), "display", "initialization");
     initialized = true;
+    change_state(DisplayState::NotInitialized, DisplayState::Ready);
     *out = display;
     return ESP_OK;
 }
 
 esp_err_t display_start() {
-    if (!initialized || started) return ESP_ERR_INVALID_STATE;
+    if (!initialized || started || display_status().state == DisplayState::Faulted) return ESP_ERR_INVALID_STATE;
     esp_err_t error = esp_lv_adapter_start();
-    if (error == ESP_OK) started = true;
+    if (error == ESP_OK) {
+        started = true;
+        // Rendering can already fail on the other core during adapter_start.
+        change_state(DisplayState::Ready, DisplayState::Running);
+    }
     return error;
 }
-esp_err_t display_lock(int32_t timeout_ms) { return esp_lv_adapter_lock(timeout_ms); }
+esp_err_t display_lock(int32_t timeout_ms) {
+    if (timeout_ms < -1) return ESP_ERR_INVALID_ARG;
+    for (;;) {
+        if (display_status().state == DisplayState::Faulted) return ESP_ERR_INVALID_STATE;
+        const auto error = esp_lv_adapter_lock(timeout_ms < 0 ? 100 : timeout_ms);
+        if (error == ESP_OK && display_status().state == DisplayState::Faulted) {
+            esp_lv_adapter_unlock();
+            return ESP_ERR_INVALID_STATE;
+        }
+        if (error != ESP_ERR_TIMEOUT || timeout_ms >= 0) return error;
+    }
+}
 void display_unlock() { esp_lv_adapter_unlock(); }
+DisplayStatus IRAM_ATTR display_status() {
+    portENTER_CRITICAL(&health_guard);
+    const auto result = health;
+    portEXIT_CRITICAL(&health_guard);
+    return result;
+}
 esp_err_t display_set_brightness(uint8_t percent) {
     if (percent > 100) return ESP_ERR_INVALID_ARG;
     if (!initialized) return ESP_ERR_INVALID_STATE;
+    if (display_status().state == DisplayState::Faulted) return display_status().error;
     ESP_RETURN_ON_ERROR(display_lock(), "display", "lock");
     // Stop UI submission and consume the last real DMA completion before
     // sending a panel control command on the shared QSPI bus.
-    wait_transfer(nullptr);
+    if (!drain_transfer()) { display_unlock(); return display_status().error; }
     panel_stream.strips = {}; // A control command breaks a RAMWRC sequence.
     esp_err_t error = esp_lcd_panel_co5300_set_brightness(panel_stream.panel, percent);
+    if (error != ESP_OK) latch_fault(DisplayFault::ControlTransfer, error);
     display_unlock();
     return error;
 }
 esp_err_t display_enable_fps(lv_display_t *display, bool enable) {
-    return display ? esp_lv_adapter_fps_stats_enable(display, enable) : ESP_ERR_INVALID_ARG;
+    if (!display) return ESP_ERR_INVALID_ARG;
+    // The adapter takes its recursive lock with an infinite timeout. Acquire
+    // it through our fault-aware wrapper first, including for diagnostics.
+    ESP_RETURN_ON_ERROR(display_lock(), "display", "lock FPS");
+    const auto error = esp_lv_adapter_fps_stats_enable(display, enable);
+    display_unlock();
+    return error;
 }
 esp_err_t display_reset_fps(lv_display_t *display) {
-    return display ? esp_lv_adapter_fps_stats_reset(display) : ESP_ERR_INVALID_ARG;
+    if (!display) return ESP_ERR_INVALID_ARG;
+    ESP_RETURN_ON_ERROR(display_lock(), "display", "lock FPS");
+    const auto error = esp_lv_adapter_fps_stats_reset(display);
+    display_unlock();
+    return error;
 }
 esp_err_t display_read_fps(lv_display_t *display, uint32_t *fps) {
-    return display && fps ? esp_lv_adapter_get_fps(display, fps) : ESP_ERR_INVALID_ARG;
+    if (!display || !fps) return ESP_ERR_INVALID_ARG;
+    ESP_RETURN_ON_ERROR(display_lock(), "display", "lock FPS");
+    const auto error = esp_lv_adapter_get_fps(display, fps);
+    display_unlock();
+    return error;
 }
 esp_err_t display_enable_metrics(bool enabled) {
     if (!initialized) return ESP_ERR_INVALID_STATE;
     ESP_RETURN_ON_ERROR(display_lock(), "display", "lock metrics");
-    wait_transfer(nullptr);
+    if (!drain_transfer()) { display_unlock(); return display_status().error; }
     panel_stream.metrics = {};
     panel_stream.metrics_enabled = enabled;
     display_unlock();
@@ -256,7 +327,7 @@ esp_err_t display_read_metrics(DisplayMetrics *out, bool reset) {
     if (!initialized) return ESP_ERR_INVALID_STATE;
     ESP_RETURN_ON_ERROR(display_lock(), "display", "lock metrics");
     if (!panel_stream.metrics_enabled) { display_unlock(); return ESP_ERR_INVALID_STATE; }
-    wait_transfer(nullptr);
+    if (!drain_transfer()) { display_unlock(); return display_status().error; }
     *out = panel_stream.metrics;
     if (reset) panel_stream.metrics = {};
     display_unlock();

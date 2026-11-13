@@ -9,6 +9,26 @@ namespace motonav {
 // per-pixel blending, or allocation. UI text remains rendered by LVGL.
 class MapRaster {
 public:
+    // A projected line shared by both stroke widths and every display strip.
+    // Only four extra bytes per segment; no per-frame allocation or normal
+    // quantization. Keep the original arithmetic order for identical pixels.
+    class PreparedLine {
+        friend class MapRaster;
+    public:
+        PreparedLine() = default;
+        PreparedLine(ProjectedPoint a, ProjectedPoint b) : a_(a), b_(b) {
+            if (!bounded(a) || !bounded(b)) return;
+            const float dx = b.x - a.x, dy = b.y - a.y;
+            length_ = std::sqrt(dx*dx + dy*dy);
+        }
+        bool intersects_y(int top, int bottom, int padding) const {
+            return length_ >= 0 && std::max(a_.y, b_.y) + padding >= top &&
+                   std::min(a_.y, b_.y) - padding <= bottom;
+        }
+    private:
+        ProjectedPoint a_{}, b_{};
+        float length_ = -1;
+    };
     MapRaster(uint16_t *pixels, size_t count, int width, int height, size_t stride, int origin_x=0, int origin_y=0)
         : pixels_(pixels), width_(width), height_(height), origin_x_(origin_x), origin_y_(origin_y), stride_(stride),
           valid_(pixels && width > 0 && width <= 466 && height > 0 && height <= 466 &&
@@ -69,8 +89,13 @@ public:
         }
     }
     void line(ProjectedPoint a, ProjectedPoint b, int width, uint16_t color) {
-        if (!valid_ || !bounded(a) || !bounded(b) || width < 1 || width > 16) return;
-        float dx=b.x-a.x, dy=b.y-a.y, length=std::sqrt(dx*dx+dy*dy), radius=width*0.5f;
+        if (!valid_ || width < 1 || width > 16) return;
+        line(PreparedLine(a, b), width, color);
+    }
+    void line(const PreparedLine &segment, int width, uint16_t color) {
+        if (!valid_ || segment.length_ < 0 || width < 1 || width > 16) return;
+        const auto a = segment.a_, b = segment.b_;
+        float dx=b.x-a.x, dy=b.y-a.y, length=segment.length_, radius=width*0.5f;
         if (length > 0.01f) {
             float nx=-dy*radius/length, ny=dx*radius/length;
             ProjectedPoint corners[]{{a.x+nx,a.y+ny},{b.x+nx,b.y+ny},{b.x-nx,b.y-ny},{a.x-nx,a.y-ny}};

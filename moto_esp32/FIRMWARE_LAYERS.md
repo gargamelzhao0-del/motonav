@@ -1,4 +1,4 @@
-# 固件分层与接口（0.3.2）
+# 固件分层与接口（0.3.3）
 
 本文件描述当前已实现的结构。主程序只组装模块；板级实现由独立 ESP-IDF 组件管理，应用不直接调用 BSP、NimBLE 或 LCD/I²C 接口。NAV3 协议保持兼容；NAV4 接收器和路线状态属于核心层，正式 UI 通过图形接口渲染路线。
 
@@ -10,7 +10,8 @@ moto_esp32/
 │   ├── app_main.cpp                  入口，只调用 app::run()
 │   ├── app/
 │   │   ├── navigation_app.*          启动顺序、模块组装、运行状态日志
-│   │   └── navigation_service.*      BLE 事件/字节 → 导航会话；加锁快照
+│   │   ├── navigation_service.*      BLE 事件/字节 → 原子导航会话；加锁快照
+│   │   └── device_supervisor.*       读取显示健康状态；应用决定故障重启
 │   ├── CMakeLists.txt                应用依赖与可选测试装配
 │   └── idf_component.yml             第三方版本锁定
 ├── components/
@@ -44,11 +45,15 @@ moto_esp32/
 flowchart TD
     Entry[main/app_main] --> App[应用组装 navigation_app]
     App --> Service[导航业务 navigation_service]
-    Service --> Core[纯 C++ 会话与 NAV3]
+    Service --> Core[纯 C++ 会话与 NAV3/NAV4]
     Service --> BLE[BLE 传输接口]
     Service --> Platform[平台接口]
     App --> UI[导航 UI]
     UI --> Core
+    UI --> Graphics[地图图形组件]
+    App --> Supervisor[设备监督]
+    Supervisor --> Display
+    Supervisor --> Platform
     App --> Display[显示驱动接口]
     App --> Touch[触摸驱动接口]
     App -. 构建开关 .-> Bench[tests/device 测试组件]
@@ -73,7 +78,9 @@ flowchart TD
 | 同上 | `display_enable_metrics / display_read_metrics` | 默认关闭的传输字节、像素转换、命令、提交、DMA 和等待耗时；自行加锁 |
 | `motonav/drivers/touch.h` | `touch_init(display, &input)` | 初始化并绑定 LVGL 输入；应用使用 LVGL 点击/长按事件 |
 | `motonav/drivers/ble_transport.h` | `ble_start(name, revision, callbacks)` | 启动单连接加密认证 NUS 服务和广播；复制名称/版本 |
-| 同上 | `ble_notify(data, length)` | 在 BLE 回调内回复通知，复制数据并报告资源/发送失败 |
+| 同上 | `ble_notify / ble_notify_batch` | BLE 回调内全有或全无地入队；成功代表复制完成，不代表无线送达 |
+| `motonav/drivers/display_status.h` | `display_status()` | 不获取 LVGL 锁的健康状态快照，故障锁存到重启 |
+| `motonav/drivers/platform.h` | `restart_device()` | 应用调用的整机重启，不擦除 NVS |
 | `motonav/drivers/platform.h` | `platform_init / device_name / firmware_version` | 初始化 NVS、板级身份、版本 |
 | 同上 | `monotonic_us / monotonic_ms / memory_stats` | 单调时间与内存统计 |
 | `motonav/core/navigation_session.h` | `NavigationSession` | 链路状态、配对/订阅、分片输入和只读快照；调用方负责串行化 |
@@ -110,12 +117,12 @@ ESP_ERROR_CHECK(drivers::display_init(&display, config));
 
 ### 线程与数据所有权
 
-- BLE 回调运行于 NimBLE 主机任务（CPU0），只更新业务状态和回复短通知，不调用 LVGL。不在其他任务或 ISR 中直接调用 `ble_notify`；后续主动上报应增加有界队列，把发送调度到 BLE 线程。
-- RX 回调中的字节数组只在回调期间有效；一个回调可以包含半帧、多帧或任意片段。驱动不解析 NAV3。业务会话在取消订阅、失去安全状态或断连时清理半帧与握手；新握手后才恢复诱导。
-- `NavigationService` 是业务状态的唯一持有者。快照复制与协议输入受互斥锁保护；释放业务锁后再发送 BLE 通知。UI 在 LVGL 线程通过读取器拉取快照，因此没有 BLE → LVGL 的跨线程写对象。
+- BLE 回调运行于 NimBLE 主机任务（CPU0），只更新业务状态和回复短通知，不调用 LVGL。不在其他任务或 ISR 中直接调用 `ble_notify / ble_notify_batch`。驱动已有 BLE 主机线程拥有的有界发送队列；后续跨任务主动上报仍需独立的线程间入口。
+- RX 回调中的字节数组只在回调期间有效；一个回调可以包含半帧、多帧或任意片段。驱动不解析 NAV3/NAV4 内容。业务会话在取消订阅、失去安全状态或断连时清理半帧与握手；新握手后才恢复诱导。
+- `NavigationService` 是业务状态的唯一持有者。BLE 事件与输入由主机线程串行调用；候选状态在锁外解析，ACK 全批入队成功后才在锁内提交状态。候选会话和回复存储由服务持有，不占用小任务栈。UI 只读取已提交快照，入队期间不持业务锁。UI 在 LVGL 线程通过读取器拉取快照，因此没有 BLE → LVGL 的跨线程写对象。
 - LVGL 服务运行于 CPU1；SPI 中断仍在 CPU1 分配。双 64 行内部 RAM 缓冲、466 × 466、40 MHz QSPI、RGB565_SWAPPED 绘制、真实 DMA 完成信号量及 CO5300 连续条带逻辑保留。RGB332 在已拥有的绘制缓冲中原地压缩，再提交一字节/像素的传输；16 字节对齐块使用 S3 PIE，短尾与其他四字节对齐地址使用标量路径。代码在 IRAM、掩码在内部 RAM，无每帧分配，不能在 ISR 调用转换内核。
 - 默认 QSPI 使用 ESP-IDF 公开 LCD IO 扩展接口：8 位指令 + 24 位地址走单线，像素走四线；指令与像素放在同一片选序列。按 SDK 查询到的单次 DMA 上限分段（本机 32 KiB），仅最后一段触发显示完成，且回收 SPI 返回队列后才复用描述符。队列深度为 2，没有每帧动态分配或隐式 DMA 中转缓冲。
-- 部分分段提交失败时先收回已接受的 DMA，再锁存故障阻止后续命令；若无法确认 DMA 已回收则终止运行，绝不虚构完成后复用内存。初始化失败不自动改用其他传输实现。
+- DMA 完成等待、QSPI 返回队列回收和提交等待均使用 250 ms 超时；回收失败不复用描述符。部分提交失败时尝试回收已接受的 DMA 并锁存故障；不能确认完成时仍保留像素/描述符所有权，渲染任务停留，应用监督逻辑重启。绝不将失败当作 flush_ready。初始化失败不自动改用其他传输实现。
 - SPI 热路径放入内部指令 RAM，减少 Flash 指令缓存未命中的影响；这不表示整条 LVGL/驱动调用链支持 Flash 缓存关闭期间运行。当前没有固件 OTA。
 - 从普通应用任务调用 LVGL 时先 `display_lock()`，完成后解锁；LVGL 自己的事件和定时回调已经持锁。亮度接口自己加锁，并在完成上一笔 DMA 后操作面板。
 - Dashboard 的点数组必须与页面同寿命。导航页持有自己的 Dashboard；测试组件创建独立 LVGL screen，退出时切回导航页并删除测试 screen，连同地图/仪表背景一起释放。
@@ -172,10 +179,22 @@ python tools/export_source.py dist/source-production
 
 新传感器或存储驱动新增为独立组件，公开小接口并返回真实读数/错误，不在驱动中创建页面。应用增加业务服务，UI 只接收状态；云端消息与地图路线接收也分别建立有界业务模块，避免重新塞回 `app_main.cpp`。
 
-目前只封装已经接入的显示、触摸、BLE 与基础平台服务；未实现电池/充电、IMU、RTC、音频、TF 卡业务或固件 OTA。正式导航仍为 NAV3 仪表，真实路线输入尚待两端联调。全屏地图图形组件保留，模拟路线只存在于测试模块；性能验收范围见 [0.2.7 实测报告](HARDWARE_TEST_0.2.7.md)，不能承诺任意地图复杂度或手机并发负载均达到同一帧率。
+目前只封装已经接入的显示、触摸、BLE 与基础平台服务；未实现电池/充电、IMU、RTC、音频、TF 卡业务或固件 OTA。正式导航支持 NAV3 仪表与 NAV4 真实路线，手机联调记录单独维护。全屏地图图形组件保留，模拟路线只存在于测试模块；性能验收范围见 [0.2.7 实测报告](HARDWARE_TEST_0.2.7.md)，不能承诺任意地图复杂度或手机并发负载均达到同一帧率。
 
 ## 0.3.1 集成补充
 
 `motonav_core` 的 `route_protocol.h` 校验完整 NAV4 快照；`navigation_session.h` 在单一协商通道内提交原子路线和导航状态。`motonav_ui` 调用 `motonav_graphics` 绘制当前有效路线，并在过期／断连时删除地图对象。两者不直接访问显示驱动。
 
 `NavigationMetrics` 由应用组装层通过既有显示统计接口读取真实绘制 FPS，默认关闭；无模拟数据、无测试组件依赖，不改变已验证的显示／触摸／平台驱动。说明与统计边界见 `PHONE_INTEGRATION.md`。
+
+## 0.3.3 修复与验证
+
+- **分片与 ACK 原子提交**：一次接收回调要么消费全部字节，要么消费零字节。ACK 排队失败不提交半帧、序号、时效或路线，允许重试同一 ATT 片段。每次有效写入只读取一次时钟，并进行候选复制、提交两对业务锁操作。
+- **有界通知**：最多 32 包、合计 2048 字节，每包受 MTU−3 和 512 字节上限约束；整批校验与复制。单轮最多发送 8 包，资源忙时延迟 20 ms 重试，连续 50 次失败或永久错误关闭连接。关闭失败最多再尝试至 10 次，随后请求 BLE 主机复位。首次调度失败不会接受该批。驱动保存副本，NimBLE 已消费的 mbuf 不会被重用。
+- **通道所有权**：队列绑定首个认证 RX 选中的 NAV3/NAV4 通道；取消活动通道订阅、失去安全状态或断线会清空。恢复或取消非活动 CCCD 不切换协议、不误删当前 ACK。0.3.2 的 Android 指示确认和服务变更通知保留。
+- **故障处置分层**：`display_status()` 仅取短临界区，不依赖 LVGL 锁；`main/app/device_supervisor` 每 100 ms 检查一次并决定重启。显示驱动只报告故障并保留缓冲。亮度、性能计数、FPS 接口均使用可感知故障的锁；后台渲染故障不能被启动成功或迟到中断清除。该机制针对已检测的显示传输故障，不是任意任务卡死的全局看门狗。
+- **地图热路径**：每个投影线段仅计算一次长度，双描边和多个条带复用；每个地图对象最大增加 2300 字节几何存储，无逐帧分配。颜色、圆屏覆盖及浮点运算顺序保持一致。没有据此宣称新的硬件 FPS。
+
+2026-11-13 主机验证：13 个 C++ 测试程序与依赖边界检查通过，其中显示运行时覆盖 11 种正常/故障路径。新增用例执行真实的应用服务、BLE 传输、QSPI 和显示实现，SDK 替身仅注入资源不足、调度失败、超时及迟到完成；覆盖 NAV4 304 字节包的每个切分位置、通道切换、批量回滚及复位降级。12 项真实 LVGL 离屏检查通过，包括缓存/非缓存与 RGB332 独立参考像素对比。
+
+本次基线为 `codex/device-integration` 的 `fd9b6ee`（0.3.2），在独立 `codex/esp32-driver-reliability` 分支开发。未修改 Android，未中断 COM21 手机联调或刷写设备。构建产物与本轮日志保存在 `dist/release-0.3.3/`；硬件画面、内存余量和真实手机并发 FPS 仍需在可切换设备时验证，不能用主机测试代替。

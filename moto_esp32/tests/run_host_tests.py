@@ -31,15 +31,35 @@ with tempfile.TemporaryDirectory(prefix='motonav-firmware-tests-') as directory:
         route_fixture = output / 'nav4.frames'
         subprocess.run([str(java), '-cp', str(output), 'RouteProtocolTests', str(route_fixture)], check=True)
         assert route_fixture.read_bytes() == (root / 'tests/fixtures/nav4.frames').read_bytes(), 'Android NAV4 fixture changed'
-    for name in ['navigation_protocol_test', 'route_protocol_test', 'display_model_test', 'map_projection_test', 'map_raster_test', 'navigation_session_test', 'display_qspi_test', 'pixel_pack_test', 'ble_channel_test']:
+    extra_sources = {
+        'display_qspi_test': ['components/motonav_display/qspi_panel.cpp'],
+        'pixel_pack_test': ['components/motonav_display/pixel_pack.cpp'],
+        'navigation_service_test': ['main/app/navigation_service.cpp'],
+        'ble_transport_test': ['components/motonav_ble/ble_transport.cpp'],
+        'display_runtime_test': ['components/motonav_display/display.cpp', 'components/motonav_display/pixel_pack.cpp',
+                                 'main/app/device_supervisor.cpp'],
+    }
+    for name in ['navigation_protocol_test', 'route_protocol_test', 'ble_channel_test', 'display_model_test', 'map_projection_test', 'map_raster_test',
+                 'navigation_session_test', 'display_qspi_test', 'pixel_pack_test',
+                 'navigation_service_test', 'notification_queue_test', 'ble_transport_test', 'display_runtime_test']:
         executable = output / (name + ('.exe' if os.name == 'nt' else ''))
         subprocess.run([args.cxx, '-std=c++17', '-Wall', '-Wextra', '-Werror',
                         *[f'-I{path}' for path in [root / 'components/motonav_core/include',
                             root / 'components/motonav_graphics/include', root / 'components/motonav_display',
-                            root / 'components/motonav_graphics', root / 'components/motonav_display/include']],
+                            root / 'components/motonav_graphics', root / 'components/motonav_display/include',
+                            root / 'components/motonav_ble', root / 'components/motonav_ble/include',
+                            root / 'components/motonav_platform/include', root / 'main/app']],
                         *([f'-I{root / "tests/host/qspi_sdk"}'] if name == 'display_qspi_test' else []),
+                        *([f'-I{root / "tests/host/runtime_sdk"}'] if name in {
+                            'navigation_service_test', 'notification_queue_test', 'ble_transport_test', 'display_runtime_test'} else []),
+                        *([f'-I{root / "tests/host/ble_sdk"}'] if name == 'ble_transport_test' else []),
+                        *([f'-I{root / "tests/host/display_sdk"}'] if name == 'display_runtime_test' else []),
                         str(root / 'tests/host' / (name + '.cpp')),
-                        *([str(root / 'components/motonav_display/qspi_panel.cpp')] if name == 'display_qspi_test' else []),
-                        *([str(root / 'components/motonav_display/pixel_pack.cpp')] if name == 'pixel_pack_test' else []),
+                        *[str(root / path) for path in extra_sources.get(name, [])],
                         '-o', str(executable)], check=True)
-        subprocess.run([str(executable), *([str(fixture)] if name == 'navigation_protocol_test' else [str(route_fixture)] if name == 'route_protocol_test' else [])], check=True)
+        if name == 'display_runtime_test':
+            for mode in ['normal', 'timeout', 'submit', 'submit_legacy', 'control', 'brightness',
+                         'brightness_timeout', 'metrics_timeout', 'start_fault', 'fps_lock_fault', 'fps_lock_race']:
+                subprocess.run([str(executable), mode], check=True)
+        else:
+            subprocess.run([str(executable), *([str(fixture)] if name == 'navigation_protocol_test' else [str(route_fixture)] if name in {'route_protocol_test', 'navigation_service_test'} else [])], check=True)

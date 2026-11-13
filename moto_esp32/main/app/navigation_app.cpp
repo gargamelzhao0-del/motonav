@@ -1,5 +1,6 @@
 #include "navigation_app.h"
 #include "navigation_service.h"
+#include "device_supervisor.h"
 #include "motonav/drivers/display.h"
 #include "motonav/drivers/touch.h"
 #include "motonav/drivers/platform.h"
@@ -56,8 +57,13 @@ void run() {
     uint64_t started = 0;
     RouteScene previous;
 #endif
+    uint64_t next_sample = drivers::monotonic_ms() + (MOTONAV_NAV_METRICS ? 1100 : 5000);
     while (true) {
-        vTaskDelay(pdMS_TO_TICKS(MOTONAV_NAV_METRICS ? 1100 : 5000));
+        vTaskDelay(pdMS_TO_TICKS(100));
+        supervise_display();
+        const uint64_t sample_time = drivers::monotonic_ms();
+        if (sample_time < next_sample) continue;
+        next_sample = sample_time + (MOTONAV_NAV_METRICS ? 1100 : 5000);
         auto state = navigation.snapshot();
         auto memory = drivers::memory_stats();
         ESP_LOGI("motonav", "state=%d link=%d secure=%d protocol=%u route_points=%u route_revision=%lu rx=%lu dup=%lu rejected=%lu heap=%lu internal=%lu",

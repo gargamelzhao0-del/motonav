@@ -16,6 +16,10 @@ private:
     void event(const drivers::BleEvent &event);
     drivers::BleReceiveResult receive(const uint8_t *bytes, size_t length);
     NavigationSession session_;
+    NavigationSession candidate_; // BLE-host-only transactional scratch; includes NAV4 route state.
     SemaphoreHandle_t mutex_ = nullptr;
+    // Only the serialized BLE receive callback uses this scratch space. Keep
+    // the worst-case reply batch off the small NimBLE task stack.
+    char replies_[drivers::BleNotificationBatchLimit][32]{};
 };
 } // namespace motonav::app

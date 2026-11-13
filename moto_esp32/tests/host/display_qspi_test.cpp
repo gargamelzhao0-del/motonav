@@ -69,7 +69,8 @@ esp_err_t spi_device_polling_transmit(spi_device_handle_t, spi_transaction_t *tr
     device.post_cb(transaction);
     return ESP_OK;
 }
-esp_err_t spi_device_queue_trans(spi_device_handle_t, spi_transaction_t *transaction, int) {
+esp_err_t spi_device_queue_trans(spi_device_handle_t, spi_transaction_t *transaction, int ticks) {
+    assert(ticks==250);
     assert(acquired && queued.size()<2 && transaction->length<=32*8);
     assert((transaction->flags & (SPI_TRANS_MODE_QIO | SPI_TRANS_DMA_BUFFER_ALIGN_MANUAL))==
            (SPI_TRANS_MODE_QIO | SPI_TRANS_DMA_BUFFER_ALIGN_MANUAL));
@@ -85,9 +86,10 @@ esp_err_t spi_device_queue_trans(spi_device_handle_t, spi_transaction_t *transac
     if (fail_queue_after>0) --fail_queue_after;
     check_pending(); queued.push_back({transaction,*transaction,false}); return ESP_OK;
 }
-esp_err_t spi_device_get_trans_result(spi_device_handle_t, spi_transaction_t **out, int) {
+esp_err_t spi_device_get_trans_result(spi_device_handle_t, spi_transaction_t **out, int ticks) {
+    assert(ticks==250);
     assert(!queued.empty()); check_pending(); ++drains;
-    if (fail_drain) { fail_drain=false; return ESP_FAIL; }
+    if (fail_drain) { fail_drain=false; return ESP_ERR_TIMEOUT; }
     if (!queued.front().completed) complete_dma(); // Emulate blocking get-result.
     *out=queued.front().pointer; queued.erase(queued.begin()); return ESP_OK;
 }
@@ -163,9 +165,9 @@ int main() {
     assert(io->tx_color(io,0x32002c00,pixels,64)==ESP_FAIL && queued.empty());
     assert(io->tx_color(io,0x32002c00,pixels,64)==ESP_OK);
     fail_drain=true;
-    assert(io->tx_color(io,0x32003c00,pixels+4,60)==ESP_FAIL);
+    assert(io->tx_color(io,0x32003c00,pixels+4,60)==ESP_ERR_TIMEOUT);
     assert(queued[0].pointer->addr==0x002c00 && queued[0].pointer->tx_buffer==pixels); // Failure cannot reuse DMA memory.
-    assert(io->tx_color(io,0x32003c00,pixels+4,60)==ESP_OK);
+    assert(io->tx_color(io,0x32003c00,pixels+4,60)==ESP_ERR_INVALID_STATE);
     assert(esp_lcd_panel_del(panel)==ESP_OK);
     assert(io->del(io)==ESP_OK && queued.empty() && !devices && !allocated);
     assert(spi_bus_free(BSP_LCD_SPI_NUM)==ESP_OK && !buses);
@@ -178,6 +180,19 @@ int main() {
     assert(io->tx_color(io,0x32002c00,pixels,64)==ESP_ERR_INVALID_STATE);
     assert(io->tx_param(io,0x02005100,&brightness,1)==ESP_ERR_INVALID_STATE);
     assert(qspi_panel_set_color(io, DisplayColor::Rgb332)==ESP_ERR_INVALID_STATE);
+    assert(esp_lcd_panel_del(panel)==ESP_OK && io->del(io)==ESP_OK);
+    assert(spi_bus_free(BSP_LCD_SPI_NUM)==ESP_OK && !allocated && !buses);
+    assert(motonav::drivers::create_qspi_panel(64,&panel,&io)==ESP_OK);
+    assert(io->register_event_callbacks(io,&events,&context)==ESP_OK);
+    before=callbacks;
+    fail_queue_after=1; fail_drain=true;
+    assert(io->tx_color(io,0x32002c00,pixels,64)==ESP_ERR_TIMEOUT);
+    assert(queued.size()==1 && callbacks==before && !acquired);
+    check_pending();
+    assert(io->tx_color(io,0x32002c00,pixels+4,60)==ESP_ERR_INVALID_STATE);
+    assert(io->tx_param(io,0x02005100,&brightness,1)==ESP_ERR_INVALID_STATE);
+    complete_dma(); // Late completion does not revive this IO instance.
+    assert(callbacks==before && io->tx_color(io,0x32002c00,pixels,64)==ESP_ERR_INVALID_STATE);
     assert(esp_lcd_panel_del(panel)==ESP_OK && io->del(io)==ESP_OK);
     assert(spi_bus_free(BSP_LCD_SPI_NUM)==ESP_OK && !allocated && !buses);
     std::cout << "PASS: real QSPI implementation, command framing, DMA ownership, callbacks, errors and cleanup\n";

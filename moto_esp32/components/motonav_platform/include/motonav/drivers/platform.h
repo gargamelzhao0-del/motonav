@@ -6,6 +6,8 @@
 namespace motonav::drivers {
 // Initializes NVS for persisted BLE bonds. Never auto-erases an existing NVS.
 esp_err_t platform_init();
+// System restart, without erasing NVS. Called by application fault policy only.
+[[noreturn]] void restart_device();
 esp_err_t device_name(char *out, size_t capacity);
 const char *firmware_version();
 uint64_t monotonic_us();

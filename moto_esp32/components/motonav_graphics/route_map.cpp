@@ -19,7 +19,8 @@ namespace {
 static_assert(LV_DRAW_SW_DRAW_UNIT_CNT == 1, "Map strip decoder requires one software draw unit");
 constexpr int StripRows = 16;
 constexpr size_t StripPixels = 466 * StripRows;
-struct Segment { ProjectedPoint a, b; };
+using Segment = MapRaster::PreparedLine;
+static_assert(sizeof(Segment) == 20, "Keep the prepared geometry cache bounded");
 struct MapScene {
     lv_image_dsc_t image{};
     Segment roads[64]{}, route[511]{};
@@ -62,9 +63,8 @@ void player(MapRaster &raster, float x, float y) {
     raster.polygon(inner,3,panel_color(0xf2f3e9));
 }
 void line(MapRaster &raster, const Segment &segment, int width, uint32_t color, int top, int bottom) {
-    if (std::max(segment.a.y, segment.b.y) + width < top ||
-        std::min(segment.a.y, segment.b.y) - width > bottom) return;
-    raster.line(segment.a, segment.b, width, panel_color(color));
+    if (!segment.intersects_y(top, bottom, width)) return;
+    raster.line(segment, width, panel_color(color));
 }
 void paint(MapRaster &raster, MapScene &scene, int top, int bottom) {
     const uint64_t begin = scene.clock_us ? scene.clock_us() : 0;
@@ -223,13 +223,14 @@ bool render_route_map(lv_obj_t *view, const MapCamera &camera, const MapGeometry
     MapProjection projection(scene->image.header.w, scene->image.header.h, camera);
     if (!projection.valid()) return false;
     scene->road_count = scene->route_count = 0;
+    ProjectedPoint a, b;
     for (size_t i=0; i<geometry.road_count; ++i) {
-        auto &segment = scene->roads[scene->road_count];
-        if (projection.segment(geometry.roads[i].a, geometry.roads[i].b, segment.a, segment.b)) ++scene->road_count;
+        if (projection.segment(geometry.roads[i].a, geometry.roads[i].b, a, b))
+            scene->roads[scene->road_count++] = Segment(a, b);
     }
     for (size_t i=1; i<geometry.route_count; ++i) {
-        auto &segment = scene->route[scene->route_count];
-        if (projection.segment(geometry.route[i-1], geometry.route[i], segment.a, segment.b)) ++scene->route_count;
+        if (projection.segment(geometry.route[i-1], geometry.route[i], a, b))
+            scene->route[scene->route_count++] = Segment(a, b);
     }
     if (scene->image.header.w == 466 && scene->image.header.h == 466 &&
         lv_obj_get_x(view) == 0 && lv_obj_get_y(view) == 0 &&

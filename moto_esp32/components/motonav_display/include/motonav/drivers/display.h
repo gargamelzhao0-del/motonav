@@ -3,6 +3,7 @@
 #include "lvgl.h"
 #include "motonav/drivers/display_metrics.h"
 #include "motonav/drivers/display_color.h"
+#include "motonav/drivers/display_status.h"
 
 namespace motonav::drivers {
 struct DisplayConfig {
@@ -21,6 +22,7 @@ esp_err_t display_start();
 esp_err_t display_lock(int32_t timeout_ms = -1);
 void display_unlock();
 // Serializes with rendering and waits for actual DMA completion (0..100).
+// Returns the latched error after a hardware fault; see display_status().
 esp_err_t display_set_brightness(uint8_t percent);
 // Counts completed display frames, not UI timer ticks. Disabled by default.
 esp_err_t display_enable_fps(lv_display_t *display, bool enable);

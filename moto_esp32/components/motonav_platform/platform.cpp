@@ -4,10 +4,12 @@
 #include "esp_timer.h"
 #include "esp_app_desc.h"
 #include "esp_heap_caps.h"
+#include "esp_system.h"
 #include <cstdio>
 
 namespace motonav::drivers {
 esp_err_t platform_init() { return nvs_flash_init(); }
+[[noreturn]] void restart_device() { esp_restart(); }
 esp_err_t device_name(char *out, size_t capacity) {
     if (!out || capacity < 13) return ESP_ERR_INVALID_ARG;
     uint8_t mac[6];

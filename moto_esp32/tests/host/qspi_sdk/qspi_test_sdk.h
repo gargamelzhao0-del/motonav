@@ -7,11 +7,12 @@
 #include <cstdlib>
 using esp_err_t = int;
 constexpr int ESP_OK=0, ESP_FAIL=-1, ESP_ERR_INVALID_ARG=1, ESP_ERR_INVALID_STATE=2,
-    ESP_ERR_NO_MEM=3, ESP_ERR_NOT_SUPPORTED=4;
+    ESP_ERR_NO_MEM=3, ESP_ERR_NOT_SUPPORTED=4, ESP_ERR_TIMEOUT=5;
 #define ESP_RETURN_ON_ERROR(expr, ...) do { auto error=(expr); if(error!=ESP_OK) return error; } while(0)
 #define ESP_ERROR_CHECK(expr) assert((expr)==ESP_OK)
 #define ESP_LOGI(...) ((void)0)
 #define IRAM_ATTR
+#define pdMS_TO_TICKS(ms) (ms)
 #define portYIELD_FROM_ISR() fake_yield()
 constexpr int portMAX_DELAY=-1, MALLOC_CAP_INTERNAL=1, MALLOC_CAP_8BIT=2;
 void fake_yield();

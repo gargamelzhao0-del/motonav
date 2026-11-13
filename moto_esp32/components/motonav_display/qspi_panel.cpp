@@ -32,8 +32,8 @@ static_assert(std::is_standard_layout_v<QspiIo> && offsetof(QspiIo, base) == 0);
 esp_err_t IRAM_ATTR drain(QspiIo &io) {
     while (io.recycled < io.queued) {
         spi_transaction_t *completed = nullptr;
-        esp_err_t result = spi_device_get_trans_result(io.device, &completed, portMAX_DELAY);
-        if (result != ESP_OK) return result;
+        esp_err_t result = spi_device_get_trans_result(io.device, &completed, pdMS_TO_TICKS(250));
+        if (result != ESP_OK) { io.faulted = true; return result; }
         auto *expected = &io.color[io.recycled++].base;
         if (completed != expected) { io.faulted = true; return ESP_ERR_INVALID_STATE; }
     }
@@ -94,12 +94,17 @@ esp_err_t IRAM_ATTR write_color(esp_lcd_panel_io_t *base, int encoded, const voi
         transfer.base.length = count * 8;
         transfer.base.tx_buffer = static_cast<const uint8_t *>(pixels) + offset;
         transfer.base.user = last ? &io : nullptr;
-        result = spi_device_queue_trans(io.device, &transfer.base, portMAX_DELAY);
+        result = spi_device_queue_trans(io.device, &transfer.base, pdMS_TO_TICKS(250));
         if (result != ESP_OK) {
             // A partly submitted CS-held sequence cannot be safely resumed.
-            // Drain accepted jobs before returning buffer ownership; no fake
-            // completion. Latch the fault to prevent later panel commands.
-            if (io.queued) { io.faulted = true; ESP_ERROR_CHECK(drain(io)); }
+            // Try to drain accepted jobs without waiting forever. On failure,
+            // descriptors and pixels remain owned; the display adapter parks
+            // its renderer and the application supervisor handles restart.
+            if (io.queued) {
+                io.faulted = true;
+                const auto drained = drain(io);
+                if (drained != ESP_OK) result = drained;
+            }
             break;
         }
         ++io.queued;
