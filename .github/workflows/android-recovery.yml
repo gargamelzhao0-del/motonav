@@ -54,21 +54,38 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
-      - name: Build 1.75C navigation receiver
+      - name: Firmware dependency boundaries, protocol, sessions and raster checks
+        run: python3 moto_esp32/tests/run_host_tests.py
+      - name: Build production without tests and optional device benchmark
         uses: espressif/esp-idf-ci-action@v1
         with:
-          esp_idf_version: v5.5.1
+          esp_idf_version: v5.5.4
           target: esp32s3
           path: moto_esp32
-          command: idf.py build
+          # Match the measured local toolchain. Older resolver versions can
+          # introduce a second, newer LVGL while reconfiguring this lockfile.
+          command: >-
+            python -m pip install idf-component-manager==2.4.10 &&
+            idf.py reconfigure &&
+            test "$(cat managed_components/lvgl__lvgl/.component_hash)" = "184e532558c1c45fefed631f3e235423d22582aafb4630f3e8885c35281a49ae" &&
+            python tools/export_source.py dist/production-source &&
+            ln -s "$PWD/managed_components" dist/production-source/managed_components &&
+            idf.py -C dist/production-source build &&
+            python tools/verify_production.py dist/production-source/build &&
+            idf.py -DMOTONAV_DEVICE_TESTS=ON -DMOTONAV_AUTORUN_BENCH=ON build
+      - name: LVGL layouts, map animation and navigation takeover
+        run: |
+          cmake -S moto_esp32/tests/lvgl_host -B moto_esp32/build-host
+          cmake --build moto_esp32/build-host -j2
+          ctest --test-dir moto_esp32/build-host --output-on-failure
       - uses: actions/upload-artifact@v4
         with:
           name: motonav-175c-navigation-test
           path: |
-            moto_esp32/build/motonav.bin
-            moto_esp32/build/bootloader/bootloader.bin
-            moto_esp32/build/partition_table/partition-table.bin
-            moto_esp32/build/flash_args
-            moto_esp32/build/flasher_args.json
+            moto_esp32/dist/production-source/build/motonav.bin
+            moto_esp32/dist/production-source/build/bootloader/bootloader.bin
+            moto_esp32/dist/production-source/build/partition_table/partition-table.bin
+            moto_esp32/dist/production-source/build/flash_args
+            moto_esp32/dist/production-source/build/flasher_args.json
           if-no-files-found: error
           retention-days: 7
