@@ -1,6 +1,7 @@
 #include "motonav/drivers/display.h"
 #include "strip_stream.h"
 #include "qspi_panel.h"
+#include "pixel_pack.h"
 #include "bsp/esp-bsp.h"
 #include "esp_check.h"
 #include "esp_lcd_panel_ops.h"
@@ -23,6 +24,7 @@ struct PanelStream {
     volatile uint32_t completed_us = 0; // Published before the ISR gives done.
     DisplayMetrics metrics;
     size_t buffer_bytes = 0;
+    DisplayColor color = DisplayColor::Rgb332;
 };
 PanelStream panel_stream{};
 esp_err_t create_panel_on_ui_core(const bsp_display_config_t &config,
@@ -87,6 +89,16 @@ esp_err_t IRAM_ATTR draw_strip(lv_display_t *, esp_lcd_panel_handle_t, int x1, i
         x1 >= x2 || y1 >= y2 || ((x1 | y1 | x2 | y2) & 1) ||
         static_cast<size_t>(x2-x1) * (y2-y1) * 2 > stream.buffer_bytes)
         return ESP_ERR_INVALID_ARG;
+    size_t bytes = static_cast<size_t>(x2 - x1) * (y2 - y1) * 2;
+    if (stream.color == DisplayColor::Rgb332) {
+        const uint32_t begin = stream.metrics_enabled ? static_cast<uint32_t>(esp_timer_get_time()) : 0;
+        // LVGL owns this buffer and has finished drawing. The previous DMA
+        // was drained above; compact only this buffer before handing it to SPI.
+        bytes = PixelPack::rgb332(static_cast<uint8_t *>(const_cast<void *>(pixels)), bytes / 2);
+        if (!bytes) return ESP_ERR_INVALID_ARG;
+        if (stream.metrics_enabled)
+            stream.metrics.convert_us += static_cast<uint32_t>(esp_timer_get_time()) - begin;
+    }
     auto plan = stream.strips.begin(x1, y1, x2, y2);
     if (plan == StripStream::Start) {
         uint32_t begin = stream.metrics_enabled ? static_cast<uint32_t>(esp_timer_get_time()) : 0;
@@ -110,12 +122,12 @@ esp_err_t IRAM_ATTR draw_strip(lv_display_t *, esp_lcd_panel_handle_t, int x1, i
     int command = plan == StripStream::Continue ? 0x32003c00 : 0x32002c00;
     stream.pending = true;
     if (stream.metrics_enabled) stream.submitted_us = static_cast<uint32_t>(esp_timer_get_time());
-    esp_err_t result = esp_lcd_panel_io_tx_color(stream.io, command, pixels, (y2 - y1) * (x2 - x1) * 2);
+    esp_err_t result = esp_lcd_panel_io_tx_color(stream.io, command, pixels, bytes);
     if (result != ESP_OK) stream.pending = false;
     ESP_RETURN_ON_ERROR(result, "display", "pixels");
     if (stream.metrics_enabled) {
         stream.metrics.submit_us += static_cast<uint32_t>(esp_timer_get_time()) - stream.submitted_us;
-        stream.metrics.bytes += (y2 - y1) * (x2 - x1) * 2;
+        stream.metrics.bytes += bytes;
         ++stream.metrics.transfers;
     }
     stream.strips.submitted(y2);
@@ -138,6 +150,8 @@ esp_err_t display_init(lv_display_t **out, uint8_t brightness_percent) {
 esp_err_t display_init(lv_display_t **out, const DisplayConfig &options) {
     if (!out || options.brightness_percent > 100 || options.buffer_rows < 16 ||
         options.buffer_rows > 64 || options.buffer_rows % 2) return ESP_ERR_INVALID_ARG;
+    if ((options.color != DisplayColor::Rgb565 && options.color != DisplayColor::Rgb332) ||
+        (!options.direct_qspi && options.color != DisplayColor::Rgb565)) return ESP_ERR_INVALID_ARG;
     *out = nullptr;
     if (initialization_attempted) return ESP_ERR_INVALID_STATE;
     initialization_attempted = true;
@@ -153,11 +167,14 @@ esp_err_t display_init(lv_display_t **out, const DisplayConfig &options) {
     bsp_display_config_t hardware{};
     panel_stream.buffer_bytes = BSP_LCD_H_RES * options.buffer_rows * BSP_LCD_BITS_PER_PIXEL / 8;
     panel_stream.direct_qspi = options.direct_qspi;
+    panel_stream.color = options.color;
     // DMA descriptors only need to cover one owned draw buffer. Reserving a
     // full 466x466 frame here wastes internal RAM for transfers we never submit.
     hardware.max_transfer_sz = panel_stream.buffer_bytes;
     // Keep the vendor's reset sequence, panel commands and 40 MHz QSPI clock.
     ESP_RETURN_ON_ERROR(create_panel_on_ui_core(hardware, &panel, &io, options.direct_qspi), "display", "initialization");
+    if (options.color == DisplayColor::Rgb332)
+        ESP_RETURN_ON_ERROR(qspi_panel_set_color(io, options.color), "display", "color mode");
     esp_lv_adapter_display_config_t config{};
     config.panel = panel; config.panel_io = io;
     config.profile.interface = ESP_LV_ADAPTER_PANEL_IF_OTHER;
@@ -171,12 +188,13 @@ esp_err_t display_init(lv_display_t **out, const DisplayConfig &options) {
     config.tear_avoid_mode = ESP_LV_ADAPTER_TEAR_AVOID_MODE_NONE;
     auto *display = esp_lv_adapter_register_display(&config);
     ESP_RETURN_ON_ERROR(display ? ESP_OK : ESP_ERR_NO_MEM, "display", "initialization");
-    // Render in the panel's byte order. The adapter can submit these pixels
-    // directly, keeping conversion out of the interval after DMA completion.
+    // Application drawing stays in the same RGB565 byte order. RGB332 packing
+    // is a private driver step after rendering and before DMA submission.
     lv_display_set_color_format(display, LV_COLOR_FORMAT_RGB565_SWAPPED);
     ESP_LOGI("display", "double_buffer=%d color_format=%d buffer_rows=%u direct_qspi=%d bytes_per_buffer=%u",
         lv_display_is_double_buffered(display), lv_display_get_color_format(display), options.buffer_rows,
         panel_stream.direct_qspi, static_cast<unsigned>(panel_stream.buffer_bytes));
+    ESP_LOGI("display", "transport=%s", options.color == DisplayColor::Rgb332 ? "RGB332" : "RGB565");
     panel_stream.io = io;
     panel_stream.panel = panel;
     esp_lv_adapter_draw_bitmap_callbacks_t callbacks{};

@@ -1,6 +1,6 @@
 # MotoNav 1.75C 导航接收固件
 
-固件版本 **0.2.6**，配套支持 NAV3 的 Android 0.7.0 及以后版本，将真实转向、距离、预计时间及车速显示在 Waveshare ESP32-S3-Touch-AMOLED-1.75C 上。本地开发以 ESP-IDF 5.5.4、官方 BSP 3.0.0、LVGL 9.5.0 为基线，依赖版本由 `dependencies.lock` 记录。界面当前使用英文，支持左右转、斜转、急转、直行及保持左/右方向的箭头，其他转向以明确文字表示。
+固件版本 **0.2.7**，配套支持 NAV3 的 Android 0.7.0 及以后版本，将真实转向、距离、预计时间及车速显示在 Waveshare ESP32-S3-Touch-AMOLED-1.75C 上。本地开发以 ESP-IDF 5.5.4、官方 BSP 3.0.0、LVGL 9.5.0 为基线，依赖版本由 `dependencies.lock` 记录。界面当前使用英文，支持左右转、斜转、急转、直行及保持左/右方向的箭头，其他转向以明确文字表示。
 
 0.2.3 的 `ROUTE MAP / SIMULATED` 性能页使用 **466 × 466 全屏地图**，地图覆盖圆屏四周，文字卡片叠在地图上，用户已确认铺满且文字清楚。地图以面板字节序直接绘入内部 RAM 的 DMA 条带，保持完整分辨率，不再分配整幅地图 Canvas。动态刷新覆盖全部圆屏像素及 3 像素径向余量，只省去外框后方不可见的四角。此页不生成真实导航报文，也尚未接入手机路线。手机联调步骤见 [PHONE_INTEGRATION.md](PHONE_INTEGRATION.md)。
 
@@ -10,9 +10,9 @@
 
 0.2.6 根据分阶段测量优化 UI 合成：静态仪表背景预先转换为屏幕字节序并声明真实覆盖范围；实色背景的单行标签复用有界像素缓存，文字/样式变化时重新绘制。驱动接口、真实 DMA 完成计数、40 MHz QSPI、64 行双缓冲及完整圆屏地图均保持原有配置。实机数据和验证范围见 [HARDWARE_TEST_0.2.6.md](HARDWARE_TEST_0.2.6.md)。
 
-2026-11-13 进行了冲击 60 FPS 的差分刷新试验。像素差分最好为最低/平均 35/36 FPS，几何细分方案也有退化，因此均已撤回，保持已验收的 0.2.6。测量和取舍见 [60 FPS 试验记录](HARDWARE_TEST_60FPS_2026-11-13.md)，不能将尝试目标写成已达到的性能。
+0.2.7 在用户确认全屏地图“画面完整清楚，颜色可以接受”后采用 RGB332（256 色）传输，并使用 ESP32-S3 批量像素转换。应用继续调用同一显示接口，LVGL 与地图仍绘制 RGB565；压缩、寄存器和 DMA 由驱动管理。40 MHz 下全圆模拟地图最低/平均 **58/60 FPS**，局部仪表 **60/61**，强制整矩形重绘 **39/39**，各测量约 120.5 秒。最低未达到 60，不能称为稳定锁定 60。支持 `-ColorMode RGB565` 保留完整 16 位配色。详细范围、检查和交付镜像见 [0.2.7 实测记录](HARDWARE_TEST_0.2.7.md)。
 
-低色深试验的后续复核已修正独立彩条程序的 DMA 缓冲复用错误。用户确认 RGB565 与 RGB332（COLMOD `0x22`）彩条正常，16 色模式仍有数字/彩条错位。RGB332 独立地图原型加入 ESP32-S3 批量像素转换后，120.5 秒测量的传输完成计数达到最低/平均 **58/60 FPS**，但完整地图的实屏质量仍待确认，不能称为已验收的 60 FPS。COM21 暂留原型动画供观察；正式源码、安装包和已验收性能仍是 0.2.6 的 RGB565 地图 42/42 FPS。详见 [低色深复核与原型记录](HARDWARE_TEST_COLOR_MODES_2026-11-13.md)。
+本轮未采用像素/几何差分刷新和 16 色错位配置。原独立彩条程序的 DMA 缓冲复用错误已修正，RGB332 彩条与完整地图分别取得用户确认。历史试验与判定过程见 [差分刷新记录](HARDWARE_TEST_60FPS_2026-11-13.md) 和 [低色深复核记录](HARDWARE_TEST_COLOR_MODES_2026-11-13.md)。0.2.6 的原始镜像继续保留为回退版本。
 
 后续产品分工、原型地图移植、40 FPS 预算、共享协议及远程升级路线见 [PROJECT_ARCHITECTURE.md](PROJECT_ARCHITECTURE.md)。该文档为后续设计，不表示全部能力已实现。
 
@@ -24,7 +24,7 @@
 
 在 ESP-IDF 5.5 环境中进入本目录，执行 `idf.py set-target esp32s3` 和 `idf.py build`。依赖由 IDF Component Manager 下载。GitHub Actions 同时构建 Android APK 和本固件，产物分别为 `motonav-recovery-parking-test` 和 `motonav-175c-navigation-test`。
 
-本机 Windows 可执行 `pwsh -File tools/build.ps1`，参数支持另行指定 IDF 和 Python 环境。该脚本只编译，不访问串口或刷写。独立主机测试：`python tests/run_host_tests.py`，不需要手机、串口或 Android SDK。
+本机 Windows 可执行 `pwsh -File tools/build.ps1`，默认 RGB332 正常版；增加 `-ColorMode RGB565` 切回完整配色，`-LegacyQspi` 使用厂商 RGB565 IO。该脚本只编译，不访问串口或刷写，并显式关闭未请求的测试选项。独立主机测试：`python tests/run_host_tests.py`，不需要手机、串口或 Android SDK。
 
 `tests/lvgl_host` 可用 CMake 和桌面 C/C++ 编译器构建真实 LVGL 界面的离屏预览：先完成 IDF 配置下载依赖，再执行 `cmake -S tests/lvgl_host -B build-host`、`cmake --build build-host`，最后执行 `ctest --test-dir build-host --output-on-failure`；也可以运行 `ui_preview <输出目录>`。它验证状态布局以及有效导航自动打断性能页，不模拟硬件 FPS；输出 PPM 可转换为 PNG 查看。
 
@@ -36,7 +36,7 @@
 
 ## 40 FPS 的验证方式
 
-LVGL 刷新和界面服务周期为 16 ms，保留官方 BSP 的 QSPI 40 MHz，使用两块 64 行内部 RAM 绘制缓冲。LVGL 任务及 SPI 中断固定在 CPU1，NimBLE 固定在 CPU0；LVGL 软件绘制在适配器任务中同步执行。显示直接使用 `RGB565_SWAPPED`，DMA 完成回调保留适配器的帧计数，并通过信号量唤醒显示任务。静态仪表背景预先缓存；列范围相同、行连续的条带使用 CO5300 Memory Write Continue，窗口变化、间断或提交失败时重新设定地址。CPU 使用 32 KB 指令缓存及 64 KB 数据缓存。数字和转向只在内容变化时重绘，不能把静态页面的低刷新率解释为性能不足。
+LVGL 刷新和界面服务周期为 16 ms，QSPI 保持 40 MHz，使用两块 64 行内部 RAM 绘制缓冲。LVGL 任务及 SPI 中断固定在 CPU1，NimBLE 固定在 CPU0。LVGL 同步绘制 `RGB565_SWAPPED`，显示驱动在拥有的当前缓冲内压缩为 RGB332 后提交真实 DMA；选择 RGB565 时直接提交原像素。完成回调保留适配器帧计数并通过信号量唤醒显示任务。静态仪表背景预先缓存；列范围相同、行连续的条带使用 CO5300 Memory Write Continue，窗口变化、间断或提交失败时重设地址。CPU 使用 32 KB 指令缓存及 64 KB 数据缓存。数字和转向仅在内容变化时重绘，静态页低刷新率不表示性能不足。
 
 先用 `pwsh -File tools/build.ps1 -DeviceTests` 构建手动测试版，再在未显示有效导航时长按屏幕进入 `DISPLAY TEST / NOT NAVIGATION`；短按依次切换 `PARTIAL HUD`、`FULL FRAME`、`ROUTE MAP / SIMULATED`，长按返回。配对或有效导航到来会自动退出测试并释放地图缓冲。测试只改变本地显示，不生成 GPS、车速或导航报文。
 

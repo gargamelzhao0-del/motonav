@@ -7,6 +7,9 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#if MOTONAV_PREVIEW_RGB332
+#include "pixel_pack.h"
+#endif
 
 static motonav::ScreenSnapshot snapshot;
 static uint64_t clock_ms;
@@ -17,11 +20,35 @@ static uint64_t host_time_us() { return clock_ms * 1000; }
 void advance_host_clock(uint32_t milliseconds) { clock_ms += milliseconds; lv_tick_inc(milliseconds); }
 static void flush(lv_display_t *display, const lv_area_t *area, uint8_t *data) {
     auto input = reinterpret_cast<uint16_t *>(data);
+#if MOTONAV_PREVIEW_RGB332
+    const size_t count = lv_area_get_size(area);
+    std::array<uint8_t,466*64> expected;
+    if (count > expected.size()) std::abort();
+    for (size_t i=0; i<count; ++i) {
+        const uint16_t rgb = static_cast<uint16_t>((input[i] << 8) | (input[i] >> 8));
+        expected[i] = (rgb/2048/4)*32 + ((rgb/32)%64/8)*4 + (rgb%32/8);
+    }
+#if MOTONAV_PREVIEW_RGB332 == 1
+    if (motonav::drivers::PixelPack::rgb332(data,count) != count ||
+        std::memcmp(data,expected.data(),count)) std::abort();
+#endif
+    size_t index = 0;
+    for (int y=area->y1; y<=area->y2; ++y) for (int x=area->x1; x<=area->x2; ++x,++index) {
+#if MOTONAV_PREVIEW_RGB332 == 1
+        const uint8_t value = data[index];
+#else
+        const uint8_t value = expected[index];
+#endif
+        const unsigned r=(value>>5)*255/7, g=((value>>2)&7)*255/7, b=(value&3)*255/3;
+        pixels[y*466+x] = ((r>>3)<<11) | ((g>>2)<<5) | (b>>3);
+    }
+#else
     for (int y = area->y1; y <= area->y2; ++y)
         for (int x = area->x1; x <= area->x2; ++x) {
             uint16_t pixel = *input++;
             pixels[y * 466 + x] = static_cast<uint16_t>((pixel << 8) | (pixel >> 8));
         }
+#endif
     lv_display_flush_ready(display);
 }
 static void save(lv_display_t *display, const std::filesystem::path &path) {
@@ -107,6 +134,12 @@ int main(int argc, char **argv) {
     lv_display_set_color_format(display, LV_COLOR_FORMAT_RGB565_SWAPPED);
     lv_display_set_buffers(display, buffer.data(), nullptr, sizeof(buffer), LV_DISPLAY_RENDER_MODE_PARTIAL);
     lv_display_set_flush_cb(display, flush);
+#if MOTONAV_PREVIEW_RGB332
+    lv_display_add_event_cb(display, [](lv_event_t *event) {
+        auto *area = static_cast<lv_area_t *>(lv_event_get_param(event));
+        area->x1 &= ~1; area->y1 &= ~1; area->x2 |= 1; area->y2 |= 1;
+    }, LV_EVENT_INVALIDATE_AREA, nullptr);
+#endif
     motonav::SnapshotReader reader{[](void *) { return snapshot; }, nullptr};
     motonav::UiExtension extension;
 #if MOTONAV_DEVICE_TESTS
@@ -148,6 +181,16 @@ int main(int argc, char **argv) {
     require_label("ROUTE MAP / SIMULATED");
     clock_ms += 43000; lv_tick_inc(43000);
     save(display, directory / "automatic-finished.ppm");
+#if MOTONAV_HOLD_MAP_AFTER_BENCH
+    require_label("ROUTE MAP / SIMULATED");
+    const auto held_pixels = pixels;
+    clock_ms += 500; lv_tick_inc(500);
+    save(display, directory / "automatic-held-map.ppm");
+    require_label("ROUTE MAP / SIMULATED");
+    if (pixels == held_pixels) { std::cerr << "Held map stopped animating\n"; return 1; }
+    lv_obj_send_event(lv_screen_active(), LV_EVENT_LONG_PRESSED, nullptr);
+    save(display, directory / "automatic-held-exit.ppm");
+#endif
     require_label("CONNECT PHONE");
     std::cout << "PASS: map-only automatic test restores normal display\n";
 #endif

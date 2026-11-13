@@ -51,6 +51,7 @@ void profile(bool reset) {
         data.submit_us/n, data.transfer_us/n, data.wait_us/n);
     for (unsigned i=0;i<32;++i) if (task_calls[i])
         ESP_LOGI("draw_profile", "type=%u calls=%llu total_us=%llu frame_us=%llu", i, task_calls[i], task_us[i], task_us[i]/n);
+    ESP_LOGI("color_profile", "convert_us=%llu", data.convert_us/n);
 }
 }
 BenchmarkServices driver_benchmark_services(lv_display_t *display) {

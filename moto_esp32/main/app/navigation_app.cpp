@@ -9,6 +9,7 @@
 #if MOTONAV_DEVICE_TESTS
 #include "motonav/testing/display_benchmark.h"
 #include "motonav/testing/driver_probe.h"
+#include "motonav/testing/pixel_pack_check.h"
 #endif
 
 namespace motonav::app {
@@ -25,6 +26,13 @@ void run() {
     drivers::DisplayConfig display_config;
     display_config.buffer_rows = MOTONAV_DISPLAY_ROWS;
     display_config.direct_qspi = MOTONAV_DIRECT_QSPI;
+    display_config.color = MOTONAV_COLOR_RGB332 ? drivers::DisplayColor::Rgb332 : drivers::DisplayColor::Rgb565;
+#if MOTONAV_DEVICE_TESTS
+    if (display_config.color == drivers::DisplayColor::Rgb332 && !testing::check_pixel_pack()) {
+        ESP_LOGE("motonav", "RGB332 self-check failed; use RGB565 for this boot");
+        display_config.color = drivers::DisplayColor::Rgb565;
+    }
+#endif
     ESP_ERROR_CHECK(drivers::display_init(&display, display_config));
     ESP_ERROR_CHECK(drivers::touch_init(display));
     ESP_ERROR_CHECK(drivers::display_lock());
