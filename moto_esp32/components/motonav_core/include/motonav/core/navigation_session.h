@@ -28,6 +28,7 @@ public:
     }
     ScreenSnapshot snapshot(uint64_t now_ms) const {
         auto result = link_;
+        result.protocol = protocol_;
         const auto &receiver=protocol_==4?route_receiver_.navigation():receiver_;
         result.guidance = receiver.guidance(now_ms);
         result.handshaken = receiver.handshaken();

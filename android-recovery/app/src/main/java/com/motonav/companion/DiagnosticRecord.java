@@ -13,14 +13,14 @@ public final class DiagnosticRecord {
     public static final Set<String> TEXT = new HashSet<>(Arrays.asList(
         "owner", "reason", "state", "error_class", "manufacturer", "model", "version", "phase", "action"));
     public static final Set<String> NUMBERS = new HashSet<>(Arrays.asList(
-        "api", "version_code", "error", "source", "accuracy_m", "measurement_age_ms", "elapsed_age_ms",
+        "api", "version_code", "error", "source", "original_source", "accuracy_m", "measurement_age_ms", "elapsed_age_ms",
         "wall_age_ms", "callback_gap_ms", "observation_age_ms", "navigation_age_ms", "generation",
         "satellites", "gps_status", "trusted_level", "count", "route_age_ms", "moved_m", "icon",
         "fix_age_ms", "dropped", "queue", "line"));
     public static final Set<String> FLAGS = new HashSet<>(Arrays.asList(
         "fine", "coarse", "system_location", "foreground", "consent", "map_ready", "requested", "accepted",
         "eligible", "mock", "network", "wifi", "cellular", "vpn", "battery_saver", "idle",
-        "background_exempt", "navigating", "gps_weak", "destination", "selected", "route_valid"));
+        "background_exempt", "navigating", "gps_weak", "destination", "selected", "route_valid", "map_service", "map_rx", "map_tx"));
     private DiagnosticRecord() {}
 
     public static String line(String session, long sequence, long elapsed, String event, Object... fields) {

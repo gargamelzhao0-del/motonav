@@ -201,4 +201,11 @@ esp_err_t create_qspi_panel(size_t max_bytes, esp_lcd_panel_handle_t *panel, esp
     }
     return result;
 }
+esp_err_t qspi_panel_set_color(esp_lcd_panel_io_handle_t io, DisplayColor color) {
+    if (!io || (color != DisplayColor::Rgb565 && color != DisplayColor::Rgb332))
+        return ESP_ERR_INVALID_ARG;
+    // Matching VIPF/IFPF 0x22 passed the fixed-board color-bar and map checks.
+    const uint8_t format = color == DisplayColor::Rgb565 ? 0x55 : 0x22;
+    return esp_lcd_panel_io_tx_param(io, 0x02003a00, &format, 1);
+}
 } // namespace motonav::drivers

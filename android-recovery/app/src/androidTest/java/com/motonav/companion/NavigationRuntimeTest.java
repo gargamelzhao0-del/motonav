@@ -27,6 +27,33 @@ import static org.junit.Assert.*;
 /** Actual Android runtime and real SDK classes; online route entitlement is a separate phone test. */
 @RunWith(AndroidJUnit4.class)
 public class NavigationRuntimeTest {
+    @Test public void trustedStationaryNetworkUpdatesDoNotExpireOrBecomeGps() {
+        long start=SystemClock.elapsedRealtimeNanos(),wall=System.currentTimeMillis();
+        MapFixTracker<AMapLocation> fixes=new MapFixTracker<>();
+        for(int second=0;second<=30;second++) {
+            AMapLocation point=new AMapLocation("network");
+            point.setLatitude(39.989614);point.setLongitude(116.481763);point.setAccuracy(42);
+            point.setLocationType(AMapLocation.LOCATION_TYPE_SAME_REQ);
+            point.setTrustedLevel(AMapLocation.TRUSTED_LEVEL_HIGH);
+            point.setTime(wall+second*1000L);point.setElapsedRealtimeNanos(0);
+            AMapLocation copy=point.clone();
+            int source=AmapLocationSample.source(copy);
+            assertEquals(MapFixTracker.TRUSTED_NETWORK_RECHECK,source);
+            long now=start+second*1_000_000_000L;
+            long measured=MapStartupPolicy.fixTime(now,wall+second*1000L,copy.getElapsedRealtimeNanos(),copy.getTime());
+            assertTrue(fixes.offer(copy,measured,copy.getAccuracy(),source,true));
+            assertNotNull(fixes.navigation(now,true,true));
+            assertFalse("Network observations do not become SDK GPS measurements",new NaviFixTracker().offer(
+                    true,now,wall+second*1000L,1,copy.getTime(),copy.getLatitude(),copy.getLongitude(),42,0,0));
+        }
+        assertNull(fixes.navigation(start+46_000_000_000L,true,true));
+        AMapLocation stale=new AMapLocation("network");stale.setTime(wall);
+        assertEquals(0,MapStartupPolicy.fixTime(start+16_000_000_000L,wall+16000,0,stale.getTime()));
+        stale.setLocationType(AMapLocation.LOCATION_TYPE_FIX_CACHE);stale.setTrustedLevel(AMapLocation.TRUSTED_LEVEL_HIGH);
+        assertFalse(MapFixTracker.isLiveSource(AmapLocationSample.source(stale)));
+        stale.setLocationType(AMapLocation.LOCATION_TYPE_SAME_REQ);stale.setTrustedLevel(AMapLocation.TRUSTED_LEVEL_NORMAL);
+        assertFalse(MapFixTracker.isLiveSource(AmapLocationSample.source(stale)));
+    }
     @Test public void gpsContinuityAndAtomicDeviceRoute() throws Exception {
         NaviFixTracker tracker=new NaviFixTracker();
         long wall=System.currentTimeMillis(),now=SystemClock.elapsedRealtimeNanos();

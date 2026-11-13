@@ -1,0 +1,12 @@
+file(GLOB images "${ROOT}/preview-rgb332/*.ppm")
+if(NOT images)
+    message(FATAL_ERROR "Missing RGB332 previews")
+endif()
+foreach(image IN LISTS images)
+    get_filename_component(name "${image}" NAME)
+    execute_process(COMMAND "${CMAKE_COMMAND}" -E compare_files
+        "${image}" "${ROOT}/preview-rgb332-reference/${name}" RESULT_VARIABLE result)
+    if(NOT result EQUAL 0)
+        message(FATAL_ERROR "RGB332 differs from independent reference: ${name}")
+    endif()
+endforeach()

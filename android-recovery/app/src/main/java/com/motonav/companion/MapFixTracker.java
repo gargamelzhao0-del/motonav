@@ -7,6 +7,8 @@ public final class MapFixTracker<T> {
     public static final int CELL = 6;
     public static final int APPROXIMATE = 11;
     public static final int SYSTEM_NETWORK = 12;
+    /** App-normalized source, not an AMap or GPS source code. */
+    public static final int TRUSTED_NETWORK_RECHECK = 1002;
 
     public record Fix<T>(T point, long timeNanos, float accuracy, int source) {}
 
@@ -14,15 +16,18 @@ public final class MapFixTracker<T> {
     private Fix<T> navigation;
 
     public static int resolveSource(int source, int original, boolean highlyTrusted) {
-        // SAME_REQ (2) is also returned after a stationary sensor/network recheck.
-        // Cache-only, unknown-origin and low-trust results remain rejected. Measurement
-        // age is independently checked by fixTime; this never changes a timestamp.
-        return source == 2 && highlyTrusted && isLiveSource(original) ? original : source;
+        // AMap documents SAME_REQ as a network/sensor recheck when stationary.
+        // HIGH means surrounding observations are within 15s. Some callbacks omit
+        // realLocationType; keep these distinct from GPS and from cache-only results.
+        // Measurement age/order and accuracy are still checked by the caller.
+        if (source != 2 || !highlyTrusted) return source;
+        if (original == 0 || original == 2) return TRUSTED_NETWORK_RECHECK;
+        return isLiveSource(original) && original != TRUSTED_NETWORK_RECHECK ? original : source;
     }
 
     public static boolean isLiveSource(int source) {
         return switch (source) {
-            case SATELLITE, WIFI, CELL, APPROXIMATE, SYSTEM_NETWORK -> true;
+            case SATELLITE, WIFI, CELL, APPROXIMATE, SYSTEM_NETWORK, TRUSTED_NETWORK_RECHECK -> true;
             default -> false;
         };
     }

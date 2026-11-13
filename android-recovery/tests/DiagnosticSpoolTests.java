@@ -17,6 +17,9 @@ public class DiagnosticSpoolTests {
             spool.append(line(second,1),false);
             List<DiagnosticSpool.Entry> batch=spool.batch(24,32768);
             check(batch.size()==3); check(batch.get(0).sequence()==1); check(batch.get(2).sequence()==3);
+            check(spool.batch(second,24,32768).get(0).session().equals(second));
+            check(spool.size()==4); // Prioritize live diagnostics without discarding older sessions.
+            check(spool.batch("c".repeat(32),24,32768).get(0).session().equals(first));
             spool = new DiagnosticSpool(root.toFile());
             check(spool.size()==4); // A process exit never erased unacknowledged data.
             spool.acknowledge(first,2);

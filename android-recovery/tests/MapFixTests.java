@@ -45,7 +45,9 @@ public class MapFixTests {
         // A fresh, highly trusted stationary recheck retains its original source.
         check(MapFixTracker.resolveSource(2, MapFixTracker.WIFI, true) == MapFixTracker.WIFI);
         check(MapFixTracker.resolveSource(2, MapFixTracker.WIFI, false) == 2);
-        for (int unknown : new int[]{0, 2, 4, 8, 9, 99}) check(MapFixTracker.resolveSource(2, unknown, true) == 2);
+        for (int unknown : new int[]{4, 8, 9, 99}) check(MapFixTracker.resolveSource(2, unknown, true) == 2);
+        for (int missing : new int[]{0,2}) check(MapFixTracker.resolveSource(2,missing,true)==MapFixTracker.TRUSTED_NETWORK_RECHECK);
+        check(MapFixTracker.resolveSource(2,0,false)==2);
         check(MapFixTracker.resolveSource(4, MapFixTracker.WIFI, true) == 4);
         check(tracker.offer("stationary wifi", start, 25, MapFixTracker.resolveSource(2, MapFixTracker.WIFI, true), true));
         check(tracker.navigation(start + second, true, true) != null);
@@ -54,7 +56,21 @@ public class MapFixTests {
         tracker.clear();
         check(tracker.offer("stationary cell", start, 10, MapFixTracker.resolveSource(2, MapFixTracker.CELL, true), true));
         check(tracker.navigation(start, true, true) == null);
-        check(!tracker.offer("unknown stationary origin", start + second, 10, MapFixTracker.resolveSource(2, 0, true), true));
+        tracker.clear();
+        int recheck=MapFixTracker.resolveSource(2,0,true);
+        check(tracker.offer("stationary network",start,42,recheck,true));
+        check(!tracker.offer("duplicate recheck",start,42,recheck,true));
+        for(int i=1;i<=30;i++) {
+            check(tracker.offer("stationary network",start+i*second,42,recheck,true));
+            check(tracker.navigation(start+i*second,true,true)!=null);
+        }
+        check(tracker.navigation(start+46*second,true,true)==null);
+        tracker.clear();
+        check(tracker.offer("coarse network",start,550,recheck,true));
+        check(tracker.navigation(start,true,true)==null);
+        tracker.clear();
+        check(tracker.offer("permission limited",start,42,recheck,false));
+        check(tracker.navigation(start,true,true)==null);
         System.out.println("MapFix: "+count+" checks passed");
     }
 }

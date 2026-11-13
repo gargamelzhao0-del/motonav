@@ -31,14 +31,15 @@ with tempfile.TemporaryDirectory(prefix='motonav-firmware-tests-') as directory:
         route_fixture = output / 'nav4.frames'
         subprocess.run([str(java), '-cp', str(output), 'RouteProtocolTests', str(route_fixture)], check=True)
         assert route_fixture.read_bytes() == (root / 'tests/fixtures/nav4.frames').read_bytes(), 'Android NAV4 fixture changed'
-    for name in ['navigation_protocol_test', 'route_protocol_test', 'display_model_test', 'map_projection_test', 'map_raster_test', 'navigation_session_test', 'display_qspi_test']:
+    for name in ['navigation_protocol_test', 'route_protocol_test', 'display_model_test', 'map_projection_test', 'map_raster_test', 'navigation_session_test', 'display_qspi_test', 'pixel_pack_test', 'ble_channel_test']:
         executable = output / (name + ('.exe' if os.name == 'nt' else ''))
         subprocess.run([args.cxx, '-std=c++17', '-Wall', '-Wextra', '-Werror',
                         *[f'-I{path}' for path in [root / 'components/motonav_core/include',
                             root / 'components/motonav_graphics/include', root / 'components/motonav_display',
-                            root / 'components/motonav_graphics']],
+                            root / 'components/motonav_graphics', root / 'components/motonav_display/include']],
                         *([f'-I{root / "tests/host/qspi_sdk"}'] if name == 'display_qspi_test' else []),
                         str(root / 'tests/host' / (name + '.cpp')),
                         *([str(root / 'components/motonav_display/qspi_panel.cpp')] if name == 'display_qspi_test' else []),
+                        *([str(root / 'components/motonav_display/pixel_pack.cpp')] if name == 'pixel_pack_test' else []),
                         '-o', str(executable)], check=True)
         subprocess.run([str(executable), *([str(fixture)] if name == 'navigation_protocol_test' else [str(route_fixture)] if name == 'route_protocol_test' else [])], check=True)

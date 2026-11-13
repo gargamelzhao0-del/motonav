@@ -15,8 +15,8 @@ import time
 
 EVENTS = set('session_start session_stop user_mark environment lifecycle location_start location_stop location_callback location_decision location_state location_retry location_exception route_action route_result search_result navigation_state ble_state java_crash'.split())
 TEXT = set('owner reason state error_class manufacturer model version phase action'.split())
-NUMBERS = set('api version_code error source accuracy_m measurement_age_ms elapsed_age_ms wall_age_ms callback_gap_ms observation_age_ms navigation_age_ms generation satellites gps_status trusted_level count route_age_ms moved_m icon fix_age_ms dropped queue line'.split())
-FLAGS = set('fine coarse system_location foreground consent map_ready requested accepted eligible mock network wifi cellular vpn battery_saver idle background_exempt navigating gps_weak destination selected route_valid'.split())
+NUMBERS = set('api version_code error source original_source accuracy_m measurement_age_ms elapsed_age_ms wall_age_ms callback_gap_ms observation_age_ms navigation_age_ms generation satellites gps_status trusted_level count route_age_ms moved_m icon fix_age_ms dropped queue line'.split())
+FLAGS = set('fine coarse system_location foreground consent map_ready requested accepted eligible mock network wifi cellular vpn battery_saver idle background_exempt navigating gps_weak destination selected route_valid map_service map_rx map_tx'.split())
 REQUIRED = {'schema', 'session', 'seq', 'at_ms', 'event'}
 MAX_BODY = 32768
 MAX_STORAGE = 20 * 1024 * 1024

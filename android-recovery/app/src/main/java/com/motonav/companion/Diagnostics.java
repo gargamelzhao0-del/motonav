@@ -24,7 +24,10 @@ import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.Callable;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.FutureTask;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ThreadPoolExecutor;
@@ -34,20 +37,26 @@ import org.json.JSONObject;
 
 /** Explicit, expiring diagnosis sessions. No coordinates, SDK messages, keys or stable device IDs. */
 final class Diagnostics {
-    private static final Object LOCK = new Object(), FILE_LOCK = new Object();
+    private static final Object LOCK = new Object();
     private static volatile long sessionLimitMs = 60 * 60 * 1000L;
     private static final int FILE_BYTES = 512 * 1024;
     private static final Handler main = new Handler(Looper.getMainLooper());
+    private static volatile Thread writerThread;
     private static final ThreadPoolExecutor writer = new ThreadPoolExecutor(1, 1, 0, TimeUnit.SECONDS,
-        new ArrayBlockingQueue<>(256), task -> new Thread(task, "motonav-diagnostic-file"),
+        new ArrayBlockingQueue<>(256), task -> { writerThread=new Thread(task, "motonav-diagnostic-file");return writerThread; },
+        new ThreadPoolExecutor.AbortPolicy());
+    private static final ThreadPoolExecutor closer = new ThreadPoolExecutor(1, 1, 0, TimeUnit.SECONDS,
+        new ArrayBlockingQueue<>(1), task -> new Thread(task, "motonav-diagnostic-close"),
         new ThreadPoolExecutor.AbortPolicy());
     private static final ScheduledExecutorService sender = Executors.newSingleThreadScheduledExecutor(
         task -> new Thread(task, "motonav-diagnostic-upload"));
     private static volatile DiagnosticSpool spool;
+    private static volatile int pendingCount, persistedDropped;
     private static Context context;
     private static File directory;
     private static boolean enabled, uploadEligible;
     private static volatile boolean storageFailed;
+    private static volatile String storageFailureClass = "";
     private static String session = "", transportState = "未连接";
     private static long started, sequence, lastDelivered, nextAttempt;
     private static int dropped, failures;
@@ -90,7 +99,7 @@ final class Diagnostics {
             session = UUID.randomUUID().toString().replace("-", "");
             sequence = 0; started = SystemClock.elapsedRealtime(); lastDelivered = 0;
             dropped = 0; failures = 0; nextAttempt = 0; endpoint = destination;
-            transportState = destination == null ? "仅本地记录" : "正在连接";
+            transportState = destination == null ? "仅本地记录" : "正在准备日志队列";
             enabled = true; uploadEligible = destination != null;
         }
         record("session_start", "version", BuildConfig.VERSION_NAME, "version_code", BuildConfig.VERSION_CODE,
@@ -102,64 +111,92 @@ final class Diagnostics {
     }
 
     static void stop() {
-        emit(true, "session_stop", "reason", "user_or_expiry");
+        HttpsURLConnection previous;
         synchronized (LOCK) {
+            emit(false, "session_stop", "reason", "user_or_expiry");
             enabled = false; endpoint = null; uploadEligible = false;
             if (pump != null) { pump.cancel(false); pump = null; }
-            if (connection != null) connection.disconnect();
-            connection = null;
+            previous = connection; connection = null;
         }
+        // Android's HTTP implementation may wait for an in-flight TLS operation.
+        // Never disconnect a socket on the UI thread or while holding LOCK.
+        if (previous != null) try { closer.execute(previous::disconnect); }
+        catch (java.util.concurrent.RejectedExecutionException ignored) { /* uploader also closes in finally */ }
         main.removeCallbacks(heartbeat);
     }
     static boolean active() { synchronized (LOCK) { return enabled; } }
     static void record(String event, Object... fields) { emit(false, event, fields); }
     private static void emit(boolean immediate, String event, Object... fields) {
-        String line;
+        FutureTask<Void> saved;
         synchronized (LOCK) {
             if (!enabled || (SystemClock.elapsedRealtime() - started >= sessionLimitMs && !event.equals("session_stop"))) return;
+            final String line;
             try { line = DiagnosticRecord.line(session, ++sequence, SystemClock.elapsedRealtime() - started, event, fields); }
             catch (RuntimeException ignored) { return; }
-            // Persist in sequence order before the sender can observe the event, including crashes/stops.
-            if (uploadEligible) try { outbox().append(line, immediate); }
-            catch (java.io.IOException e) { storageFailed = true; }
+            final boolean remote = uploadEligible;
+            // Serialize submissions, not disk access. Only this worker owns the
+            // journal, including recovery, appends, upload batches and ACK writes.
+            saved = new FutureTask<>(() -> {
+                if (remote) try { outbox().append(line, immediate); refreshCounts(); }
+                catch (java.io.IOException | RuntimeException | LinkageError e) { storageFailure(e); }
+                append(line, immediate);
+                return null;
+            });
+            try { writer.execute(saved); }
+            catch (java.util.concurrent.RejectedExecutionException ignored) { dropped++;return; }
+            Log.i("MotoNavDiag", line);
         }
-        Log.i("MotoNavDiag", line);
-        if (immediate) append(line, true);
-        else try { writer.execute(() -> append(line, false)); }
-        catch (java.util.concurrent.RejectedExecutionException ignored) { storageFailed = true; }
+        // Crash-only best effort, bounded even when storage is stuck. Normal
+        // start/stop/record/status paths never wait for a file or network worker.
+        if (immediate && Thread.currentThread() != writerThread)
+            try { saved.get(250, TimeUnit.MILLISECONDS); }
+            catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); }
+            catch (Exception ignored) { }
     }
     private static DiagnosticSpool outbox() throws java.io.IOException {
-        synchronized (FILE_LOCK) {
-            if (spool == null) spool = new DiagnosticSpool(directory);
-            return spool;
-        }
+        if (spool == null) { spool = new DiagnosticSpool(directory); refreshCounts(); }
+        return spool;
+    }
+    private static void storageFailure(Throwable failure) {
+        // FutureTask captures class-initialization errors as well as exceptions.
+        // Surface a bounded class name, never exception messages, paths or credentials.
+        Throwable cause = failure.getCause();
+        storageFailureClass = (cause == null ? failure : cause).getClass().getSimpleName();
+        storageFailed = true;
+    }
+    private static void refreshCounts() {
+        pendingCount = spool.size(); persistedDropped = spool.dropped();
+    }
+    private static <T> T onWriter(Callable<T> action) throws Exception {
+        Future<T> result = writer.submit(action);
+        try { return result.get(5, TimeUnit.SECONDS); }
+        catch (InterruptedException interrupted) { result.cancel(false);Thread.currentThread().interrupt();throw interrupted; }
+        catch (Exception failure) { result.cancel(false);throw failure; }
     }
     private static void append(String line, boolean sync) {
-        synchronized (FILE_LOCK) {
-            try {
-                if (!directory.isDirectory() && !directory.mkdirs()) throw new java.io.IOException();
-                File current = new File(directory, "current.jsonl"), previous = new File(directory, "previous.jsonl");
-                byte[] bytes = (line + "\n").getBytes(StandardCharsets.UTF_8);
-                if (current.length() + bytes.length > FILE_BYTES) {
-                    if (previous.exists() && !previous.delete()) throw new java.io.IOException();
-                    if (!current.renameTo(previous)) throw new java.io.IOException();
-                }
-                try (FileOutputStream output = new FileOutputStream(current, true)) { output.write(bytes); }
-            } catch (Exception ignored) { storageFailed = true; }
-        }
+        try {
+            if (!directory.isDirectory() && !directory.mkdirs()) throw new java.io.IOException();
+            File current = new File(directory, "current.jsonl"), previous = new File(directory, "previous.jsonl");
+            byte[] bytes = (line + "\n").getBytes(StandardCharsets.UTF_8);
+            if (current.length() + bytes.length > FILE_BYTES) {
+                if (previous.exists() && !previous.delete()) throw new java.io.IOException();
+                if (!current.renameTo(previous)) throw new java.io.IOException();
+            }
+            try (FileOutputStream output = new FileOutputStream(current, true)) {
+                output.write(bytes); if (sync) output.getFD().sync();
+            }
+        } catch (Exception failure) { storageFailure(failure); }
     }
     static void export(OutputStream output, java.util.function.Consumer<Boolean> completed) {
         try { writer.execute(() -> {
             boolean success = false;
             try (OutputStream destination = output) {
-                synchronized (FILE_LOCK) {
-                    for (String name : new String[]{"previous.jsonl", "current.jsonl"}) {
-                        File file = new File(directory, name);
-                        if (!file.isFile()) continue;
-                        try (InputStream input = new FileInputStream(file)) {
-                            byte[] buffer = new byte[8192]; int count;
-                            while ((count = input.read(buffer)) != -1) destination.write(buffer, 0, count);
-                        }
+                for (String name : new String[]{"previous.jsonl", "current.jsonl"}) {
+                    File file = new File(directory, name);
+                    if (!file.isFile()) continue;
+                    try (InputStream input = new FileInputStream(file)) {
+                        byte[] buffer = new byte[8192]; int count;
+                        while ((count = input.read(buffer)) != -1) destination.write(buffer, 0, count);
                     }
                 }
                 success = true;
@@ -174,10 +211,10 @@ final class Diagnostics {
         synchronized (LOCK) {
             String state = enabled ? "诊断记录中 · 剩余 " + Math.max(0, (sessionLimitMs - (SystemClock.elapsedRealtime() - started)) / 60000) + " 分钟"
                 : "诊断已停止；现有本地记录仍可导出";
-            if (enabled) state += "\n" + transportState + " · 待发送 " + (spool == null ? 0 : spool.size()) + " 条 · 丢弃 " + (dropped + (spool == null ? 0 : spool.dropped())) + " 条";
+            if (enabled) state += "\n" + transportState + " · 待发送 " + pendingCount + " 条 · 丢弃 " + (dropped + persistedDropped) + " 条";
             if (enabled && lastDelivered > 0) state += "\n最近上传确认：" + (SystemClock.elapsedRealtime() - lastDelivered) / 1000 + " 秒前";
             if (enabled && endpoint != null) state += "\n接收端：" + endpoint.host;
-            return state + (storageFailed ? "\n本地写入失败，请保留远程接收记录" : "");
+            return state + (storageFailed ? "\n日志存储异常（" + storageFailureClass + "）" : "");
         }
     }
 
@@ -188,8 +225,16 @@ final class Diagnostics {
             if (SystemClock.elapsedRealtime() - started >= sessionLimitMs) { main.post(Diagnostics::stop); return; }
             target = endpoint; currentSession = session;
         }
-        try { batch = outbox().batch(24, 32768); }
-        catch (java.io.IOException e) { storageFailed = true; return; }
+        try { batch = onWriter(() -> outbox().batch(currentSession, 24, 32768)); }
+        catch (Exception e) {
+            if (!(e instanceof java.util.concurrent.TimeoutException)
+                    && !(e instanceof java.util.concurrent.RejectedExecutionException)) storageFailure(e);
+            synchronized (LOCK) {
+                if (enabled && endpoint == target && session.equals(currentSession))
+                    transportState = "日志队列暂不可用，尚未上传；正在重试";
+            }
+            return;
+        }
 
         if (batch.isEmpty()) return;
         HttpsURLConnection request = null; int responseCode = -1;
@@ -205,6 +250,7 @@ final class Diagnostics {
             synchronized (LOCK) {
                 if (!enabled || endpoint != target || !session.equals(currentSession)) return;
                 connection = request;
+                transportState = "正在连接接收端";
             }
             try (OutputStream output = request.getOutputStream()) { output.write(bytes); }
             responseCode = request.getResponseCode();
@@ -221,7 +267,10 @@ final class Diagnostics {
             if (new JSONObject(result.toString("UTF-8")).getLong("last_seq") != last) throw new java.io.IOException();
             synchronized (LOCK) {
                 if (!enabled || endpoint != target || !session.equals(currentSession)) return;
-                outbox().acknowledge(batch.get(0).session(), last);
+            }
+            onWriter(() -> { outbox().acknowledge(batch.get(0).session(), last); refreshCounts(); return null; });
+            synchronized (LOCK) {
+                if (!enabled || endpoint != target || !session.equals(currentSession)) return;
                 failures = 0; nextAttempt = 0; lastDelivered = SystemClock.elapsedRealtime(); transportState = "远程接收已确认";
             }
         } catch (Exception ignored) {
@@ -266,6 +315,7 @@ final class Diagnostics {
         if (value == null) { record("location_callback", "owner", owner, "reason", "null", "callback_gap_ms", gap, "generation", generation); return; }
         long now = SystemClock.elapsedRealtimeNanos();
         record("location_callback", "owner", owner, "error", value.getErrorCode(), "source", value.getLocationType(),
+            "original_source", AmapLocationSample.originalSource(value),
             "reason", MapStartupPolicy.epochBasedElapsed(now,value.getElapsedRealtimeNanos(),value.getTime()) ? "epoch_elapsed"
                 : value.getElapsedRealtimeNanos()<=0 ? "wall_fallback" : value.getElapsedRealtimeNanos()>now ? "future_elapsed" : "monotonic",
             "accuracy_m", value.getAccuracy(), "elapsed_age_ms", DiagnosticRecord.age(now, value.getElapsedRealtimeNanos()),

@@ -122,6 +122,17 @@ int main() {
     assert(commands[10].opcode==2 && commands[10].address==0x2a00);
     assert(commands[10].data==std::vector<uint8_t>({0,6,1,0xd7}));
     assert(commands[12].address==0x1100 && commands[12].data.empty());
+    using motonav::drivers::DisplayColor;
+    using motonav::drivers::qspi_panel_set_color;
+    assert(qspi_panel_set_color(nullptr, DisplayColor::Rgb332)==ESP_ERR_INVALID_ARG);
+    const auto command_count = commands.size();
+    assert(qspi_panel_set_color(io, static_cast<DisplayColor>(99))==ESP_ERR_INVALID_ARG);
+    assert(commands.size()==command_count);
+    assert(qspi_panel_set_color(io, DisplayColor::Rgb332)==ESP_OK);
+    assert(commands.back().opcode==2 && commands.back().address==0x3a00 &&
+           commands.back().data==std::vector<uint8_t>({0x22}));
+    assert(qspi_panel_set_color(io, DisplayColor::Rgb565)==ESP_OK);
+    assert(commands.back().data==std::vector<uint8_t>({0x55}));
     int context=42;
     esp_lcd_panel_io_callbacks_t events{[](esp_lcd_panel_io_handle_t, esp_lcd_panel_io_event_data_t *, void *value) {
         assert(*static_cast<int *>(value)==42); ++callbacks; return true;
@@ -166,6 +177,7 @@ int main() {
     assert(queued.empty() && callbacks==before && !acquired);
     assert(io->tx_color(io,0x32002c00,pixels,64)==ESP_ERR_INVALID_STATE);
     assert(io->tx_param(io,0x02005100,&brightness,1)==ESP_ERR_INVALID_STATE);
+    assert(qspi_panel_set_color(io, DisplayColor::Rgb332)==ESP_ERR_INVALID_STATE);
     assert(esp_lcd_panel_del(panel)==ESP_OK && io->del(io)==ESP_OK);
     assert(spi_bus_free(BSP_LCD_SPI_NUM)==ESP_OK && !allocated && !buses);
     std::cout << "PASS: real QSPI implementation, command framing, DMA ownership, callbacks, errors and cleanup\n";
