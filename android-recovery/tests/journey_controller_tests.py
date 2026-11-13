@@ -20,13 +20,13 @@ public class AlertDialog implements android.content.DialogInterface {
 }''',
     "android/graphics/Bitmap.java": 'package android.graphics; public class Bitmap {}',
     "android/widget/EditText.java": 'package android.widget; public class EditText {public EditText(android.app.Activity a){} public void setHint(String s){} public void setSingleLine(boolean b){} public void setSaveEnabled(boolean b){} public String getText(){return "";}}',
-    "android/os/Looper.java": 'package android.os; public class Looper {public static Looper getMainLooper(){return new Looper();}}',
+    "android/os/Looper.java": 'package android.os; public class Looper {public static boolean background;private static final Looper MAIN=new Looper();public static Looper getMainLooper(){return MAIN;}public static Looper myLooper(){return background?null:MAIN;}}',
     "android/os/SystemClock.java": 'package android.os; public class SystemClock {public static long now=100000; public static long elapsedRealtime(){return now;} public static long elapsedRealtimeNanos(){return now*1000000;}}',
     "android/os/Handler.java": '''package android.os;
 public class Handler {
  record Task(Handler owner,Runnable run,long at,long seq){}
  static final java.util.List<Task> tasks=new java.util.ArrayList<>(); static long sequence;
- public Handler(Looper l){} public void postDelayed(Runnable r,long delay){tasks.add(new Task(this,r,SystemClock.now+delay,sequence++));}
+ public Handler(Looper l){} public Looper getLooper(){return Looper.getMainLooper();} public void post(Runnable r){postDelayed(r,0);} public void postDelayed(Runnable r,long delay){tasks.add(new Task(this,r,SystemClock.now+delay,sequence++));}
  public void removeCallbacks(Runnable r){tasks.removeIf(t->t.owner==this&&t.run==r);}
  public void removeCallbacksAndMessages(Object o){tasks.removeIf(t->t.owner==this);}
  public static void reset(){tasks.clear();SystemClock.now=100000;}

@@ -228,6 +228,15 @@ public class JourneyControllerTests {
         }
     }
     static void separateGuidanceStreams() throws Exception {
+        try (Fixture f=new Fixture()) {
+            AMapNavi previous=f.navigate();
+            android.os.Looper.background=true;
+            previous.listener.onLocationChange(new AMapNaviLocation());
+            android.os.Looper.background=false;
+            f.controller.end();f.host.fixAt(30.01);
+            AMapNavi next=f.navigate();Handler.advance(0);
+            check(next!=previous && f.controller.guidanceFix().getLatitude()==30.01,"queued GPS callback from an ended engine cannot enter the replacement journey");
+        }
         try (Fixture f = new Fixture()) {
             AMapNavi engine = f.navigate();
             engine.listener.onNaviInfoUpdate(new NaviInfo());

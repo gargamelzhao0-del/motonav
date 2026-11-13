@@ -364,18 +364,25 @@ final class JourneyController {
                     report(JourneyState.maneuver(info.getIconType())+" · 剩余"+Math.max(0,info.getPathRetainDistance())+"米 / "+Math.max(0,info.getPathRetainTime()/60)+"分钟\n下一路段："+safeName(info.getNextRoadName())+" · 距当前段末"+Math.max(0,info.getCurStepRetainDistance())+"米");
                 }
                 @Override public void onLocationChange(AMapNaviLocation location) {
-                    if (!active() || engine != navi || !state.active(token) || location == null) return;
+                    if (location == null) return;
                     Long measured = location.getTime();
                     NaviLatLng coordinate = location.getCoord();
-                    boolean accepted = coordinate != null && sdkFixes.offer(state.phase() == JourneyState.Phase.NAVIGATING,
-                            SystemClock.elapsedRealtimeNanos(),System.currentTimeMillis(), location.getLocationType(),
-                            measured == null ? 0 : measured, coordinate.getLatitude(), coordinate.getLongitude(),
-                            location.getAccuracy(), location.getSpeed(), location.getBearing());
-                    NaviFixTracker.Fix current = sdkFixes.current(SystemClock.elapsedRealtimeNanos());
-                    lastSdkFixNanos = current == null ? 0 : current.timeNanos();
-                    Diagnostics.record("navigation_state", "state", "sdk_position", "source", location.getLocationType(),
-                            "accuracy_m", location.getAccuracy(), "route_valid", location.isMatchNaviPath(), "accepted", accepted,
-                            "measurement_age_ms", DiagnosticRecord.age(SystemClock.elapsedRealtimeNanos(),lastSdkFixNanos));
+                    double latitude=coordinate==null?Double.NaN:coordinate.getLatitude(),longitude=coordinate==null?Double.NaN:coordinate.getLongitude();
+                    int source=location.getLocationType();
+                    float accuracy=location.getAccuracy(),speed=location.getSpeed(),bearing=location.getBearing();
+                    boolean matched=location.isMatchNaviPath();
+                    Runnable receive=() -> {
+                        if (!active() || engine != navi || !state.active(token)) return;
+                        boolean accepted = sdkFixes.offer(state.phase() == JourneyState.Phase.NAVIGATING,
+                                SystemClock.elapsedRealtimeNanos(),System.currentTimeMillis(),source,
+                                measured == null ? 0 : measured,latitude,longitude,accuracy,speed,bearing);
+                        NaviFixTracker.Fix current = sdkFixes.current(SystemClock.elapsedRealtimeNanos());
+                        lastSdkFixNanos = current == null ? 0 : current.timeNanos();
+                        Diagnostics.record("navigation_state", "state", "sdk_position", "source",source,
+                                "accuracy_m",accuracy,"route_valid",matched,"accepted",accepted,
+                                "measurement_age_ms",DiagnosticRecord.age(SystemClock.elapsedRealtimeNanos(),lastSdkFixNanos));
+                    };
+                    if(Looper.myLooper()==handler.getLooper())receive.run();else handler.post(receive);
                 }
                 @Override public void onStopNavi(){if(active()&&engine==navi&&state.active(token))stop("SDK已结束导航。");}
                 @Override public void onArriveDestination(){if(active()&&engine==navi&&state.active(token))stop("已到达目的地。", NavigationFrame.ARRIVED);}
