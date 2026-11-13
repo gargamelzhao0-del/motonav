@@ -27,6 +27,24 @@ import static org.junit.Assert.*;
 /** Actual Android runtime and real SDK classes; online route entitlement is a separate phone test. */
 @RunWith(AndroidJUnit4.class)
 public class NavigationRuntimeTest {
+    @Test public void gpsContinuityAndAtomicDeviceRoute() throws Exception {
+        NaviFixTracker tracker=new NaviFixTracker();
+        long wall=System.currentTimeMillis(),now=SystemClock.elapsedRealtimeNanos();
+        assertTrue(tracker.offer(true,now,wall,0,wall,39.982,116.48,8,36,90));
+        assertFalse(tracker.offer(true,now+1000000000L,wall+1000,0,wall,39.982,116.48,8,36,90));
+        assertNull(tracker.current(now+15000000001L));
+        assertTrue(tracker.offer(true,now+16000000000L,wall+16000,0,wall+16000,39.982,116.48,8,36,90));
+        DeviceRoute route=new DeviceRoute();
+        route.replace(java.util.List.of(new DeviceRoute.Coordinate(39.98,116.48),new DeviceRoute.Coordinate(39.983,116.48),new DeviceRoute.Coordinate(39.983,116.484)));
+        DeviceRoute.Frame map=route.frame(39.982,116.48,90); assertNotNull(map);
+        RouteProtocol protocol=new RouteProtocol(17); protocol.hello();
+        long ms=now/1000000;
+        byte[] bytes=protocol.snapshot(new NavigationFrame(2,3,120,4000,360,36,ms,ms),map,ms).bytes();
+        assertEquals(48+4*map.points().size(),bytes.length);
+        java.util.zip.CRC32 crc=new java.util.zip.CRC32(); crc.update(bytes,0,bytes.length-4);
+        assertEquals(crc.getValue(),Integer.toUnsignedLong(java.nio.ByteBuffer.wrap(bytes).order(java.nio.ByteOrder.LITTLE_ENDIAN).getInt(bytes.length-4)));
+        writeEvidence("nav4-runtime.txt","Android runtime: duplicate SDK timestamp rejected, source expiry and recovery passed. NAV4 route projection, bounded frame and CRC passed. Deterministic inputs; no physical BLE or online routing claim.\n");
+    }
     @Before public void requireDisposableEmulator() {
         assertTrue("These tests must run only on a disposable Android AVD",
             android.os.Build.HARDWARE.contains("ranchu") || android.os.Build.HARDWARE.contains("goldfish"));

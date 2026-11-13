@@ -72,9 +72,11 @@ final class JourneyController {
     private boolean voicePlaying;
     private long lastInstructionReceivedMs = -1, lastSdkFixNanos;
     private GuidanceHealth.Reason lastWaitingReason;
+    private final NaviFixTracker sdkFixes = new NaviFixTracker();
     private final java.util.LinkedHashSet<Integer> settledRouteRequests = new java.util.LinkedHashSet<>();
     private Runnable pendingLocation;
     private final List<LatLng> routePoints = new ArrayList<>();
+    private final DeviceRoute deviceRoute = new DeviceRoute();
     private String message = "普通驾车导航 · 输入目的地后点击开始。";
     private android.graphics.Bitmap turnBitmap;
     private NavigationFrame frame = NavigationFrame.status(NavigationFrame.STOPPED);
@@ -105,6 +107,11 @@ final class JourneyController {
         ui = null; map = null; activity = null;
     }
     NavigationFrame frame() { return frame.at(SystemClock.elapsedRealtime()); }
+    DeviceRoute.Frame deviceMap() {
+        if(frame().mode()!=NavigationFrame.LIVE)return null;
+        Location fix=guidanceFix();
+        return fix==null?null:deviceRoute.frame(fix.getLatitude(),fix.getLongitude(),fix.hasBearing()?fix.getBearing():Float.NaN);
+    }
     boolean canRequestStart() { return destination != null && state.phase() == JourneyState.Phase.IDLE; }
     String actionLabel() {
         return switch (state.phase()) {
@@ -123,13 +130,32 @@ final class JourneyController {
     private boolean usableFix() { return trustedFixTime() > 0; }
 
     private long trustedFixTime() {
+        Location fix = guidanceFix();
+        return fix == null ? 0 : fix.getElapsedRealtimeNanos();
+    }
+
+    /** During GPS navigation the navigation engine is also a first-class location source. */
+    Location guidanceFix() {
+        if (!active() || !host.navigationAllowed() || gpsWeak) return null;
+        NaviFixTracker.Fix sdk = state.phase() == JourneyState.Phase.NAVIGATING
+                ? sdkFixes.current(SystemClock.elapsedRealtimeNanos()) : null;
+        if (sdk != null) {
+            Location fix = new Location("amap_navigation_gps");
+            fix.setLatitude(sdk.latitude()); fix.setLongitude(sdk.longitude());
+            fix.setAccuracy(sdk.accuracy()); fix.setTime(sdk.wallMillis());
+            fix.setElapsedRealtimeNanos(sdk.timeNanos());
+            if (sdk.speedKmh() >= 0) fix.setSpeed(sdk.speedKmh()/3.6f);
+            if (Float.isFinite(sdk.bearing())) fix.setBearing(sdk.bearing());
+            return fix;
+        }
         Location fix = host.fix();
-        if (fix == null || !JourneyState.coordinate(fix.getLatitude(), fix.getLongitude())) return 0;
+        if (fix == null || !JourneyState.coordinate(fix.getLatitude(), fix.getLongitude())) return null;
         long time = host.fixNanos();
-        return JourneyState.usableFix(
+        if (!JourneyState.usableFix(
                 context.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED,
                 fix.isFromMockProvider(), fix.hasAccuracy() ? fix.getAccuracy() : Float.NaN,
-                SystemClock.elapsedRealtimeNanos(), time) ? time : 0;
+                SystemClock.elapsedRealtimeNanos(), time)) return null;
+        Location copy = new Location(fix); copy.setElapsedRealtimeNanos(time); return copy;
     }
 
     private boolean guidanceReady(boolean newInstruction) {
@@ -324,12 +350,13 @@ final class JourneyController {
                     if (info.getNaviType() != NaviType.GPS) return;
                     lastInstructionReceivedMs = now;
                     if (!guidanceReady(true)) return;
-                    Location fix = host.fix();
+                    Location fix = guidanceFix();
+                    if (fix == null) return;
                     int speed = fix != null && fix.hasSpeed() && Float.isFinite(fix.getSpeed())
                             ? Math.round(fix.getSpeed() * 3.6f) : -1;
                     frame = new NavigationFrame(NavigationFrame.LIVE, info.getIconType(),
                             info.getCurStepRetainDistance(), info.getPathRetainDistance(),
-                            info.getPathRetainTime(), speed, host.fixNanos() / 1_000_000L,
+                            info.getPathRetainTime(), speed, fix.getElapsedRealtimeNanos() / 1_000_000L,
                             SystemClock.elapsedRealtime()).at(SystemClock.elapsedRealtime());
                     if (frame.mode() != NavigationFrame.LIVE) { syncVoice(false); icon(null); report("等待有效的导航指令。"); return; }
                     lastWaitingReason = null;
@@ -337,14 +364,25 @@ final class JourneyController {
                     report(JourneyState.maneuver(info.getIconType())+" · 剩余"+Math.max(0,info.getPathRetainDistance())+"米 / "+Math.max(0,info.getPathRetainTime()/60)+"分钟\n下一路段："+safeName(info.getNextRoadName())+" · 距当前段末"+Math.max(0,info.getCurStepRetainDistance())+"米");
                 }
                 @Override public void onLocationChange(AMapNaviLocation location) {
-                    if (!active() || engine != navi || !state.active(token) || location == null) return;
+                    if (location == null) return;
                     Long measured = location.getTime();
-                    lastSdkFixNanos = MapStartupPolicy.fixTime(SystemClock.elapsedRealtimeNanos(),System.currentTimeMillis(),0,
-                            measured == null ? 0 : measured);
-                    // Observe this stream separately. It must not silently refresh the map's old measurement.
-                    Diagnostics.record("navigation_state", "state", "sdk_position", "source", location.getLocationType(),
-                            "accuracy_m", location.getAccuracy(), "route_valid", location.isMatchNaviPath(),
-                            "measurement_age_ms", DiagnosticRecord.age(SystemClock.elapsedRealtimeNanos(),lastSdkFixNanos));
+                    NaviLatLng coordinate = location.getCoord();
+                    double latitude=coordinate==null?Double.NaN:coordinate.getLatitude(),longitude=coordinate==null?Double.NaN:coordinate.getLongitude();
+                    int source=location.getLocationType();
+                    float accuracy=location.getAccuracy(),speed=location.getSpeed(),bearing=location.getBearing();
+                    boolean matched=location.isMatchNaviPath();
+                    Runnable receive=() -> {
+                        if (!active() || engine != navi || !state.active(token)) return;
+                        boolean accepted = sdkFixes.offer(state.phase() == JourneyState.Phase.NAVIGATING,
+                                SystemClock.elapsedRealtimeNanos(),System.currentTimeMillis(),source,
+                                measured == null ? 0 : measured,latitude,longitude,accuracy,speed,bearing);
+                        NaviFixTracker.Fix current = sdkFixes.current(SystemClock.elapsedRealtimeNanos());
+                        lastSdkFixNanos = current == null ? 0 : current.timeNanos();
+                        Diagnostics.record("navigation_state", "state", "sdk_position", "source",source,
+                                "accuracy_m",accuracy,"route_valid",matched,"accepted",accepted,
+                                "measurement_age_ms",DiagnosticRecord.age(SystemClock.elapsedRealtimeNanos(),lastSdkFixNanos));
+                    };
+                    if(Looper.myLooper()==handler.getLooper())receive.run();else handler.post(receive);
                 }
                 @Override public void onStopNavi(){if(active()&&engine==navi&&state.active(token))stop("SDK已结束导航。");}
                 @Override public void onArriveDestination(){if(active()&&engine==navi&&state.active(token))stop("已到达目的地。", NavigationFrame.ARRIVED);}
@@ -432,6 +470,9 @@ final class JourneyController {
             next.add(new LatLng(point.getLatitude(), point.getLongitude()));
         }
         routePoints.clear(); routePoints.addAll(next);
+        List<DeviceRoute.Coordinate> deviceCoordinates=new ArrayList<>();
+        for(LatLng point:next)deviceCoordinates.add(new DeviceRoute.Coordinate(point.latitude,point.longitude));
+        deviceRoute.replace(deviceCoordinates);
         return true;
     }
     private static String safeName(String name){return name==null||name.trim().isEmpty()?"等待道路信息":name;}
@@ -522,10 +563,12 @@ final class JourneyController {
         }
     }
     private void clearRoute() {
+        deviceRoute.clear();
         if (line != null) { line.remove(); line = null; }
         routePoints.clear(); plannedStart = null;
     }
     private void stopEngine() {
+        sdkFixes.clear();
         lastInstructionReceivedMs = -1; lastSdkFixNanos = 0; lastWaitingReason = null;
         nextRouteRetryMs = -1; retryRequestId = -1; retryFailures = 0; voicePlaying = false; settledRouteRequests.clear();
         state.cancel(); gpsWeak = false; icon(null); handler.removeCallbacks(watchdog);

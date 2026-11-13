@@ -20,13 +20,13 @@ public class AlertDialog implements android.content.DialogInterface {
 }''',
     "android/graphics/Bitmap.java": 'package android.graphics; public class Bitmap {}',
     "android/widget/EditText.java": 'package android.widget; public class EditText {public EditText(android.app.Activity a){} public void setHint(String s){} public void setSingleLine(boolean b){} public void setSaveEnabled(boolean b){} public String getText(){return "";}}',
-    "android/os/Looper.java": 'package android.os; public class Looper {public static Looper getMainLooper(){return new Looper();}}',
+    "android/os/Looper.java": 'package android.os; public class Looper {public static boolean background;private static final Looper MAIN=new Looper();public static Looper getMainLooper(){return MAIN;}public static Looper myLooper(){return background?null:MAIN;}}',
     "android/os/SystemClock.java": 'package android.os; public class SystemClock {public static long now=100000; public static long elapsedRealtime(){return now;} public static long elapsedRealtimeNanos(){return now*1000000;}}',
     "android/os/Handler.java": '''package android.os;
 public class Handler {
  record Task(Handler owner,Runnable run,long at,long seq){}
  static final java.util.List<Task> tasks=new java.util.ArrayList<>(); static long sequence;
- public Handler(Looper l){} public void postDelayed(Runnable r,long delay){tasks.add(new Task(this,r,SystemClock.now+delay,sequence++));}
+ public Handler(Looper l){} public Looper getLooper(){return Looper.getMainLooper();} public void post(Runnable r){postDelayed(r,0);} public void postDelayed(Runnable r,long delay){tasks.add(new Task(this,r,SystemClock.now+delay,sequence++));}
  public void removeCallbacks(Runnable r){tasks.removeIf(t->t.owner==this&&t.run==r);}
  public void removeCallbacksAndMessages(Object o){tasks.removeIf(t->t.owner==this);}
  public static void reset(){tasks.clear();SystemClock.now=100000;}
@@ -44,7 +44,8 @@ public class Location {
  public double getLatitude(){return lat;} public double getLongitude(){return lon;} public void setLatitude(double d){lat=d;} public void setLongitude(double d){lon=d;}
  public boolean hasAccuracy(){return true;} public float getAccuracy(){return accuracy;} public void setAccuracy(float f){accuracy=f;}
  public boolean isFromMockProvider(){return false;} public long getElapsedRealtimeNanos(){return time;} public void setElapsedRealtimeNanos(long t){time=t;}
- public boolean hasSpeed(){return false;} public float getSpeed(){return 0;} public float distanceTo(Location l){return (float)(Math.hypot(l.lat-lat,l.lon-lon)*111000);}
+ private float speed,bearing; private boolean speedSet; public void setTime(long t){} public void setSpeed(float s){speed=s;speedSet=true;} public void setBearing(float b){bearing=b;} public boolean hasBearing(){return true;} public float getBearing(){return bearing;}
+ public boolean hasSpeed(){return speedSet;} public float getSpeed(){return speed;} public float distanceTo(Location l){return (float)(Math.hypot(l.lat-lat,l.lon-lon)*111000);}
 }''',
     "com/amap/api/maps/AMap.java": '''package com.amap.api.maps; import com.amap.api.maps.model.*;
 public class AMap {public Polyline line; public Polyline addPolyline(PolylineOptions p){line=new Polyline(p);return line;} public Marker addMarker(MarkerOptions p){return new Marker();} public void setMyLocationStyle(MyLocationStyle s){} public void animateCamera(Object u){} }''',
@@ -65,7 +66,7 @@ public class AMap {public Polyline line; public Polyline addPolyline(PolylineOpt
     "com/amap/api/navi/model/AMapCalcRouteResult.java": 'package com.amap.api.navi.model; public class AMapCalcRouteResult {public int type,error,requestId;public int[] ids={1};public AMapCalcRouteResult(int t){type=t;requestId=t==0?1:t+10;}public int getRouteRequestId(){return requestId;}public int getCalcRouteType(){return type;}public int getErrorCode(){return error;}public int[] getRouteid(){return ids;}}',
     "com/amap/api/navi/model/AMapNaviPath.java": '''package com.amap.api.navi.model; public class AMapNaviPath {public java.util.List<NaviLatLng> points=java.util.List.of(new NaviLatLng(30,120),new NaviLatLng(30.01,120.01)); public int length=1000;public java.util.List<NaviLatLng> getCoordList(){return points;}public int getAllLength(){return length;}}''',
     "com/amap/api/navi/model/NaviInfo.java": '''package com.amap.api.navi.model; public class NaviInfo {public int getNaviType(){return 1;}public int getIconType(){return 3;}public int getCurStepRetainDistance(){return 60;}public int getPathRetainDistance(){return 800;}public int getPathRetainTime(){return 120;}public String getNextRoadName(){return "road";}public android.graphics.Bitmap getIconBitmap(){return null;}}''',
-    "com/amap/api/navi/model/AMapNaviLocation.java": '''package com.amap.api.navi.model; public class AMapNaviLocation {public Long getTime(){return System.currentTimeMillis();}public int getLocationType(){return 0;}public float getAccuracy(){return 8;}public boolean isMatchNaviPath(){return true;}}''',
+    "com/amap/api/navi/model/AMapNaviLocation.java": '''package com.amap.api.navi.model; public class AMapNaviLocation {public long measured=System.currentTimeMillis(); public int source; public float accuracy=8; public Long getTime(){return measured;}public int getLocationType(){return source;}public float getAccuracy(){return accuracy;}public boolean isMatchNaviPath(){return true;}public NaviLatLng getCoord(){return new NaviLatLng(30,120);}public float getSpeed(){return 36;}public float getBearing(){return 90;}}''',
     "com/amap/api/navi/SimpleNaviListener.java": '''package com.amap.api.navi; import com.amap.api.navi.model.*;
 public class SimpleNaviListener {public void onInitNaviSuccess(){}public void onInitNaviFailure(){}public void onCalculateRouteFailure(AMapCalcRouteResult r){}public void onCalculateRouteSuccess(AMapCalcRouteResult r){}public void onStartNavi(int t){}public void onNaviInfoUpdate(NaviInfo i){}public void onLocationChange(AMapNaviLocation l){}public void onStopNavi(){}public void onArriveDestination(){}public void onReCalculateRouteForYaw(){}public void onReCalculateRouteForTrafficJam(){}public void onGpsSignalWeak(boolean w){}}
 ''',
@@ -104,7 +105,7 @@ with tempfile.TemporaryDirectory(prefix="motonav-journey-") as directory:
     production = Path("app/src/main/java/com/motonav/companion")
     sources = [str(root / name) for name in stubs]
     sources += [str(production / (name + ".java")) for name in
-                ("JourneyController", "JourneyState", "GuidanceHealth", "MapStartupPolicy", "NavigationFrame", "DiagnosticRecord")]
+                ("JourneyController", "JourneyState", "NaviFixTracker", "DeviceRoute", "GuidanceHealth", "MapStartupPolicy", "NavigationFrame", "DiagnosticRecord")]
     classes = root / "classes"
     classes.mkdir()
     subprocess.run(["java", "-m", "jdk.compiler/com.sun.tools.javac.Main", "-encoding", "UTF-8",
