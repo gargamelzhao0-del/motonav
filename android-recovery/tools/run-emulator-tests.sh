@@ -20,6 +20,9 @@ adb -s "$serial" shell settings put secure location_mode 3
 replay_pid=$!
 finish() {
     result=$?
+    adb -s "$serial" shell settings put system font_scale 1.0 >/dev/null || true
+    adb -s "$serial" shell wm size reset >/dev/null || true
+    adb -s "$serial" shell wm density reset >/dev/null || true
     kill "$replay_pid" 2>/dev/null || true
     wait "$replay_pid" 2>/dev/null || true
     mkdir -p emulator-evidence/app
@@ -39,3 +42,10 @@ adb -s "$serial" install -r app/build/outputs/apk/androidTest/debug/app-debug-an
 adb -s "$serial" shell am instrument -w -r com.motonav.recovery.test/androidx.test.runner.AndroidJUnitRunner \
     | tee emulator-evidence/instrumentation.txt
 python3 tools/check-instrumentation.py emulator-evidence/instrumentation.txt emulator-evidence/junit.xml
+# Repeat only the native experience checks at a compact 360dp viewport and large text.
+adb -s "$serial" shell wm size 720x1280
+adb -s "$serial" shell wm density 320
+adb -s "$serial" shell settings put system font_scale 1.5
+adb -s "$serial" shell am instrument -w -r -e class com.motonav.companion.ExperienceRuntimeTest \
+    com.motonav.recovery.test/androidx.test.runner.AndroidJUnitRunner | tee emulator-evidence/experience-large-font.txt
+python3 tools/check-instrumentation.py emulator-evidence/experience-large-font.txt emulator-evidence/experience-large-font.xml

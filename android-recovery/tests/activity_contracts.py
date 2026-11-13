@@ -3,7 +3,7 @@ from pathlib import Path
 source = Path('app/src/main/java/com/motonav/companion/AmapActivity.java').read_text()
 assert 'MyLocationStyle.LOCATION_TYPE_FOLLOW' in source
 assert 'MyLocationStyle.LOCATION_TYPE_LOCATE' not in source
-negative = source.split('.setNegativeButton(', 1)[1].split('.setPositiveButton(', 1)[0]
+negative = source.split('private void askConsent(){',1)[1].split('private void initialize(){',1)[0].split('.setNegativeButton(',1)[1].split('.setPositiveButton(',1)[0]
 assert 'saved.consent(false)' in negative
 assert 'dispose()' in negative
 clear = source.split('private void clearKey(){', 1)[1].split('private void locationPermission', 1)[0]
@@ -18,7 +18,7 @@ assert 'setClipToOutline(true)' in dial
 assert 'toggleShape()' in dial
 assert 'requestDisallowInterceptTouchEvent' in dial
 assert 'map.onLowMemory()' not in source
-assert 'public void overview(){dial.setRound(false);placeLogo();}' in source
+assert 'public void overview(){dial.setRound(false);updateMapShape();placeLogo();}' in source
 assert 'x*x+y*y>r*r' in dial
 feed = Path('app/src/main/java/com/motonav/companion/AmapLocationFeed.java').read_text()
 assert 'setLocationSource(locationFeed)' in source

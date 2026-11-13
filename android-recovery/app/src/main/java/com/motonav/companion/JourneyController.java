@@ -2,14 +2,12 @@ package com.motonav.companion;
 
 import android.Manifest;
 import android.app.Activity;
-import android.app.AlertDialog;
 import android.content.Context;
 import android.content.pm.PackageManager;
 import android.location.Location;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.SystemClock;
-import android.widget.EditText;
 import com.amap.api.maps.AMap;
 import com.amap.api.maps.CameraUpdateFactory;
 import com.amap.api.maps.model.LatLng;
@@ -58,7 +56,8 @@ final class JourneyController {
     private final JourneyState state=new JourneyState();
     private AMapNavi navi;
     private SimpleNaviListener listener;
-    private AlertDialog dialog;
+    private DestinationSearchDialog dialog;
+    private String lastSearch="", nextRoad="";
     private Polyline line;
     private Marker destinationMarker;
     private PoiItem destination;
@@ -113,6 +112,9 @@ final class JourneyController {
         return fix==null?null:deviceRoute.frame(fix.getLatitude(),fix.getLongitude(),fix.hasBearing()?fix.getBearing():Float.NaN);
     }
     boolean canRequestStart() { return destination != null && state.phase() == JourneyState.Phase.IDLE; }
+    NavigationUiModel presentation() {
+        return NavigationUiModel.create(state.phase(),frame(),destination==null?"":destination.getTitle(),nextRoad,message);
+    }
     String actionLabel() {
         return switch (state.phase()) {
             case IDLE -> "开始导航";
@@ -187,18 +189,19 @@ final class JourneyController {
         report(GuidanceHealth.message(reason));
         return false;
     }
-    private void show(AlertDialog next){if(dialog!=null)dialog.dismiss();dialog=next;next.setOnDismissListener(d->{if(dialog==next)dialog=null;});next.show();}
     void searchDialog(){
         if(!active() || activity == null)return;
         if(state.phase()==JourneyState.Phase.NAVIGATING||state.phase()==JourneyState.Phase.STARTING){report("请先结束导航并停车，再更换目的地。");return;}
         if (state.phase() != JourneyState.Phase.IDLE) stop("已取消当前启动请求，请选择新的目的地。");
-        EditText input=new EditText(activity);input.setHint("城市 + 地点名称（发送给高德搜索）");input.setSingleLine(true);input.setSaveEnabled(false);
-        show(new AlertDialog.Builder(activity).setTitle("搜索真实目的地").setView(input)
-            .setNegativeButton("取消",null).setPositiveButton("搜索",(d,w)->search(input.getText().toString().trim())).create());
+        if(dialog!=null)dialog.dismiss();
+        dialog=new DestinationSearchDialog(activity,lastSearch,this::search,()->{++searchEpoch;dialog=null;});
+        dialog.show();
     }
+    private void searchFailure(String text) { if(dialog!=null)dialog.failure(text); }
     private void search(String query){
-        if(!active() || activity == null)return;
-        if(query.length()<2||query.length()>80){report("请输入2–80字的城市和地点名称。");return;}
+        if(!active() || activity == null || dialog==null)return;
+        if(query.length()<2||query.length()>80){searchFailure("请输入 2–80 字的城市和地点名称。");return;}
+        lastSearch=query;dialog.searching();
         Diagnostics.record("route_action", "action", "search", "count", query.length());
         final int token=++searchEpoch;
         final boolean[] settled={false};
@@ -211,27 +214,30 @@ final class JourneyController {
             search.setOnPoiSearchListener(new PoiSearch.OnPoiSearchListener(){
                 public void onPoiItemSearched(PoiItem item,int code){}
                 public void onPoiSearched(PoiResult result,int code){
-                    if(!active()||activity==null||token!=searchEpoch)return;
+                    handler.post(()->{
+                    if(!active()||activity==null||dialog==null||token!=searchEpoch||settled[0])return;
                     settled[0]=true;
                     Diagnostics.record("search_result", "error", code, "count", result == null || result.getPois() == null ? 0 : result.getPois().size());
-                    if(code!=1000||result==null){report("搜索失败（"+code+"），请检查高德Key、服务权限及网络。未生成目的地。");return;}
+                    if(code!=1000||result==null){searchFailure("搜索暂未成功（"+code+"）。请检查网络或地图服务配置，再试一次。");return;}
                     List<PoiItem> valid=new ArrayList<>();
                     if(result.getPois()!=null)for(PoiItem item:result.getPois())if(item!=null&&item.getLatLonPoint()!=null&&JourneyState.coordinate(item.getLatLonPoint().getLatitude(),item.getLatLonPoint().getLongitude()))valid.add(item);
-                    if(valid.isEmpty()){report("没有找到匹配地点，请补充城市或更具体的名称。");return;}
-                    String[] labels=new String[valid.size()];for(int i=0;i<labels.length;i++)labels[i]=valid.get(i).getTitle()+"\n"+valid.get(i).getSnippet();
-                    show(new AlertDialog.Builder(activity).setTitle("选择目的地 · 请核对地址").setItems(labels,(d,w)->{
-                        if(!active()||activity==null||token!=searchEpoch)return;
+                    if(valid.isEmpty()){searchFailure("没有找到匹配地点。试试加上城市、区县或更具体的名称。");return;}
+                    String[] labels=new String[valid.size()];for(int i=0;i<labels.length;i++)labels[i]=valid.get(i).getTitle()+"\n"+(valid.get(i).getSnippet()==null?"请在地图上核对位置":valid.get(i).getSnippet());
+                    dialog.results(labels,w->{
+                        if(!active()||activity==null||map==null||token!=searchEpoch||w<0||w>=valid.size())return;
                         stopEngine();clearRoute();destination=valid.get(w);++searchEpoch;
                         LatLng at=destinationPoint();if(destinationMarker!=null)destinationMarker.remove();
                         destinationMarker=map.addMarker(new MarkerOptions().position(at).title(destination.getTitle()));
                         cameraFollow(false);map.animateCamera(CameraUpdateFactory.newLatLngZoom(at,15));
                         report("目的地："+destination.getTitle()+"\n点击「开始导航」，将自动获取当前位置并规划普通驾车路线。");
-                    }).setNegativeButton("取消",null).create());
+                        if(dialog!=null)dialog.dismiss();
+                    });
+                    });
                 }
             });
-            search.searchPOIAsyn();report("正在搜索真实地点…");
-            handler.postDelayed(()->{if(active()&&token==searchEpoch&&!settled[0]){++searchEpoch;report("搜索超时，请重试；迟到结果将被忽略。");}},15000);
-        }catch(Exception|LinkageError e){++searchEpoch;report("搜索初始化失败，请检查服务配置。");}
+            search.searchPOIAsyn();
+            handler.postDelayed(()->{if(active()&&token==searchEpoch&&!settled[0]){++searchEpoch;searchFailure("搜索用时较长。输入已保留，请检查网络后重新搜索。");}},15000);
+        }catch(Exception|LinkageError e){++searchEpoch;searchFailure("暂时无法搜索，请检查地图服务配置后重试。");}
     }
     private LatLng destinationPoint(){return new LatLng(destination.getLatLonPoint().getLatitude(),destination.getLatLonPoint().getLongitude());}
     private void awaitLocation(long token, boolean routeReady) {
@@ -360,6 +366,7 @@ final class JourneyController {
                             SystemClock.elapsedRealtime()).at(SystemClock.elapsedRealtime());
                     if (frame.mode() != NavigationFrame.LIVE) { syncVoice(false); icon(null); report("等待有效的导航指令。"); return; }
                     lastWaitingReason = null;
+                    nextRoad=info.getNextRoadName();
                     icon(info.getIconBitmap());
                     report(JourneyState.maneuver(info.getIconType())+" · 剩余"+Math.max(0,info.getPathRetainDistance())+"米 / "+Math.max(0,info.getPathRetainTime()/60)+"分钟\n下一路段："+safeName(info.getNextRoadName())+" · 距当前段末"+Math.max(0,info.getCurStepRetainDistance())+"米");
                 }
@@ -554,7 +561,7 @@ final class JourneyController {
     private void drawRoute(boolean overview) {
         if (map == null || routePoints.size() < 2) return;
         if (line != null) line.remove();
-        line = map.addPolyline(new PolylineOptions().addAll(routePoints).width(15).color(0xffb4ff65));
+        line = map.addPolyline(new PolylineOptions().addAll(routePoints).width(15).color(0xffb66dff));
         if (overview && ui != null) {
             ui.overview(); cameraFollow(false);
             LatLngBounds.Builder bounds = new LatLngBounds.Builder();
@@ -568,6 +575,7 @@ final class JourneyController {
         routePoints.clear(); plannedStart = null;
     }
     private void stopEngine() {
+        nextRoad="";
         sdkFixes.clear();
         lastInstructionReceivedMs = -1; lastSdkFixNanos = 0; lastWaitingReason = null;
         nextRouteRetryMs = -1; retryRequestId = -1; retryFailures = 0; voicePlaying = false; settledRouteRequests.clear();

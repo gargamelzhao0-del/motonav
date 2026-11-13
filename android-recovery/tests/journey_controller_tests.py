@@ -18,6 +18,15 @@ public class AlertDialog implements android.content.DialogInterface {
   public Builder setItems(String[] s,OnClickListener l){return this;} public AlertDialog create(){return new AlertDialog();}
  }
 }''',
+    "com/motonav/companion/DestinationSearchDialog.java": '''package com.motonav.companion;
+public class DestinationSearchDialog {
+ public static DestinationSearchDialog latest;public java.util.function.Consumer<String> submit;public java.util.function.IntConsumer select;
+ public Runnable dismissed;public String failure;public boolean visible,busy;public String[] labels;
+ public DestinationSearchDialog(android.app.Activity a,String q,java.util.function.Consumer<String> s,Runnable d){latest=this;submit=s;dismissed=d;}
+ public void show(){visible=true;}public void searching(){busy=true;}public void failure(String s){failure=s;busy=false;}
+ public void results(String[] s,java.util.function.IntConsumer c){labels=s;select=c;busy=false;}
+ public void dismiss(){if(visible){visible=false;dismissed.run();}}
+}''',
     "android/graphics/Bitmap.java": 'package android.graphics; public class Bitmap {}',
     "android/widget/EditText.java": 'package android.widget; public class EditText {public EditText(android.app.Activity a){} public void setHint(String s){} public void setSingleLine(boolean b){} public void setSaveEnabled(boolean b){} public String getText(){return "";}}',
     "android/os/Looper.java": 'package android.os; public class Looper {public static boolean background;private static final Looper MAIN=new Looper();public static Looper getMainLooper(){return MAIN;}public static Looper myLooper(){return background?null:MAIN;}}',
@@ -87,9 +96,9 @@ public class AMapNavi {
     "com/amap/api/services/core/LatLonPoint.java": 'package com.amap.api.services.core; public class LatLonPoint {public double getLatitude(){return 30.01;}public double getLongitude(){return 120.01;}}',
     "com/amap/api/services/core/PoiItem.java": 'package com.amap.api.services.core; public class PoiItem {public LatLonPoint getLatLonPoint(){return new LatLonPoint();}public String getTitle(){return "destination";}public String getSnippet(){return "address";}}',
     "com/amap/api/services/core/ServiceSettings.java": 'package com.amap.api.services.core; public class ServiceSettings {public static final int HTTPS=2;public static void updatePrivacyShow(Object c,boolean a,boolean b){}public static void updatePrivacyAgree(Object c,boolean b){}public static ServiceSettings getInstance(){return new ServiceSettings();}public void setApiKey(String s){}public void setProtocol(int i){}public void setConnectionTimeOut(int i){}public void setSoTimeOut(int i){}}',
-    "com/amap/api/services/poisearch/PoiResult.java": 'package com.amap.api.services.poisearch; public class PoiResult {public java.util.List<com.amap.api.services.core.PoiItem> getPois(){return java.util.List.of();}}',
+    "com/amap/api/services/poisearch/PoiResult.java": 'package com.amap.api.services.poisearch; public class PoiResult {public java.util.List<com.amap.api.services.core.PoiItem> getPois(){return java.util.List.of(new com.amap.api.services.core.PoiItem());}}',
     "com/amap/api/services/poisearch/PoiSearch.java": '''package com.amap.api.services.poisearch; public class PoiSearch {
- public PoiSearch(Object c,Query q){}public void searchPOIAsyn(){}public void setOnPoiSearchListener(OnPoiSearchListener l){}
+ public static PoiSearch latest;public OnPoiSearchListener listener;public PoiSearch(Object c,Query q){latest=this;}public void searchPOIAsyn(){}public void setOnPoiSearchListener(OnPoiSearchListener l){listener=l;}
  public interface OnPoiSearchListener {void onPoiItemSearched(com.amap.api.services.core.PoiItem p,int c);void onPoiSearched(PoiResult r,int c);}
  public static class Query {public Query(String a,String b,String c){}public void setPageSize(int i){}public void setPageNum(int i){}}
 }''',
@@ -105,7 +114,7 @@ with tempfile.TemporaryDirectory(prefix="motonav-journey-") as directory:
     production = Path("app/src/main/java/com/motonav/companion")
     sources = [str(root / name) for name in stubs]
     sources += [str(production / (name + ".java")) for name in
-                ("JourneyController", "JourneyState", "NaviFixTracker", "DeviceRoute", "GuidanceHealth", "MapStartupPolicy", "NavigationFrame", "DiagnosticRecord")]
+                ("JourneyController", "NavigationUiModel", "JourneyState", "NaviFixTracker", "DeviceRoute", "GuidanceHealth", "MapStartupPolicy", "NavigationFrame", "DiagnosticRecord")]
     classes = root / "classes"
     classes.mkdir()
     subprocess.run(["java", "-m", "jdk.compiler/com.sun.tools.javac.Main", "-encoding", "UTF-8",
