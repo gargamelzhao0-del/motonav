@@ -158,8 +158,14 @@ bool refresh(void *, const ScreenSnapshot &state) {
             report_benchmark();
             workload = static_cast<Workload>(static_cast<unsigned>(workload) + 1); reset_benchmark();
         } else {
+#if MOTONAV_HOLD_MAP_AFTER_BENCH
+            report_benchmark();
+            automatic_test = false;
+            ESP_LOGI("display_test", "timed measurement finished; map animation remains for visual inspection; hold to exit");
+#else
             set_test(false);
             ESP_LOGI("display_test", "automatic test finished; normal navigation display restored");
+#endif
         }
     }
     // A workload change can create its canvas and reset counters after the

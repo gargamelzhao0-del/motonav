@@ -1,6 +1,6 @@
 # App 与圆屏固件对接
 
-本目录由固件端独立维护。固件 0.2.3 保持 Android 0.7.x 的 NAV3 字节协议；固件改动不要求 App 修改导航算法。0.6.1 尚无真实导航 NAV3 发送链路。手机联调见 [PHONE_INTEGRATION.md](PHONE_INTEGRATION.md)，后续显示和数据需求见 [DISPLAY_PLAN.md](DISPLAY_PLAN.md)，其中扩展功能尚未实现。
+固件 0.3.1 支持 Android 0.7.8 及以后的 NAV4 路线快照，并保持 NAV3 字节协议兼容。NAV4 的独立服务、字段及界限见 [共享协议](../protocol/NAV4.md)。下文 NAV3 是兼容入口，手机优先选择发现的 NAV4 服务；不能在一个连接中混用两个通道。0.6.1 尚无真实导航 NAV3 发送链路。手机联调见 [PHONE_INTEGRATION.md](PHONE_INTEGRATION.md)，后续显示和数据需求见 [DISPLAY_PLAN.md](DISPLAY_PLAN.md)，其中扩展功能尚未实现。
 
 ## 连接顺序
 
@@ -10,7 +10,7 @@
 4. 向 RX `6e400002-b5a3-f393-e0a9-e50e24dcca9e` 发送有响应写入；RX 要求加密和身份验证。尚未订阅 TX 时写入被拒绝。
 5. 发送 HELLO，收到匹配 `NAV3` 的确认后，才能发送真实导航快照。断线后重新执行订阅和握手，不能直接续发旧序号。
 
-设备信息服务 `0x180A` 的 Firmware Revision `0x2A26` 返回固件版本字符串，例如 `0.2.3`。它是诊断信息；协议能力仍以 HELLO 的 `NAV3` 确认为准。
+设备信息服务 `0x180A` 的 Firmware Revision `0x2A26` 返回固件版本字符串，例如 `0.3.1`。它是诊断信息；协议能力以实际服务和 HELLO 的 `NAV3`／`NAV4` 确认为准。
 
 ## 消息与时效
 
@@ -41,4 +41,4 @@ N,3,sequence,session,mode,icon,turn_m,remaining_m,remaining_s,speed_kmh,fix_age_
 
 `tests/fixtures/nav3.frames` 与 Android `NavigationProtocolTests` 实际编码结果逐字节对照。运行 `python tests/run_host_tests.py --android-source <android-recovery 路径>` 可验证当前 App 编码与固件接收器的互通；需在环境中设置 JAVA_HOME。
 
-当前协议尚不传输道路名称、路线几何、天气、消息或云端卡片。请勿在 NAV3 尾部直接追加字段：现有接收器会拒绝。以后扩展此类在线信息时需先约定带版本协商、长度及缓存界限的新消息，并保留 NAV3 兼容入口。
+NAV3 不传输路线几何；NAV4 已加入有界路线窗口和位置。两个协议均不传输道路名称、天气、消息或云端卡片。请勿在 NAV3 尾部直接追加字段：现有接收器会拒绝。以后扩展此类在线信息时需先约定带版本协商、长度及缓存界限的新消息，并保留 NAV3 兼容入口。

@@ -12,6 +12,7 @@ struct ScreenSnapshot {
     bool handshaken = false, stream_fresh = false, has_guidance = false, source_expired = false;
     bool pairing = false;
     uint32_t passkey = 0;
+    unsigned protocol = 3;
 };
 
 enum class ScreenMode { Disconnected, Pairing, Securing, Handshake, Ready, Waiting, Stale, Live, Arrived, Stopped };

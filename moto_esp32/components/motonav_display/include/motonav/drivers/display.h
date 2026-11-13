@@ -2,12 +2,14 @@
 #include "esp_err.h"
 #include "lvgl.h"
 #include "motonav/drivers/display_metrics.h"
+#include "motonav/drivers/display_color.h"
 
 namespace motonav::drivers {
 struct DisplayConfig {
     uint16_t buffer_rows = 64; // Even, 16..64. Two owned internal DMA buffers.
     uint8_t brightness_percent = 70;
     bool direct_qspi = true; // False selects the vendor IO path for A/B checks.
+    DisplayColor color = DisplayColor::Rgb332; // Rgb565 preserves 16-bit color; required by vendor IO.
 };
 // One board/display per boot. Initialize display, attach touch, then start.
 // Initialization failure is fatal for this boot; partial init is not retryable.

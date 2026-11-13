@@ -18,6 +18,6 @@ for entry in entries:
     if source.endswith('/main/app/navigation_app.cpp'):
         assert 'MOTONAV_DEVICE_TESTS=0' in entry['command'], 'Application enables test integration'
 cache = (build / 'CMakeCache.txt').read_text(encoding='utf-8')
-for key in ('MOTONAV_DEVICE_TESTS', 'MOTONAV_AUTORUN_BENCH', 'MOTONAV_AUTORUN_MAP_BENCH'):
+for key in ('MOTONAV_DEVICE_TESTS', 'MOTONAV_AUTORUN_BENCH', 'MOTONAV_AUTORUN_MAP_BENCH', 'MOTONAV_HOLD_MAP_AFTER_BENCH'):
     assert f'{key}:BOOL=OFF' in cache, f'{key} must explicitly be OFF'
 print(f'PASS: production image excludes device tests and simulated map: {build / "motonav.bin"}')
