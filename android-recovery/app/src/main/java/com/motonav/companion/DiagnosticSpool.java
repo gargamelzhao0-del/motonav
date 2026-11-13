@@ -11,7 +11,8 @@ import java.util.regex.*;
 public final class DiagnosticSpool {
     public record Entry(String session, long sequence, String line) {}
     private static final int MAX_ENTRIES = 4096, MAX_BYTES = 2 * 1024 * 1024;
-    private static final Pattern HEADER = Pattern.compile("^\\{\"schema\":1,\"session\":\"([0-9a-f]{32})\",\"seq\":([1-9][0-9]*),.*}$");
+    // Android's ICU rejects an unmatched literal '}', even though desktop Java accepts it.
+    private static final Pattern HEADER = Pattern.compile("^\\{\"schema\":1,\"session\":\"([0-9a-f]{32})\",\"seq\":([1-9][0-9]*),.*\\}$");
     private final File file;
     private final List<Entry> entries = new ArrayList<>();
     private final Set<String> identities = new HashSet<>();

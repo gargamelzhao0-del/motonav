@@ -41,9 +41,13 @@ public class DiagnosticSpool {
         public void await() throws Exception {if(!entered.await(3,TimeUnit.SECONDS))throw new AssertionError("Missing storage stall: "+operation);}
     }
     public static volatile Gate gate;
+    public static volatile boolean initializationFailure;
     static void stall(String op){Gate g=gate;if(g!=null)g.run(op);}
     final List<Entry> entries=new ArrayList<>();
-    public DiagnosticSpool(java.io.File directory) throws java.io.IOException {stall("recover");}
+    public DiagnosticSpool(java.io.File directory) throws java.io.IOException {
+        if(initializationFailure)throw new ExceptionInInitializerError(new java.util.regex.PatternSyntaxException("test","}",0));
+        stall("recover");
+    }
     public synchronized void append(String line,boolean sync) throws java.io.IOException {
         stall("append");var m=java.util.regex.Pattern.compile("\"session\":\"([0-9a-f]+)\",\"seq\":([0-9]+)").matcher(line);
         if(!m.find())throw new AssertionError(line);entries.add(new Entry(m.group(1),Long.parseLong(m.group(2)),line));

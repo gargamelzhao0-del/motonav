@@ -79,6 +79,23 @@ public final class DiagnosticsThreadingTests {
         gate.release.countDown();drain();
     }
 
+    private static void initializationFailureIsVisibleAndLocalRecordingSurvives(File directory) throws Exception {
+        DiagnosticSpool.gate=null;
+        var spool=Diagnostics.class.getDeclaredField("spool");spool.setAccessible(true);spool.set(null,null);
+        DiagnosticSpool.initializationFailure=true;
+        int requests=FakeHttps.requests;
+        responsive(()->Diagnostics.start(ENDPOINT));
+        responsive(()->Diagnostics.record("user_mark","reason","after_initialization_failure"));
+        drain();
+        String status=responsive(Diagnostics::status);
+        check(status.contains("日志存储异常"),"Background initialization failure is visible instead of endless connecting");
+        check(!status.contains("远程接收已确认"),"Failed queue initialization cannot confirm an upload");
+        check(FakeHttps.requests==requests,"An unavailable journal cannot fabricate a network request");
+        String local=java.nio.file.Files.readString(new File(directory,"diagnostics/current.jsonl").toPath());
+        check(local.contains("after_initialization_failure"),"Local recording survives remote spool class initialization failure");
+        responsive(Diagnostics::stop);drain();DiagnosticSpool.initializationFailure=false;
+    }
+
     private static final class FakeHttps extends HttpsURLConnection {
         static volatile int requests;
         static volatile DiagnosticSpool.Gate closeGate;
@@ -108,7 +125,8 @@ public final class DiagnosticsThreadingTests {
         try {
             Diagnostics.initialize(new android.content.Context(new File(args[0])));
             recoveryDoesNotBlockUi();acknowledgementDoesNotBlockUi();disconnectDoesNotBlockUi();backpressureIsBounded();
-            System.out.println("PASS: "+checks+" real Diagnostics checks with blocked recovery, ACK persistence, socket close and full queue");
+            initializationFailureIsVisibleAndLocalRecordingSurvives(new File(args[0]));
+            System.out.println("PASS: "+checks+" real Diagnostics checks with blocked I/O, bounded queues and initialization failure");
             success=true;
         } catch(Throwable error){error.printStackTrace();}
         finally {

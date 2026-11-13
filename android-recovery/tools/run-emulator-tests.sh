@@ -39,7 +39,8 @@ adb -s "$serial" install -r app/build/outputs/apk/debug/app-debug.apk
 adb -s "$serial" install -r app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
 # Keep the packages installed until evidence is pulled. Gradle's connected test task
 # uninstalls them at teardown, which also removes the app-owned screenshot directory.
-adb -s "$serial" shell am instrument -w -r com.motonav.recovery.test/androidx.test.runner.AndroidJUnitRunner \
+adb -s "$serial" shell am instrument -w -r -e notClass com.motonav.companion.DiagnosticsRuntimeTest \
+    com.motonav.recovery.test/androidx.test.runner.AndroidJUnitRunner \
     | tee emulator-evidence/instrumentation.txt
 python3 tools/check-instrumentation.py emulator-evidence/instrumentation.txt emulator-evidence/junit.xml
 # Repeat only the native experience checks at a compact 360dp viewport and large text.
@@ -49,3 +50,8 @@ adb -s "$serial" shell settings put system font_scale 1.5
 adb -s "$serial" shell am instrument -w -r -e class com.motonav.companion.ExperienceRuntimeTest \
     com.motonav.recovery.test/androidx.test.runner.AndroidJUnitRunner | tee emulator-evidence/experience-large-font.txt
 python3 tools/check-instrumentation.py emulator-evidence/experience-large-font.txt emulator-evidence/experience-large-font.xml
+# A separate instrumentation process owns the test-only HTTPS handler. No real
+# diagnostic endpoint or credentials are used, and other SDK tests keep their networking unchanged.
+adb -s "$serial" shell am instrument -w -r -e class com.motonav.companion.DiagnosticsRuntimeTest \
+    com.motonav.recovery.test/androidx.test.runner.AndroidJUnitRunner | tee emulator-evidence/diagnostics.txt
+python3 tools/check-instrumentation.py emulator-evidence/diagnostics.txt emulator-evidence/diagnostics.xml

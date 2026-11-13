@@ -56,6 +56,7 @@ final class Diagnostics {
     private static File directory;
     private static boolean enabled, uploadEligible;
     private static volatile boolean storageFailed;
+    private static volatile String storageFailureClass = "";
     private static String session = "", transportState = "未连接";
     private static long started, sequence, lastDelivered, nextAttempt;
     private static int dropped, failures;
@@ -98,7 +99,7 @@ final class Diagnostics {
             session = UUID.randomUUID().toString().replace("-", "");
             sequence = 0; started = SystemClock.elapsedRealtime(); lastDelivered = 0;
             dropped = 0; failures = 0; nextAttempt = 0; endpoint = destination;
-            transportState = destination == null ? "仅本地记录" : "正在连接";
+            transportState = destination == null ? "仅本地记录" : "正在准备日志队列";
             enabled = true; uploadEligible = destination != null;
         }
         record("session_start", "version", BuildConfig.VERSION_NAME, "version_code", BuildConfig.VERSION_CODE,
@@ -137,7 +138,7 @@ final class Diagnostics {
             // journal, including recovery, appends, upload batches and ACK writes.
             saved = new FutureTask<>(() -> {
                 if (remote) try { outbox().append(line, immediate); refreshCounts(); }
-                catch (java.io.IOException e) { storageFailed = true; }
+                catch (java.io.IOException | RuntimeException | LinkageError e) { storageFailure(e); }
                 append(line, immediate);
                 return null;
             });
@@ -155,6 +156,13 @@ final class Diagnostics {
     private static DiagnosticSpool outbox() throws java.io.IOException {
         if (spool == null) { spool = new DiagnosticSpool(directory); refreshCounts(); }
         return spool;
+    }
+    private static void storageFailure(Throwable failure) {
+        // FutureTask captures class-initialization errors as well as exceptions.
+        // Surface a bounded class name, never exception messages, paths or credentials.
+        Throwable cause = failure.getCause();
+        storageFailureClass = (cause == null ? failure : cause).getClass().getSimpleName();
+        storageFailed = true;
     }
     private static void refreshCounts() {
         pendingCount = spool.size(); persistedDropped = spool.dropped();
@@ -177,7 +185,7 @@ final class Diagnostics {
             try (FileOutputStream output = new FileOutputStream(current, true)) {
                 output.write(bytes); if (sync) output.getFD().sync();
             }
-        } catch (Exception ignored) { storageFailed = true; }
+        } catch (Exception failure) { storageFailure(failure); }
     }
     static void export(OutputStream output, java.util.function.Consumer<Boolean> completed) {
         try { writer.execute(() -> {
@@ -206,7 +214,7 @@ final class Diagnostics {
             if (enabled) state += "\n" + transportState + " · 待发送 " + pendingCount + " 条 · 丢弃 " + (dropped + persistedDropped) + " 条";
             if (enabled && lastDelivered > 0) state += "\n最近上传确认：" + (SystemClock.elapsedRealtime() - lastDelivered) / 1000 + " 秒前";
             if (enabled && endpoint != null) state += "\n接收端：" + endpoint.host;
-            return state + (storageFailed ? "\n本地写入失败，请保留远程接收记录" : "");
+            return state + (storageFailed ? "\n日志存储异常（" + storageFailureClass + "）" : "");
         }
     }
 
@@ -218,7 +226,15 @@ final class Diagnostics {
             target = endpoint; currentSession = session;
         }
         try { batch = onWriter(() -> outbox().batch(currentSession, 24, 32768)); }
-        catch (Exception e) { return; }
+        catch (Exception e) {
+            if (!(e instanceof java.util.concurrent.TimeoutException)
+                    && !(e instanceof java.util.concurrent.RejectedExecutionException)) storageFailure(e);
+            synchronized (LOCK) {
+                if (enabled && endpoint == target && session.equals(currentSession))
+                    transportState = "日志队列暂不可用，尚未上传；正在重试";
+            }
+            return;
+        }
 
         if (batch.isEmpty()) return;
         HttpsURLConnection request = null; int responseCode = -1;
@@ -234,6 +250,7 @@ final class Diagnostics {
             synchronized (LOCK) {
                 if (!enabled || endpoint != target || !session.equals(currentSession)) return;
                 connection = request;
+                transportState = "正在连接接收端";
             }
             try (OutputStream output = request.getOutputStream()) { output.write(bytes); }
             responseCode = request.getResponseCode();
