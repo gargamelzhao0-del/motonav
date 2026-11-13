@@ -16,12 +16,15 @@ stubs = {
     'android/net/ConnectivityManager.java': 'package android.net; public class ConnectivityManager {public Object getActiveNetwork(){return null;} public NetworkCapabilities getNetworkCapabilities(Object n){return null;}}',
     'android/net/NetworkCapabilities.java': 'package android.net; public class NetworkCapabilities {public static final int TRANSPORT_WIFI=1,TRANSPORT_CELLULAR=0,TRANSPORT_VPN=4; public boolean hasTransport(int t){return false;}}',
     'android/os/Build.java': 'package android.os; public class Build {public static String MANUFACTURER="test",MODEL="test"; public static class VERSION {public static int SDK_INT=35;}}',
+    'android/os/Bundle.java': 'package android.os; public class Bundle {public int getInt(String key,int fallback){return fallback;}}',
     'android/os/PowerManager.java': 'package android.os; public class PowerManager {public boolean isPowerSaveMode(){return false;} public boolean isDeviceIdleMode(){return false;} public boolean isIgnoringBatteryOptimizations(String p){return false;}}',
     'android/os/Looper.java': 'package android.os; public class Looper {public static Looper getMainLooper(){return new Looper();}}',
     'android/os/Handler.java': 'package android.os; public class Handler {public Handler(Looper l){} public boolean post(Runnable r){return true;} public boolean postDelayed(Runnable r,long t){return true;} public void removeCallbacks(Runnable r){}}',
     'android/os/SystemClock.java': 'package android.os; public class SystemClock {public static long elapsedRealtime(){return System.nanoTime()/1000000;} public static long elapsedRealtimeNanos(){return System.nanoTime();}}',
     'android/util/Log.java': 'package android.util; public class Log {public static int i(String tag,String line){return 0;}}',
     'com/amap/api/location/AMapLocation.java': '''package com.amap.api.location; public class AMapLocation {
+        public static final String LBS_REAL_LOCATION_TYPE="realLocationType";public static final int TRUSTED_LEVEL_HIGH=1;
+        public android.os.Bundle getExtras(){return null;}
         public int getErrorCode(){return 0;} public int getLocationType(){return 1;} public long getElapsedRealtimeNanos(){return 0;}
         public long getTime(){return 0;} public float getAccuracy(){return 0;} public boolean isFromMockProvider(){return false;}
         public int getSatellites(){return 0;} public int getGpsAccuracyStatus(){return 0;} public int getTrustedLevel(){return 0;} }''',
@@ -77,7 +80,7 @@ with tempfile.TemporaryDirectory(prefix='motonav-diagnostics-threads-') as direc
         path = output / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(source, encoding='utf-8')
-    names = ['Diagnostics', 'DiagnosticRecord', 'DiagnosticEndpoint', 'MapStartupPolicy', 'MapFixTracker']
+    names = ['Diagnostics', 'DiagnosticRecord', 'DiagnosticEndpoint', 'MapStartupPolicy', 'MapFixTracker', 'AmapLocationSample']
     sources = [root / 'app/src/main/java/com/motonav/companion' / (name + '.java') for name in names]
     if args.diagnostics_source:
         sources[0] = args.diagnostics_source.resolve()

@@ -315,6 +315,7 @@ final class Diagnostics {
         if (value == null) { record("location_callback", "owner", owner, "reason", "null", "callback_gap_ms", gap, "generation", generation); return; }
         long now = SystemClock.elapsedRealtimeNanos();
         record("location_callback", "owner", owner, "error", value.getErrorCode(), "source", value.getLocationType(),
+            "original_source", AmapLocationSample.originalSource(value),
             "reason", MapStartupPolicy.epochBasedElapsed(now,value.getElapsedRealtimeNanos(),value.getTime()) ? "epoch_elapsed"
                 : value.getElapsedRealtimeNanos()<=0 ? "wall_fallback" : value.getElapsedRealtimeNanos()>now ? "future_elapsed" : "monotonic",
             "accuracy_m", value.getAccuracy(), "elapsed_age_ms", DiagnosticRecord.age(now, value.getElapsedRealtimeNanos()),

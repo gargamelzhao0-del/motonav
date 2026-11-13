@@ -247,7 +247,9 @@ public final class BleLink {
             BluetoothGattService mapService=navigation==null?null:g.getService(MAP_SERVICE);
             routeMaps=mapService!=null&&mapService.getCharacteristic(MAP_RX)!=null&&mapService.getCharacteristic(MAP_TX)!=null;
             Diagnostics.record("ble_state","phase","discover","state","capabilities",
-                    "selected",routeMaps,"count",g.getServices().size());
+                    "selected",routeMaps,"count",g.getServices().size(),"map_service",mapService!=null,
+                    "map_rx",mapService!=null&&mapService.getCharacteristic(MAP_RX)!=null,
+                    "map_tx",mapService!=null&&mapService.getCharacteristic(MAP_TX)!=null);
             // A bonded Android phone may return its old database before the
             // peripheral's Service Changed indication arrives. Use one delayed,
             // public-API rediscovery before settling on the legacy service.

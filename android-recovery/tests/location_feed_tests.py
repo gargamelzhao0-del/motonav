@@ -224,15 +224,18 @@ public class LocationFeedTests {
             step(1000);
             AMapLocation stationary = sample(0);
             stationary.source = 2;
-            stationary.extras = new Bundle();
-            stationary.extras.putInt(AMapLocation.LBS_REAL_LOCATION_TYPE, 5);
-            check(AmapLocationSample.source(stationary) == 5, "stationary Wi-Fi original source");
+            if (i % 2 == 0) {
+                stationary.extras = new Bundle();
+                stationary.extras.putInt(AMapLocation.LBS_REAL_LOCATION_TYPE, 5);
+            }
+            check(AmapLocationSample.source(stationary) == (i%2==0?5:MapFixTracker.TRUSTED_NETWORK_RECHECK),
+                    "high-trust recheck works with or without optional original-source metadata");
             second.emit(stationary);
             map.maintain();
         }
         check(second.starts == 1 && second.destroys == 0, "fresh stationary observations do not restart");
-        AMapLocation untrusted = sample(0); untrusted.source = 2;
-        check(AmapLocationSample.source(untrusted) == 2, "unknown source rejected");
+        AMapLocation untrusted = sample(0); untrusted.source = 2; untrusted.trust = 2;
+        check(AmapLocationSample.source(untrusted) == 2, "untrusted recheck without origin rejected");
         untrusted.extras = new Bundle(); untrusted.extras.putInt(AMapLocation.LBS_REAL_LOCATION_TYPE, 5);
         untrusted.trust = 2;
         check(AmapLocationSample.source(untrusted) == 2, "low trust recheck rejected");

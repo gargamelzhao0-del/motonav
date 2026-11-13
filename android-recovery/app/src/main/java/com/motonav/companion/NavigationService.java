@@ -274,7 +274,7 @@ public final class NavigationService extends Service implements JourneyControlle
     @Override public void ready() {
         handler.removeCallbacks(reconnect); reconnecting = false; retries = 0;
         Diagnostics.record("ble_state", "state", "ready");
-        status(link.routeMaps() ? "圆屏已连接 · 支持完整圆屏路线地图" : "圆屏已连接 · 箭头导航（路线地图需要升级固件）"); publish();
+        status(link.routeMaps() ? "圆屏已连接 · 支持完整圆屏路线地图" : "圆屏已连接 · 箭头导航（暂未发现路线地图服务）"); publish();
     }
     @Override public void acknowledged(int sequence) { }
     @Override public void disconnected() {
