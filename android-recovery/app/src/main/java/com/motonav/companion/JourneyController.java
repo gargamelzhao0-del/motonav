@@ -392,6 +392,8 @@ final class JourneyController {
                         lastSdkFixNanos = current == null ? 0 : current.timeNanos();
                         Diagnostics.record("navigation_state", "state", "sdk_position", "source",source,
                                 "accuracy_m",accuracy,"route_valid",matched,"accepted",accepted,
+                                "wall_age_ms",measured==null||measured<=0?-1:System.currentTimeMillis()-measured,
+                                "gps_weak",gpsWeak,
                                 "measurement_age_ms",DiagnosticRecord.age(SystemClock.elapsedRealtimeNanos(),lastSdkFixNanos));
                     };
                     if(Looper.myLooper()==handler.getLooper())receive.run();else handler.post(receive);

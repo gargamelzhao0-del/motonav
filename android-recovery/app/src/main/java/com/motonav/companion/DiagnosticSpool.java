@@ -14,6 +14,7 @@ public final class DiagnosticSpool {
     private static final Pattern HEADER = Pattern.compile("^\\{\"schema\":1,\"session\":\"([0-9a-f]{32})\",\"seq\":([1-9][0-9]*),.*}$");
     private final File file;
     private final List<Entry> entries = new ArrayList<>();
+    private final Set<String> identities = new HashSet<>();
     private int bytes, dropped;
 
     public DiagnosticSpool(File directory) throws IOException {
@@ -28,7 +29,7 @@ public final class DiagnosticSpool {
                     String line = value.substring(65);
                     if (!digest(line).equals(value.substring(0,64))) continue;
                     Entry entry = parse(line);
-                    if (entry != null && entries.stream().noneMatch(e -> e.session.equals(entry.session) && e.sequence == entry.sequence)) {
+                    if (entry != null && identities.add(identity(entry))) {
                         entries.add(entry); bytes += encodedSize(entry);
                     }
                 }
@@ -41,18 +42,22 @@ public final class DiagnosticSpool {
     public synchronized void append(String line, boolean sync) throws IOException {
         Entry entry = parse(line);
         if (entry == null) throw new IOException("diagnostic_record");
-        if (entries.stream().anyMatch(e -> e.session.equals(entry.session) && e.sequence == entry.sequence)) return;
+        if (identities.contains(identity(entry))) return;
         try (FileOutputStream output = new FileOutputStream(file, true)) {
             output.write(encoded(entry));
             if (sync) output.getFD().sync();
         }
-        entries.add(entry); bytes += encodedSize(entry);
+        entries.add(entry); identities.add(identity(entry)); bytes += encodedSize(entry);
         if (entries.size() > MAX_ENTRIES || bytes > MAX_BYTES) { trim(); persist(entries); }
     }
     public synchronized List<Entry> batch(int maximum, int maxBytes) {
+        return batch(null, maximum, maxBytes);
+    }
+    public synchronized List<Entry> batch(String preferredSession, int maximum, int maxBytes) {
         List<Entry> batch = new ArrayList<>();
         if (entries.isEmpty()) return batch;
-        String first = entries.get(0).session;
+        String first = preferredSession != null && entries.stream().anyMatch(e -> e.session.equals(preferredSession))
+                ? preferredSession : entries.get(0).session;
         List<Entry> session = entries.stream().filter(e -> e.session.equals(first))
                 .sorted(Comparator.comparingLong(Entry::sequence)).collect(java.util.stream.Collectors.toList());
         int size = 0;
@@ -68,13 +73,15 @@ public final class DiagnosticSpool {
         remaining.removeIf(e -> e.session.equals(session) && e.sequence <= sequence);
         persist(remaining);
         entries.clear(); entries.addAll(remaining);
+        identities.clear(); for (Entry entry : entries) identities.add(identity(entry));
         bytes = entries.stream().mapToInt(DiagnosticSpool::encodedSize).sum();
     }
     public synchronized int size() { return entries.size(); }
     public synchronized int dropped() { return dropped; }
     private void trim() {
         while (!entries.isEmpty() && (entries.size() > MAX_ENTRIES || bytes > MAX_BYTES)) {
-            bytes -= encodedSize(entries.remove(0)); dropped++;
+            Entry removed = entries.remove(0); identities.remove(identity(removed));
+            bytes -= encodedSize(removed); dropped++;
         }
     }
     private void persist(List<Entry> snapshot) throws IOException {
@@ -94,6 +101,7 @@ public final class DiagnosticSpool {
         catch (NumberFormatException e) { return null; }
     }
     private static int encodedSize(Entry entry) { return entry.line.getBytes(StandardCharsets.UTF_8).length + 66; }
+    private static String identity(Entry entry) { return entry.session + ":" + entry.sequence; }
     private static byte[] encoded(Entry entry) { return (digest(entry.line) + " " + entry.line + "\n").getBytes(StandardCharsets.UTF_8); }
     private static String digest(String line) {
         try {

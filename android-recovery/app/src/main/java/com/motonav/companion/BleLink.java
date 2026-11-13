@@ -39,6 +39,7 @@ public final class BleLink {
     private boolean ready;
     private boolean scanning;
     private int serviceChanges;
+    private boolean retriedDiscovery, awaitingDiscoveryRetry;
     private record Pending(int sequence,int helloVersion) { }
     private Pending pending;
     private Runnable completion;
@@ -116,6 +117,7 @@ public final class BleLink {
         openGatt(device);
     }
     private void openGatt(BluetoothDevice device) {
+        retriedDiscovery=false;awaitingDiscoveryRetry=false;
         phase="connect";diagnostic("start",0);
         try {gatt=device.connectGatt(context,false,callback,BluetoothDevice.TRANSPORT_LE);handler.postDelayed(timeout,15000);}
         catch(SecurityException|IllegalArgumentException e){fail("连接失败，请检查蓝牙权限。");}
@@ -157,6 +159,7 @@ public final class BleLink {
         if (routeProtocol != null) routeProtocol.reset();
         routeMaps=false;
         pendingSubscription=null;notifications=null;phase="idle";
+        awaitingDiscoveryRetry=false;
         BluetoothGatt old=gatt;gatt=null;
         if(old!=null){try{old.disconnect();old.close();}catch(SecurityException ignored){}}
         listener.disconnected();
@@ -237,12 +240,28 @@ public final class BleLink {
             if(state==BluetoothProfile.STATE_CONNECTED){phase="discover";listener.status("连接成功，正在验证服务…");try{if(!g.discoverServices())fail("服务发现失败。");}catch(SecurityException e){fail("蓝牙权限不可用。");}}
         });}
         @Override public void onServicesDiscovered(BluetoothGatt g,int status){handler.post(()->{
-            if(g!=gatt)return;
+            if(g!=gatt||awaitingDiscoveryRetry||pendingSubscription!=null||pending!=null||ready)return;
             diagnostic("services_discovered",status);
             if(status!=BluetoothGatt.GATT_SUCCESS){fail("设备服务发现失败（GATT "+status+"）。");return;}
             BluetoothGattService service=g.getService(SERVICE);
             BluetoothGattService mapService=navigation==null?null:g.getService(MAP_SERVICE);
             routeMaps=mapService!=null&&mapService.getCharacteristic(MAP_RX)!=null&&mapService.getCharacteristic(MAP_TX)!=null;
+            Diagnostics.record("ble_state","phase","discover","state","capabilities",
+                    "selected",routeMaps,"count",g.getServices().size());
+            // A bonded Android phone may return its old database before the
+            // peripheral's Service Changed indication arrives. Use one delayed,
+            // public-API rediscovery before settling on the legacy service.
+            if(navigation!=null&&!routeMaps&&!retriedDiscovery){
+                retriedDiscovery=true;awaitingDiscoveryRetry=true;
+                listener.status("正在重新确认圆屏路线地图服务…");
+                handler.postDelayed(()->{
+                    if(g!=gatt||!awaitingDiscoveryRetry)return;
+                    awaitingDiscoveryRetry=false;diagnostic("rediscover",0);
+                    try{if(!g.discoverServices())fail("圆屏服务重新发现未启动，请重新连接。");}
+                    catch(SecurityException e){fail("蓝牙权限不可用。");}
+                },750);
+                return;
+            }
             if(routeMaps)service=mapService;
             rx=service==null?null:service.getCharacteristic(routeMaps?MAP_RX:RX);
             BluetoothGattCharacteristic tx=service==null?null:service.getCharacteristic(routeMaps?MAP_TX:TX);

@@ -19,12 +19,14 @@ stubs = {
     'android/os/SystemClock.java': 'package android.os; public class SystemClock {public static long elapsedRealtime(){return 10000;}}',
     'android/os/Looper.java': 'package android.os; public class Looper {public static Looper getMainLooper(){return new Looper();}}',
     'android/os/Handler.java': '''package android.os; public class Handler {
-        static java.util.List<Runnable> queue=new java.util.ArrayList<>(), delayed=new java.util.ArrayList<>();
+        static java.util.List<Runnable> queue=new java.util.ArrayList<>();
+        record Delayed(Runnable action,long millis){} static java.util.List<Delayed> delayed=new java.util.ArrayList<>();
         public Handler(Looper l){} public boolean post(Runnable r){queue.add(r);return true;}
-        public boolean postDelayed(Runnable r,long t){delayed.add(r);return true;}
-        public void removeCallbacks(Runnable r){queue.removeIf(x->x==r);delayed.removeIf(x->x==r);}
+        public boolean postDelayed(Runnable r,long t){delayed.add(new Delayed(r,t));return true;}
+        public void removeCallbacks(Runnable r){queue.removeIf(x->x==r);delayed.removeIf(x->x.action()==r);}
         public static void flush(){while(!queue.isEmpty())queue.remove(0).run();}
-        public static void timeout(){var copy=new java.util.ArrayList<>(delayed);delayed.clear();copy.forEach(Runnable::run);flush();}
+        public static void advance(long millis){var copy=new java.util.ArrayList<>(delayed);for(var d:copy)if(d.millis()<=millis&&delayed.remove(d))d.action().run();flush();}
+        public static void timeout(){advance(Long.MAX_VALUE);}
         public static void clear(){queue.clear();delayed.clear();} }''',
     'android/os/ParcelUuid.java': 'package android.os; public class ParcelUuid {public ParcelUuid(java.util.UUID u){}}',
     'android/bluetooth/BluetoothProfile.java': 'package android.bluetooth; public class BluetoothProfile {public static final int STATE_CONNECTED=2,STATE_DISCONNECTED=0;}',
@@ -43,6 +45,7 @@ stubs = {
         public BluetoothGatt(BluetoothDevice d,BluetoothGattCallback c){device=d;callback=c;}
         public BluetoothDevice getDevice(){return device;} public void disconnect(){} public void close(){closed=true;}
         public boolean discoverServices(){discoveries++;return true;} public BluetoothGattService getService(java.util.UUID u){return services.get(u);}
+        public java.util.List<BluetoothGattService> getServices(){return new java.util.ArrayList<>(services.values());}
         public boolean setCharacteristicNotification(BluetoothGattCharacteristic c,boolean b){return true;}
         public boolean writeDescriptor(BluetoothGattDescriptor d){descriptor=d;descriptorWrites++;return writeDescriptorResult;}
         public boolean writeCharacteristic(BluetoothGattCharacteristic c){lastWrite=c;writes++;return true;} }''',
@@ -124,6 +127,7 @@ public class BleLinkTests implements BleLink.Listener {
     static void errorsAndLateCallbacks(){
         for(boolean maps:new boolean[]{false,true}){
             var t=new BleLinkTests();var g=t.start(maps);t.discover(g);
+            if(!maps){Handler.advance(750);t.discover(g);}
             g.callback.onDescriptorWrite(g,g.descriptor,3);Handler.flush();
             t.check(t.status.contains("GATT 3")&&t.status.contains(maps?"NAV4":"NAV3"),"Expose exact subscription error and protocol");
             t.check(g.closed&&!t.link.sessionOpen()&&g.writes==0,"Failed subscription closes without HELLO");
@@ -148,7 +152,26 @@ public class BleLinkTests implements BleLink.Listener {
         fresh.callback.onServiceChanged(fresh);Handler.flush();
         t.check(fresh.closed&&!t.link.sessionOpen(),"Repeated service change is bounded");
     }
-    public static void main(String[] args){subscriptionAndAck();errorsAndLateCallbacks();serviceChange();System.out.println("PASS: "+checks+" real BleLink callback checks (boundary doubles; no radio)");}
+    static void rediscovery(){
+        var t=new BleLinkTests();var g=t.start(false);t.discover(g);
+        t.check(g.descriptorWrites==0&&g.writes==0,"Do not select cached NAV3 before Service Changed can arrive");
+        g.callback.onServicesDiscovered(g,0);Handler.flush();
+        t.check(g.descriptorWrites==0,"Duplicate discovery callback cannot bypass migration wait");
+        Handler.advance(750);
+        t.check(g.discoveries==2,"One public API rediscovery");
+        var service=new BluetoothGattService();var mapTx=new BluetoothGattCharacteristic(16);
+        service.chars.put(UUID.fromString("91c40002-6b5d-4f1a-b817-52e0baf8a430"),new BluetoothGattCharacteristic(8));
+        service.chars.put(UUID.fromString("91c40003-6b5d-4f1a-b817-52e0baf8a430"),mapTx);
+        g.services.put(BleLink.MAP_SERVICE,service);t.discover(g);
+        t.check(g.descriptor==mapTx.descriptor,"New NAV4 service wins over cached legacy service");
+        t.link.disconnect();
+        t=new BleLinkTests();g=t.start(false);t.discover(g);Handler.advance(750);t.discover(g);
+        t.check(g.descriptorWrites==1&&g.discoveries==2,"Actual NAV3-only firmware remains supported with bounded retry");
+        t.link.disconnect();
+        t=new BleLinkTests();g=t.start(false);t.discover(g);t.link.disconnect();Handler.advance(750);
+        t.check(g.discoveries==1,"Disconnect cancels the delayed rediscovery");
+    }
+    public static void main(String[] args){subscriptionAndAck();errorsAndLateCallbacks();serviceChange();rediscovery();System.out.println("PASS: "+checks+" real BleLink callback checks (boundary doubles; no radio)");}
 }
 '''
 
