@@ -1,9 +1,11 @@
 #pragma once
 #include "motonav/core/navigation_protocol.h"
+#include "motonav/core/route_scene.h"
 
 namespace motonav {
 
 struct ScreenSnapshot {
+    RouteScene route{};
     Guidance guidance{};
     ReceiverStats packets{};
     bool linked = false, encrypted = false, subscribed = false;

@@ -4,7 +4,7 @@
 #include "esp_err.h"
 
 namespace motonav::drivers {
-enum class BleEventType { Connected, Disconnected, Subscription, PairingPin, Security };
+enum class BleEventType { Connected, Disconnected, Subscription, PairingPin, Security, Protocol };
 struct BleEvent { BleEventType type; uint32_t value = 0; };
 enum class BleReceiveResult { Accepted, Rejected, NoMemory };
 struct BleCallbacks {

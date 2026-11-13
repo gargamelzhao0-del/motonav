@@ -231,13 +231,32 @@ public class JourneyControllerTests {
         try (Fixture f = new Fixture()) {
             AMapNavi engine = f.navigate();
             engine.listener.onNaviInfoUpdate(new NaviInfo());
-            Handler.advance(16000);
-            engine.listener.onLocationChange(new AMapNaviLocation());
+            Handler.advance(14000);
+            AMapNaviLocation gps = new AMapNaviLocation(); gps.measured -= 1000;
+            engine.listener.onLocationChange(gps);
             engine.listener.onNaviInfoUpdate(new NaviInfo());
-            check(f.host.message.contains("导航 SDK 仍在更新位置"),"fresh SDK position plus expired map stream is diagnosed distinctly");
-            check(f.controller.frame().mode()==NavigationFrame.WAITING,"SDK observation does not rewrite an old map fix timestamp");
-            Handler.advance(1); f.host.fixAt(30); engine.listener.onNaviInfoUpdate(new NaviInfo());
-            check(f.controller.frame().mode()==NavigationFrame.LIVE,"fresh map position and instruction recover normally");
+            Handler.advance(2000);
+            engine.listener.onNaviInfoUpdate(new NaviInfo());
+            check(f.controller.frame().mode()==NavigationFrame.LIVE,"fresh SDK GPS keeps guidance live when map stream expires");
+            check(f.host.location.getElapsedRealtimeNanos()==100000000000L,"map timestamp is never rewritten");
+            check(f.controller.frame().speedKmh()==36,"SDK km/h is not converted twice");
+            Handler.advance(16000);
+            engine.listener.onLocationChange(gps); engine.listener.onNaviInfoUpdate(new NaviInfo());
+            check(f.controller.frame().mode()==NavigationFrame.WAITING,"duplicate SDK measurement cannot extend source lifetime");
+            Handler.advance(1); engine.listener.onLocationChange(new AMapNaviLocation());
+            engine.listener.onNaviInfoUpdate(new NaviInfo());
+            check(f.controller.frame().mode()==NavigationFrame.LIVE,"new SDK GPS and instruction recover without map callback");
+            f.host.allowed=false; f.controller.refreshGuidance();
+            check(f.host.finished==1,"SDK source never overrides revoked location permission");
+        }
+        try (Fixture f = new Fixture()) {
+            AMapNavi engine=f.navigate(); Handler.advance(16001);
+            AMapNaviLocation network=new AMapNaviLocation(); network.source=1;
+            engine.listener.onLocationChange(network); engine.listener.onNaviInfoUpdate(new NaviInfo());
+            check(f.controller.frame().mode()==NavigationFrame.WAITING,"SDK network callback does not bypass GPS quality gate");
+            network.source=0; network.accuracy=550;
+            engine.listener.onLocationChange(network); engine.listener.onNaviInfoUpdate(new NaviInfo());
+            check(f.controller.frame().mode()==NavigationFrame.WAITING,"550m SDK fix cannot sustain navigation");
         }
         try (Fixture f = new Fixture()) {
             AMapNavi engine = f.navigate();

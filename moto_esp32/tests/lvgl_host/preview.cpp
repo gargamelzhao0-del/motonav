@@ -1,5 +1,6 @@
 #include "motonav/ui/navigation_ui.h"
 #include "motonav/ui/dashboard.h"
+#include "motonav/core/navigation_session.h"
 #if MOTONAV_DEVICE_TESTS
 #include "motonav/testing/display_benchmark.h"
 #endif
@@ -160,6 +161,29 @@ int main(int argc, char **argv) {
     snapshot.guidance = {motonav::Live, 3, 250, 12000, 1000, 50};
     save(display, directory / "navigation.ppm");
     auto navigation_pixels = pixels;
+    {
+        auto previous=snapshot;
+        motonav::NavigationSession session;
+        session.connected();session.protocol(4);session.security(true);session.subscription(true);
+        std::ifstream fixture(ROUTE_FIXTURE_PATH);std::string row;char reply[32]{};
+        for(int frame=0;frame<2;frame++) {
+            if(!std::getline(fixture,row))return 1;
+            for(size_t i=0;i<row.size();i+=2)session.feed(static_cast<char>(std::stoul(row.substr(i,2),nullptr,16)),clock_ms,reply);
+            if(reply[0]!='A')return 1;
+        }
+        snapshot=session.snapshot(clock_ms);
+        if(snapshot.route.count!=4)return 1;
+        save(display,directory/"phone-route.ppm");require_label("36 km/h");require_label("120 m");
+        if(pixels==navigation_pixels || lv_obj_get_child_count(lv_screen_active())!=normal_children+1)return 1;
+        snapshot.route.x+=40;snapshot.route.y+=50;snapshot.route.heading=900;
+        save(display,directory/"phone-route-moving.ppm");
+        snapshot=session.snapshot(clock_ms+15001);
+        save(display,directory/"phone-route-expired.ppm");require_label("GUIDANCE EXPIRED");
+        if(lv_obj_get_child_count(lv_screen_active())!=normal_children)return 1;
+        snapshot=previous;
+        save(display,directory/"phone-route-fallback.ppm");
+        if(pixels!=navigation_pixels)return 1;
+    }
     snapshot.guidance = {motonav::Live, 47, 50000000, 50000000, 31536000, -1};
     save(display, directory / "unknown-maneuver.ppm");
     snapshot.guidance = {};

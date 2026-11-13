@@ -30,6 +30,7 @@ void NavigationService::event(const drivers::BleEvent &input) {
         case drivers::BleEventType::Subscription: session_.subscription(input.value != 0); break;
         case drivers::BleEventType::PairingPin: session_.pairing(input.value); break;
         case drivers::BleEventType::Security: session_.security(input.value != 0); break;
+        case drivers::BleEventType::Protocol: session_.protocol(input.value); break;
     }
     xSemaphoreGive(mutex_);
 }

@@ -18,7 +18,8 @@ constexpr const char *Tag = "motonav";
 BleCallbacks callbacks;
 bool subscribed = false, secure = false;
 char revision[33];
-uint16_t connection_handle = BLE_HS_CONN_HANDLE_NONE, tx_handle;
+uint16_t connection_handle = BLE_HS_CONN_HANDLE_NONE, tx_handle, map_tx_handle;
+unsigned active_protocol=0;
 uint8_t address_type;
 char device_name[20];
 ble_npl_callout advertising_retry;
@@ -26,6 +27,9 @@ ble_npl_callout advertising_retry;
 const ble_uuid128_t service_uuid = BLE_UUID128_INIT(0x9e,0xca,0xdc,0x24,0x0e,0xe5,0xa9,0xe0,0x93,0xf3,0xa3,0xb5,0x01,0x00,0x40,0x6e);
 const ble_uuid128_t rx_uuid = BLE_UUID128_INIT(0x9e,0xca,0xdc,0x24,0x0e,0xe5,0xa9,0xe0,0x93,0xf3,0xa3,0xb5,0x02,0x00,0x40,0x6e);
 const ble_uuid128_t tx_uuid = BLE_UUID128_INIT(0x9e,0xca,0xdc,0x24,0x0e,0xe5,0xa9,0xe0,0x93,0xf3,0xa3,0xb5,0x03,0x00,0x40,0x6e);
+const ble_uuid128_t map_service_uuid = BLE_UUID128_INIT(0x30,0xa4,0xf8,0xba,0xe0,0x52,0x17,0xb8,0x1a,0x4f,0x5d,0x6b,0x01,0x00,0xc4,0x91);
+const ble_uuid128_t map_rx_uuid = BLE_UUID128_INIT(0x30,0xa4,0xf8,0xba,0xe0,0x52,0x17,0xb8,0x1a,0x4f,0x5d,0x6b,0x02,0x00,0xc4,0x91);
+const ble_uuid128_t map_tx_uuid = BLE_UUID128_INIT(0x30,0xa4,0xf8,0xba,0xe0,0x52,0x17,0xb8,0x1a,0x4f,0x5d,0x6b,0x03,0x00,0xc4,0x91);
 const ble_uuid16_t info_uuid = BLE_UUID16_INIT(0x180a);
 const ble_uuid16_t revision_uuid = BLE_UUID16_INIT(0x2a26);
 
@@ -39,9 +43,10 @@ int read_revision(uint16_t, uint16_t, ble_gatt_access_ctxt *ctx, void *) {
     return os_mbuf_append(ctx->om, version, std::strlen(version)) ? BLE_ATT_ERR_INSUFFICIENT_RES : 0;
 }
 
-int write_bytes(uint16_t connection, uint16_t, ble_gatt_access_ctxt *ctx, void *) {
+int write_bytes(uint16_t connection, uint16_t, ble_gatt_access_ctxt *ctx, void *channel) {
     if (ctx->op != BLE_GATT_ACCESS_OP_WRITE_CHR) return BLE_ATT_ERR_WRITE_NOT_PERMITTED;
-    if (connection != connection_handle || !subscribed || !secure) return BLE_ATT_ERR_UNLIKELY;
+    if (connection != connection_handle || !subscribed || !secure
+            || active_protocol!=reinterpret_cast<uintptr_t>(channel)) return BLE_ATT_ERR_UNLIKELY;
     uint8_t bytes[512];
     uint16_t length = OS_MBUF_PKTLEN(ctx->om);
     if (!length || length > sizeof(bytes) || ble_hs_mbuf_to_flat(ctx->om, bytes, sizeof(bytes), nullptr))
@@ -60,15 +65,21 @@ int notification_access(uint16_t, uint16_t, ble_gatt_access_ctxt *ctx, void *) {
 }
 
 const ble_gatt_chr_def characteristics[] = {
-    {.uuid = &rx_uuid.u, .access_cb = write_bytes,
+    {.uuid = &rx_uuid.u, .access_cb = write_bytes, .arg = reinterpret_cast<void *>(3),
      .flags = BLE_GATT_CHR_F_WRITE | BLE_GATT_CHR_F_WRITE_ENC | BLE_GATT_CHR_F_WRITE_AUTHEN},
     {.uuid = &tx_uuid.u, .access_cb = notification_access, .flags = BLE_GATT_CHR_F_NOTIFY, .val_handle = &tx_handle}, {}
+};
+const ble_gatt_chr_def map_characteristics[] = {
+    {.uuid = &map_rx_uuid.u, .access_cb = write_bytes, .arg = reinterpret_cast<void *>(4),
+     .flags = BLE_GATT_CHR_F_WRITE | BLE_GATT_CHR_F_WRITE_ENC | BLE_GATT_CHR_F_WRITE_AUTHEN},
+    {.uuid = &map_tx_uuid.u, .access_cb = notification_access, .flags = BLE_GATT_CHR_F_NOTIFY, .val_handle = &map_tx_handle}, {}
 };
 const ble_gatt_chr_def info_characteristics[] = {
     {.uuid = &revision_uuid.u, .access_cb = read_revision, .flags = BLE_GATT_CHR_F_READ}, {}
 };
 const ble_gatt_svc_def services[] = {
     {.type = BLE_GATT_SVC_TYPE_PRIMARY, .uuid = &service_uuid.u, .characteristics = characteristics},
+    {.type = BLE_GATT_SVC_TYPE_PRIMARY, .uuid = &map_service_uuid.u, .characteristics = map_characteristics},
     {.type = BLE_GATT_SVC_TYPE_PRIMARY, .uuid = &info_uuid.u, .characteristics = info_characteristics}, {}
 };
 
@@ -76,6 +87,7 @@ void advertise();
 void reset_connection() {
     connection_handle = BLE_HS_CONN_HANDLE_NONE;
     subscribed = secure = false;
+    active_protocol=0;
     emit(BleEventType::Disconnected);
 }
 
@@ -85,6 +97,7 @@ int gap_event(ble_gap_event *event, void *) {
             if (event->connect.status) { advertise(); return 0; }
             connection_handle = event->connect.conn_handle;
             subscribed = secure = false;
+            active_protocol=0;
             emit(BleEventType::Connected);
             ESP_LOGI(Tag, "Phone connected"); return 0;
         case BLE_GAP_EVENT_DISCONNECT:
@@ -93,9 +106,14 @@ int gap_event(ble_gap_event *event, void *) {
         case BLE_GAP_EVENT_ADV_COMPLETE:
             advertise(); return 0;
         case BLE_GAP_EVENT_SUBSCRIBE:
-            if (event->subscribe.attr_handle == tx_handle) {
-                subscribed = event->subscribe.cur_notify;
-                emit(BleEventType::Subscription, subscribed);
+            if (event->subscribe.attr_handle == tx_handle || event->subscribe.attr_handle == map_tx_handle) {
+                unsigned channel=event->subscribe.attr_handle==map_tx_handle?4:3;
+                if(event->subscribe.cur_notify && !active_protocol) {
+                    active_protocol=channel; subscribed=true;
+                    emit(BleEventType::Protocol,channel); emit(BleEventType::Subscription,1);
+                } else if(!event->subscribe.cur_notify && active_protocol==channel) {
+                    subscribed=false; active_protocol=0; emit(BleEventType::Subscription,0);
+                }
             }
             return 0;
         case BLE_GAP_EVENT_PASSKEY_ACTION: {
@@ -179,6 +197,6 @@ esp_err_t ble_notify(const uint8_t *data, size_t length) {
     os_mbuf *packet = ble_hs_mbuf_from_flat(data, length);
     if (!packet) return ESP_ERR_NO_MEM;
     // NimBLE consumes the packet even on failure.
-    return ble_gatts_notify_custom(connection_handle, tx_handle, packet) ? ESP_FAIL : ESP_OK;
+    return ble_gatts_notify_custom(connection_handle, active_protocol==4?map_tx_handle:tx_handle, packet) ? ESP_FAIL : ESP_OK;
 }
 } // namespace motonav::drivers

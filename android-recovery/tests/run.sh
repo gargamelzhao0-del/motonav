@@ -21,6 +21,8 @@ java -cp "$build" AmapAccessTests
 java -cp "$build" AmapKeySessionTests
 java -m jdk.compiler/com.sun.tools.javac.Main -encoding UTF-8 -source 17 -target 17 -d "$build" app/src/main/java/com/motonav/companion/MapStartupPolicy.java tests/MapStartupPolicyTests.java
 java -cp "$build" MapStartupPolicyTests
+java -m jdk.compiler/com.sun.tools.javac.Main -encoding UTF-8 -source 17 -target 17 -cp "$build" -d "$build" app/src/main/java/com/motonav/companion/NaviFixTracker.java tests/NaviFixTests.java
+java -cp "$build" NaviFixTests
 python3 tests/activity_contracts.py
 java -m jdk.compiler/com.sun.tools.javac.Main -encoding UTF-8 -source 17 -target 17 -cp "$build" -d "$build" app/src/main/java/com/motonav/companion/JourneyState.java tests/JourneyStateTests.java
 java -cp "$build" JourneyStateTests
@@ -42,3 +44,7 @@ java -m jdk.compiler/com.sun.tools.javac.Main -encoding UTF-8 -source 17 -target
 java -cp "$build" NavigationProtocolTests "$build/nav3.frames"
 g++ -std=c++17 -Wall -Wextra -Werror ../moto_esp32/tests/navigation_protocol_test.cpp -o "$build/navigation-protocol-test"
 "$build/navigation-protocol-test" "$build/nav3.frames"
+java -m jdk.compiler/com.sun.tools.javac.Main -encoding UTF-8 -source 17 -target 17 -cp "$build" -d "$build" app/src/main/java/com/motonav/companion/DeviceRoute.java app/src/main/java/com/motonav/companion/RouteProtocol.java tests/RouteProtocolTests.java
+java -cp "$build" RouteProtocolTests "$build/nav4.frames"
+g++ -std=c++17 -Wall -Wextra -Werror -I../moto_esp32/components/motonav_core/include ../moto_esp32/tests/host/route_protocol_test.cpp -o "$build/route-protocol-test"
+"$build/route-protocol-test" "$build/nav4.frames"

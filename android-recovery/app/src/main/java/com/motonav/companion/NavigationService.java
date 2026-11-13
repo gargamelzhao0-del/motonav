@@ -219,7 +219,7 @@ public final class NavigationService extends Service implements JourneyControlle
 
     private void publish() {
         NavigationFrame frame = journey.frame();
-        if (link.ready() && !link.busy()) link.sendNavigation(frame, stopping ? this::shutdownForeground : null);
+        if (link.ready() && !link.busy()) link.sendNavigation(frame, journey.deviceMap(), stopping ? this::shutdownForeground : null);
         if (!navigating || stopping) return;
         String text = frame.mode() == NavigationFrame.LIVE ? JourneyState.maneuver(frame.icon()) + " · " + frame.turnMeters() + " 米" : "等待可信定位和导航指令";
         if (!text.equals(notificationText)) {
@@ -274,7 +274,7 @@ public final class NavigationService extends Service implements JourneyControlle
     @Override public void ready() {
         handler.removeCallbacks(reconnect); reconnecting = false; retries = 0;
         Diagnostics.record("ble_state", "state", "ready");
-        status("圆屏已连接 · 实时导航协议 v3"); publish();
+        status(link.routeMaps() ? "圆屏已连接 · 支持完整圆屏路线地图" : "圆屏已连接 · 箭头导航（路线地图需要升级固件）"); publish();
     }
     @Override public void acknowledged(int sequence) { }
     @Override public void disconnected() {

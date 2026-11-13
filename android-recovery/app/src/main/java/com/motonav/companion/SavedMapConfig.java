@@ -42,8 +42,8 @@ final class SavedMapConfig {
         byte[] plain=cipher.doFinal(Base64.decode(prefs.getString("cipher",""),Base64.NO_WRAP));
         try{return new String(plain,StandardCharsets.UTF_8);}finally{java.util.Arrays.fill(plain,(byte)0);}
     }
-    boolean consent(){return prefs.getInt("consent_version",0)==3;}
-    boolean consent(boolean value){return prefs.edit().putInt("consent_version",value?3:0).commit();}
+    boolean consent(){return prefs.getInt("consent_version",0)==4;}
+    boolean consent(boolean value){return prefs.edit().putInt("consent_version",value?4:0).commit();}
     boolean asked(){return prefs.getBoolean("permission_asked",false);}
     void asked(boolean value){prefs.edit().putBoolean("permission_asked",value).apply();}
     boolean clear(){

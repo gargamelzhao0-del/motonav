@@ -216,7 +216,7 @@ public final class AmapActivity extends Activity {
     private void policy(String url){try{startActivity(new Intent(Intent.ACTION_VIEW,Uri.parse(url)));}catch(ActivityNotFoundException e){status.setText(getString(R.string.amap_no_browser,url));}}
     private void askConsent(){
         if(map!=null||!keys.configured()||!foreground||consentDialog!=null)return;
-        consentDialog=new AlertDialog.Builder(this).setTitle("启用高德联网地图？").setMessage("本应用使用高德地图、定位、搜索及导航SDK，联网时向高德提交Android Key、包信息及服务必需的网络、设备和位置信息，服务端可见IP。浏览地图时在前台定位。主动开始导航后，通过持续通知在锁屏或切换应用时继续定位，直到结束导航。主动搜索或规划路线时会把搜索词和起终点提交高德；显式开始后提供GPS普通驾车导航（不含摩托车禁限行避让），并向你选择并配对的ESP32发送转向、距离、车速和数据有效状态。圆屏连接通过系统蓝牙授权和配对。本次版本扩展了数据用途，因此需要重新同意一次。请先阅读页面中的隐私政策和条款。\n\nKey将用Android Keystore保护的AES-GCM加密保存于本应用私有存储，应用备份关闭。此次同意会保存，今后打开自动加载地图及定位；可在设置中删除Key并撤回同意。SDK自身缓存无法保证彻底清除。系统首次定位授权仍需本人操作。")
+        consentDialog=new AlertDialog.Builder(this).setTitle("启用高德联网地图？").setMessage("本应用使用高德地图、定位、搜索及导航SDK，联网时向高德提交Android Key、包信息及服务必需的网络、设备和位置信息，服务端可见IP。浏览地图时在前台定位。主动开始导航后，通过持续通知在锁屏或切换应用时继续定位，直到结束导航。主动搜索或规划路线时会把搜索词和起终点提交高德；显式开始后提供GPS普通驾车导航（不含摩托车禁限行避让），并向你选择并配对的ESP32发送当前位置、路线片段、转向、距离、车速和数据有效状态。圆屏连接通过系统蓝牙授权和配对。本次版本扩展了数据用途，因此需要重新同意一次。请先阅读页面中的隐私政策和条款。\n\nKey将用Android Keystore保护的AES-GCM加密保存于本应用私有存储，应用备份关闭。此次同意会保存，今后打开自动加载地图及定位；可在设置中删除Key并撤回同意。SDK自身缓存无法保证彻底清除。系统首次定位授权仍需本人操作。")
             .setNegativeButton("不同意并关闭",(d,w)->{consent=false;dispose();boolean recorded=saved.consent(false);if(!recorded){saved.clear();keys.clear();open.setEnabled(false);}status.setText(recorded?"已撤回同意，不会自动联网定位":"已停止地图，但无法确认撤回记录已保存。请在系统中清除本测试应用数据后再使用。");})
             .setPositiveButton("同意并联网打开",(d,w)->{if(!foreground||isFinishing())return;if(!saved.consent(true)){status.setText("无法保存同意，请重试");return;}consent=true;initialize();}).create();
         consentDialog.setOnDismissListener(d->consentDialog=null);consentDialog.show();
@@ -419,6 +419,13 @@ public final class AmapActivity extends Activity {
     private void renderLocation(boolean precise) {
         Diagnostics.fixState("map", fixes, precise, systemLocationEnabled());
         long now = SystemClock.elapsedRealtimeNanos();
+        Location guidance = navigationService != null && NavigationService.navigating ? navigationService.journey().guidanceFix() : null;
+        if (precise && systemLocationEnabled() && guidance != null && "amap_navigation_gps".equals(guidance.getProvider())) {
+            setLocationDot(true); locationFeed.show(guidance);
+            status.setText("导航卫星定位 · 精度约 " + (long)Math.ceil(guidance.getAccuracy()) + " 米 · "
+                    + Math.max(0,(now-guidance.getElapsedRealtimeNanos())/1_000_000_000L) + " 秒前更新");
+            return;
+        }
         MapFixTracker.Fix<Location> observed = fixes.latest(now);
         MapFixTracker.Fix<Location> reliable = fixes.navigation(now, precise, true);
         MapFixTracker.Fix<Location> displayed = reliable != null ? reliable : observed;

@@ -9,6 +9,7 @@ struct Dashboard {
     lv_obj_t *remaining = nullptr, *footer = nullptr, *arrow = nullptr;
     lv_point_precise_t arrow_points[6]{};
     int last_icon = -1;
+    float arrow_scale = 1;
 };
 void create_dashboard(lv_obj_t *screen, Dashboard &view);
 void dashboard_arrow(Dashboard &view, int icon);

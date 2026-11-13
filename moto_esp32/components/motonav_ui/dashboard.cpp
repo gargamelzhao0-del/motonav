@@ -83,7 +83,7 @@ void dashboard_arrow(Dashboard &view, int icon) {
     lv_obj_set_flag(view.arrow, LV_OBJ_FLAG_HIDDEN, shape.count == 0);
     if (!shape.count) return;
     for (unsigned i = 0; i < shape.count; ++i) {
-        view.arrow_points[i].x = shape.points[i].x; view.arrow_points[i].y = shape.points[i].y;
+        view.arrow_points[i].x = shape.points[i].x*view.arrow_scale; view.arrow_points[i].y = shape.points[i].y*view.arrow_scale;
     }
     lv_line_set_points(view.arrow, view.arrow_points, shape.count);
 }

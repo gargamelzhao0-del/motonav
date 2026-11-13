@@ -1,5 +1,7 @@
 #include "motonav/ui/navigation_ui.h"
 #include "motonav/ui/dashboard.h"
+#include "motonav/graphics/route_map.h"
+#include <initializer_list>
 
 namespace motonav {
 namespace {
@@ -9,6 +11,71 @@ UiExtension extension;
 Dashboard view;
 const char *name;
 uint32_t last_title_color = 0;
+lv_obj_t *map_view=nullptr;
+bool map_layout=false;
+uint32_t map_revision=0,transition_at=0;
+MapCamera camera{},from_camera{},target_camera{};
+bool map_failed=false;
+void layout(bool enabled) {
+    if(enabled==map_layout)return;
+    map_layout=enabled; view.last_icon=-1; view.arrow_scale=enabled?0.35f:1;
+    lv_obj_set_pos(view.arrow,enabled?105:153,enabled?95:130);
+    lv_obj_set_style_line_width(view.arrow,enabled?5:14,0);
+    lv_obj_set_y(view.top,enabled?40:52); lv_obj_set_width(view.top,enabled?230:310);
+    lv_obj_set_y(view.title,enabled?68:88); lv_obj_set_width(view.title,enabled?266:350);
+    lv_obj_set_style_text_font(view.title,enabled?&lv_font_montserrat_20:&lv_font_montserrat_28,0);
+    lv_label_set_long_mode(view.title,enabled?LV_LABEL_LONG_DOT:LV_LABEL_LONG_WRAP);
+    lv_obj_set_y(view.number,enabled?99:266); lv_obj_set_width(view.number,enabled?210:330);
+    lv_obj_set_style_text_font(view.number,enabled?&lv_font_montserrat_28:&lv_font_montserrat_48,0);
+    lv_obj_align(view.number,LV_ALIGN_TOP_MID,enabled?30:0,enabled?99:266);
+    lv_obj_set_y(view.speed,enabled?361:330); lv_obj_set_width(view.speed,enabled?250:340);
+    lv_obj_set_y(view.remaining,enabled?400:374); lv_obj_set_width(view.remaining,enabled?270:330);
+    lv_obj_set_style_text_font(view.remaining,enabled?&lv_font_montserrat_16:&lv_font_montserrat_20,0);
+    lv_obj_set_flag(view.footer,LV_OBJ_FLAG_HIDDEN,enabled);
+    for(auto *label:{view.top,view.title,view.number,view.speed,view.remaining}) {
+        lv_obj_set_style_bg_color(label,lv_color_hex(0x090f0c),0);
+        lv_obj_set_style_bg_opa(label,enabled?LV_OPA_COVER:LV_OPA_TRANSP,0);
+        lv_obj_set_style_radius(label,enabled?6:0,0);
+    }
+}
+void route_map(const ScreenSnapshot &state) {
+    bool visible=screen_mode(state)==ScreenMode::Live && state.route.count>=2;
+    if(!visible) {
+        if(map_view) { lv_obj_delete(map_view); map_view=nullptr; }
+        map_revision=0; map_failed=false; layout(false); return;
+    }
+    if(!map_view && !map_failed) {
+        map_view=create_route_map(lv_obj_get_parent(view.top),466,466);
+        if(map_view) { lv_obj_set_pos(map_view,0,0); lv_obj_move_to_index(map_view,1); }
+        else map_failed=true;
+    }
+    if(!map_view) { layout(false); return; }
+    layout(true);
+    const auto &r=state.route;
+    float heading=r.heading<0?0:static_cast<float>(r.heading)*0.001745329252f;
+    bool changed=false;
+    uint32_t now=lv_tick_get();
+    if(map_revision!=r.revision) {
+        map_revision=r.revision; camera={static_cast<float>(r.x),static_cast<float>(r.y),heading,1};
+        from_camera=target_camera=camera; transition_at=now; changed=true;
+    } else if(target_camera.x!=r.x || target_camera.y!=r.y || std::abs(target_camera.heading-heading)>0.0001f) {
+        from_camera=camera; target_camera={static_cast<float>(r.x),static_cast<float>(r.y),heading,1}; transition_at=now;
+    }
+    float fraction=std::min(1.0f,static_cast<float>(now-transition_at)/900);
+    float turn=std::remainder(target_camera.heading-from_camera.heading,6.283185307f);
+    MapCamera next{from_camera.x+(target_camera.x-from_camera.x)*fraction,
+        from_camera.y+(target_camera.y-from_camera.y)*fraction,from_camera.heading+turn*fraction,1};
+    next.heading=std::remainder(next.heading,6.283185307f);
+    changed=changed||std::abs(next.x-camera.x)>0.001f||std::abs(next.y-camera.y)>0.001f||std::abs(next.heading-camera.heading)>0.0001f;
+    camera=next;
+    if(changed) {
+        MapPoint points[64];
+        for(unsigned i=0;i<r.count;i++)points[i]={r.points[i].x,r.points[i].y};
+        if(!render_route_map(map_view,camera,{points,r.count,nullptr,0})) {
+            lv_obj_delete(map_view); map_view=nullptr; map_failed=true; layout(false);
+        }
+    }
+}
 void touch(lv_event_t *event) {
     if (extension.gesture) extension.gesture(extension.context,
         lv_event_get_code(event) == LV_EVENT_LONG_PRESSED ? UiGesture::Hold : UiGesture::Tap, snapshot());
@@ -17,6 +84,7 @@ void refresh(lv_timer_t *) {
     ScreenSnapshot state = snapshot();
     if (extension.refresh && extension.refresh(extension.context, state)) return;
     ScreenMode mode = screen_mode(state);
+    route_map(state);
     set_label_text(view.top, state.linked ? (state.encrypted ? "PHONE CONNECTED" : "PHONE CONNECTING") : name);
     set_label_text(view.footer, mode == ScreenMode::Live ? "MOTONAV" : (extension.idle_hint ? extension.idle_hint : "MOTONAV"));
     uint32_t title_color = mode == ScreenMode::Stale || mode == ScreenMode::Waiting ? Amber : Lime;

@@ -9,7 +9,7 @@ import re
 root = Path(__file__).resolve().parents[1]
 allowed = {
     'motonav_core': {'core'},
-    'motonav_ui': {'core', 'ui'},
+    'motonav_ui': {'core', 'ui', 'graphics'},
     'motonav_graphics': {'graphics'},
     'motonav_display': {'drivers'},
     'motonav_touch': {'drivers'},

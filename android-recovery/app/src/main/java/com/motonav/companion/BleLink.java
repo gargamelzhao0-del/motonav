@@ -21,6 +21,9 @@ public final class BleLink {
     public static final UUID SERVICE=UUID.fromString("6e400001-b5a3-f393-e0a9-e50e24dcca9e");
     private static final UUID RX=UUID.fromString("6e400002-b5a3-f393-e0a9-e50e24dcca9e");
     private static final UUID TX=UUID.fromString("6e400003-b5a3-f393-e0a9-e50e24dcca9e");
+    public static final UUID MAP_SERVICE=UUID.fromString("91c40001-6b5d-4f1a-b817-52e0baf8a430");
+    private static final UUID MAP_RX=UUID.fromString("91c40002-6b5d-4f1a-b817-52e0baf8a430");
+    private static final UUID MAP_TX=UUID.fromString("91c40003-6b5d-4f1a-b817-52e0baf8a430");
     private static final UUID CCCD=UUID.fromString("00002902-0000-1000-8000-00805f9b34fb");
     public interface Listener { void status(String text); void found(BluetoothDevice device); void ready(); void disconnected(); void acknowledged(int seq); }
     private final Context context;
@@ -32,7 +35,8 @@ public final class BleLink {
     private ScanCallback activeScanCallback;
     private boolean ready;
     private boolean scanning;
-    private Protocol.Command pending;
+    private record Pending(int sequence,int helloVersion) { }
+    private Pending pending;
     private Runnable completion;
     private List<byte[]> chunks;
     private int chunkIndex;
@@ -43,6 +47,9 @@ public final class BleLink {
     private final NetworkProtocol networkProtocol=new NetworkProtocol();
     private LocalNetwork network;
     private NavigationProtocol navigation;
+    private RouteProtocol routeProtocol;
+    private boolean routeMaps;
+    public boolean routeMaps(){return ready && routeMaps;}
     private BluetoothDevice bondingDevice;
     private BroadcastReceiver bondReceiver;
     private List<Protocol.Command> transfer;
@@ -60,10 +67,15 @@ public final class BleLink {
         if (sessionOpen() || bondingDevice != null) throw new IllegalStateException("Connected");
         network = null;
         navigation = new NavigationProtocol(session);
+        routeProtocol = new RouteProtocol(session);
     }
     public boolean sendNavigation(NavigationFrame frame, Runnable done) {
+        return sendNavigation(frame,null,done);
+    }
+    public boolean sendNavigation(NavigationFrame frame, DeviceRoute.Frame map, Runnable done) {
         if (!ready || busy() || navigation == null) return false;
-        send(navigation.snapshot(frame, SystemClock.elapsedRealtime()), done);
+        if(routeMaps)send(routeProtocol.snapshot(frame,map,SystemClock.elapsedRealtime()),done);
+        else send(navigation.snapshot(frame, SystemClock.elapsedRealtime()), done);
         return true;
     }
     public void scan(){
@@ -134,6 +146,8 @@ public final class BleLink {
         clearBondWait();
         stopScan();handler.removeCallbacks(timeout);ready=false;pending=null;completion=null;chunks=null;chunkIndex=0;ackReceived=false;rx=null;writing=false;incoming.setLength(0);protocol.reset();networkProtocol.reset();transfer=null;transferIndex=0;
         if (navigation != null) navigation.reset();
+        if (routeProtocol != null) routeProtocol.reset();
+        routeMaps=false;
         BluetoothGatt old=gatt;gatt=null;
         if(old!=null){try{old.disconnect();old.close();}catch(SecurityException ignored){}}
         listener.disconnected();
@@ -152,13 +166,21 @@ public final class BleLink {
         send(transfer.get(transferIndex++),this::sendNextNetworkFrame);
     }
     private void beginProtocol(){
+        if (navigation != null && routeMaps) { send(routeProtocol.hello(), () -> { ready=true; listener.ready(); }); return; }
         if (navigation != null) { send(navigation.hello(), () -> { ready = true; listener.ready(); }); return; }
         if(network==null){send(protocol.hello(),()->send(protocol.route(),()->{ready=true;listener.ready();}));return;}
         send(networkProtocol.hello(),()->{transfer=networkProtocol.transfer(network);transferIndex=0;sendNextNetworkFrame();});
     }
     private void send(Protocol.Command command,Runnable done){
-        pending=command;completion=done;chunks=Protocol.chunks(command.wire());chunkIndex=0;ackReceived=false;
+        pending=new Pending(command.sequence(),navigation!=null&&command.wire().startsWith("H,3,")?3:0);
+        completion=done;chunks=Protocol.chunks(command.wire());chunkIndex=0;ackReceived=false;
         handler.removeCallbacks(timeout);handler.postDelayed(timeout,3000);writeNext();
+    }
+    private void send(RouteProtocol.Command command,Runnable done){
+        pending=new Pending(command.sequence(),command.hello()?4:0); completion=done;
+        chunks=new ArrayList<>(); byte[] bytes=command.bytes();
+        for(int i=0;i<bytes.length;i+=20)chunks.add(Arrays.copyOfRange(bytes,i,Math.min(bytes.length,i+20)));
+        chunkIndex=0;ackReceived=false;handler.removeCallbacks(timeout);handler.postDelayed(timeout,3000);writeNext();
     }
     @SuppressWarnings("deprecation")
     private void writeNext(){
@@ -177,8 +199,8 @@ public final class BleLink {
             if(b=='\n'){
                 String line=incoming.toString();incoming.setLength(0);
                 if(pending==null)continue;
-                String expected = "A," + pending.sequence() + ",NAV3";
-                boolean navHello = navigation != null && pending.wire().startsWith("H,3,");
+                String expected = "A," + pending.sequence() + ",NAV" + pending.helloVersion();
+                boolean navHello = pending.helloVersion()!=0;
                 if(navHello ? line.equals(expected) : Protocol.acknowledged(line,pending.sequence())){ackReceived=true;finishIfAcknowledged();}
                 else {fail("设备拒绝数据或协议不匹配："+line);return;}
             } else if(b>=32&&b<=126&&incoming.length()<32) incoming.append((char)b);
@@ -194,8 +216,11 @@ public final class BleLink {
         @Override public void onServicesDiscovered(BluetoothGatt g,int status){handler.post(()->{
             if(g!=gatt)return;
             BluetoothGattService service=g.getService(SERVICE);
-            rx=service==null?null:service.getCharacteristic(RX);
-            BluetoothGattCharacteristic tx=service==null?null:service.getCharacteristic(TX);
+            BluetoothGattService mapService=navigation==null?null:g.getService(MAP_SERVICE);
+            routeMaps=mapService!=null&&mapService.getCharacteristic(MAP_RX)!=null&&mapService.getCharacteristic(MAP_TX)!=null;
+            if(routeMaps)service=mapService;
+            rx=service==null?null:service.getCharacteristic(routeMaps?MAP_RX:RX);
+            BluetoothGattCharacteristic tx=service==null?null:service.getCharacteristic(routeMaps?MAP_TX:TX);
             BluetoothGattDescriptor descriptor=tx==null?null:tx.getDescriptor(CCCD);
             if(status!=BluetoothGatt.GATT_SUCCESS||rx==null||tx==null||descriptor==null||(rx.getProperties()&BluetoothGattCharacteristic.PROPERTY_WRITE)==0||(tx.getProperties()&BluetoothGattCharacteristic.PROPERTY_NOTIFY)==0){fail("设备不支持所需MotoNav BLE写入/通知服务，请检查固件。");return;}
             try{

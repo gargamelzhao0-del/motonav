@@ -12,13 +12,13 @@ set(BENCH_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../device/motonav_bench")
 function(add_preview target tests)
     add_executable(${target} preview.cpp
         ${COMPONENTS_DIR}/motonav_ui/navigation_ui.cpp ${COMPONENTS_DIR}/motonav_ui/dashboard.cpp
-        ${COMPONENTS_DIR}/motonav_ui/label_cache.cpp)
+        ${COMPONENTS_DIR}/motonav_ui/label_cache.cpp ${COMPONENTS_DIR}/motonav_graphics/route_map.cpp)
     target_include_directories(${target} PRIVATE .
-        ${COMPONENTS_DIR}/motonav_core/include ${COMPONENTS_DIR}/motonav_ui/include)
+        ${COMPONENTS_DIR}/motonav_core/include ${COMPONENTS_DIR}/motonav_ui/include ${COMPONENTS_DIR}/motonav_graphics/include)
     target_compile_definitions(${target} PRIVATE MOTONAV_DEVICE_TESTS=${tests})
+    target_compile_definitions(${target} PRIVATE ROUTE_FIXTURE_PATH="${CMAKE_CURRENT_SOURCE_DIR}/../fixtures/nav4.frames")
     if(tests)
-        target_sources(${target} PRIVATE ${COMPONENTS_DIR}/motonav_graphics/route_map.cpp
-            ${BENCH_DIR}/display_benchmark.cpp ${BENCH_DIR}/map_fixture.cpp)
+        target_sources(${target} PRIVATE ${BENCH_DIR}/display_benchmark.cpp ${BENCH_DIR}/map_fixture.cpp)
         target_include_directories(${target} PRIVATE
             ${COMPONENTS_DIR}/motonav_graphics/include ${BENCH_DIR}/include)
     endif()
