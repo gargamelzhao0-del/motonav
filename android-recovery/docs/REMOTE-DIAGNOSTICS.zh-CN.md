@@ -19,6 +19,7 @@
 3. `location_state`：分别查看最近观察点与可导航点年龄，以及 precise_permission_missing、system_location_off、navigation_fix_expired、accuracy_over_100m 等原因。
 4. `route_action` / `route_result`：区分 UI 拦截、提交时失效、SDK 拒绝、SDK 返回错误和成功。
 5. `lifecycle` / `environment`：对照页面暂停、服务启停、系统定位开关、网络与省电状态。
+6. 0.7.10 起，`ble_state` 的 `phase` 区分 `pair/connect/discover/subscribe/hello/stream`；`state=complete` 的 `error` 是 Android 回执订阅状态，`state=not_started` 表示请求没有发起，`state=timeout` 保留超时阶段。`generation` 表示所选导航协议版本（3/4，选择前为 3）；这些信息不包含设备地址与配对码。
 
 从 0.7.3 起，`location_callback` 的 `owner=shared` 表示地图与导航共用的定位请求；`location_decision` 仍分别标记 `map` 和 `navigation`，其中 `source` 是验证可信度后解析的原始来源。`location_start` 的 `measurement_stalled` / `recreate_after_stall` / `manual_retry` 区分自动重启、重建客户端和手动重试，`observation_age_ms` 表示距离收到新有效测量的时长。SDK 持续返回错误或旧数据时不会重置这个恢复计时器。
 

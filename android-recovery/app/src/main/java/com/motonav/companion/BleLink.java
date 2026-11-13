@@ -31,6 +31,9 @@ public final class BleLink {
     private final Handler handler=new Handler(Looper.getMainLooper());
     private BluetoothGatt gatt;
     private BluetoothGattCharacteristic rx;
+    private BluetoothGattCharacteristic notifications;
+    private BluetoothGattDescriptor pendingSubscription;
+    private String phase="idle";
     private BluetoothLeScanner scanner;
     private ScanCallback activeScanCallback;
     private boolean ready;
@@ -55,7 +58,7 @@ public final class BleLink {
     private BroadcastReceiver bondReceiver;
     private List<Protocol.Command> transfer;
     private int transferIndex;
-    private final Runnable timeout=()->fail("设备响应超时，已断开。请重新连接。");
+    private final Runnable timeout=()->{diagnostic("timeout",-1);fail("设备响应超时，已断开。请重新连接。");};
     private final Runnable scanTimeout=this::onScanTimeout;
     private void onScanTimeout(){ stopScan(); listener.status("扫描结束；没有找到设备时，请确认固件和蓝牙已开启。"); }
     public BleLink(Context context,Listener listener) { this.context=context;this.listener=listener; }
@@ -113,10 +116,12 @@ public final class BleLink {
         openGatt(device);
     }
     private void openGatt(BluetoothDevice device) {
+        phase="connect";diagnostic("start",0);
         try {gatt=device.connectGatt(context,false,callback,BluetoothDevice.TRANSPORT_LE);handler.postDelayed(timeout,15000);}
         catch(SecurityException|IllegalArgumentException e){fail("连接失败，请检查蓝牙权限。");}
     }
     private void bond(BluetoothDevice device) {
+        phase="pair";diagnostic("start",0);
         bondingDevice = device;
         bondReceiver = new BroadcastReceiver() {
             @Override public void onReceive(Context c, Intent intent) {
@@ -124,6 +129,7 @@ public final class BleLink {
                 if (!device.equals(changed) || !device.equals(bondingDevice)) return;
                 try {
                     int state = device.getBondState();
+                    diagnostic("bond_state",state);
                     if (state == BluetoothDevice.BOND_BONDED) { clearBondWait(); openGatt(device); }
                     else if (state == BluetoothDevice.BOND_NONE) fail("圆屏配对未完成，请重试连接。");
                 } catch (SecurityException e) { fail("蓝牙权限已撤回。"); }
@@ -150,11 +156,16 @@ public final class BleLink {
         if (navigation != null) navigation.reset();
         if (routeProtocol != null) routeProtocol.reset();
         routeMaps=false;
+        pendingSubscription=null;notifications=null;phase="idle";
         BluetoothGatt old=gatt;gatt=null;
         if(old!=null){try{old.disconnect();old.close();}catch(SecurityException ignored){}}
         listener.disconnected();
     }
     private void fail(String message){disconnect();listener.status(message);}
+    private void diagnostic(String state,int error){
+        Diagnostics.record("ble_state","phase",phase,"state",state,"error",error,
+                "generation",navigation==null?0:routeMaps?4:3);
+    }
     public boolean sendPosition(Simulation simulation,Runnable done){
         if(!ready||busy()||navigation!=null) return false;
         if((network!=null&&(simulation.totalMm()!=network.lengthMm()||!Arrays.deepEquals(simulation.route(),network.points())))||(network==null&&!Arrays.deepEquals(simulation.route(),Simulation.ROUTE))){fail("手机路线与已提交数据不一致，已安全断开。");return false;}
@@ -168,6 +179,7 @@ public final class BleLink {
         send(transfer.get(transferIndex++),this::sendNextNetworkFrame);
     }
     private void beginProtocol(){
+        phase="hello";diagnostic("start",0);
         if (navigation != null && routeMaps) { send(routeProtocol.hello(), () -> { ready=true; listener.ready(); }); return; }
         if (navigation != null) { send(navigation.hello(), () -> { ready = true; listener.ready(); }); return; }
         if(network==null){send(protocol.hello(),()->send(protocol.route(),()->{ready=true;listener.ready();}));return;}
@@ -193,6 +205,7 @@ public final class BleLink {
     }
     private void finishIfAcknowledged(){
         if(pending==null||writing||!ackReceived)return;
+        if(pending.helloVersion()!=0){diagnostic("acknowledged",0);phase="stream";}
         int sequence=pending.sequence();Runnable done=completion;pending=null;completion=null;handler.removeCallbacks(timeout);
         listener.acknowledged(sequence);if(done!=null)done.run();
     }
@@ -212,17 +225,21 @@ public final class BleLink {
     private final BluetoothGattCallback callback=new BluetoothGattCallback(){
         @Override public void onServiceChanged(BluetoothGatt g){handler.post(()->{
             if(g!=gatt)return;
+            diagnostic("services_changed",0);
             if(++serviceChanges>1){fail("圆屏服务反复变化，请重新连接。");return;}
             BluetoothDevice device=g.getDevice();
             disconnect();listener.status("圆屏固件已更新，正在重新发现路线地图服务…");openGatt(device);
         });}
         @Override public void onConnectionStateChange(BluetoothGatt g,int status,int state){handler.post(()->{
             if(g!=gatt)return;
+            diagnostic(state==BluetoothProfile.STATE_CONNECTED?"connected":"connection_state",status);
             if(status!=BluetoothGatt.GATT_SUCCESS||state==BluetoothProfile.STATE_DISCONNECTED){fail("设备已断开（"+status+"）。");return;}
-            if(state==BluetoothProfile.STATE_CONNECTED){listener.status("连接成功，正在验证服务…");try{if(!g.discoverServices())fail("服务发现失败。");}catch(SecurityException e){fail("蓝牙权限不可用。");}}
+            if(state==BluetoothProfile.STATE_CONNECTED){phase="discover";listener.status("连接成功，正在验证服务…");try{if(!g.discoverServices())fail("服务发现失败。");}catch(SecurityException e){fail("蓝牙权限不可用。");}}
         });}
         @Override public void onServicesDiscovered(BluetoothGatt g,int status){handler.post(()->{
             if(g!=gatt)return;
+            diagnostic("services_discovered",status);
+            if(status!=BluetoothGatt.GATT_SUCCESS){fail("设备服务发现失败（GATT "+status+"）。");return;}
             BluetoothGattService service=g.getService(SERVICE);
             BluetoothGattService mapService=navigation==null?null:g.getService(MAP_SERVICE);
             routeMaps=mapService!=null&&mapService.getCharacteristic(MAP_RX)!=null&&mapService.getCharacteristic(MAP_TX)!=null;
@@ -232,21 +249,28 @@ public final class BleLink {
             BluetoothGattDescriptor descriptor=tx==null?null:tx.getDescriptor(CCCD);
             if(status!=BluetoothGatt.GATT_SUCCESS||rx==null||tx==null||descriptor==null||(rx.getProperties()&BluetoothGattCharacteristic.PROPERTY_WRITE)==0||(tx.getProperties()&BluetoothGattCharacteristic.PROPERTY_NOTIFY)==0){fail("设备不支持所需MotoNav BLE写入/通知服务，请检查固件。");return;}
             try{
+                phase="subscribe";diagnostic("start",0);
                 if(!g.setCharacteristicNotification(tx,true)){fail("无法开启设备回执。");return;}
+                notifications=tx;pendingSubscription=descriptor;
                 descriptor.setValue(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE);
-                if(!g.writeDescriptor(descriptor))fail("回执订阅失败。");
+                if(!g.writeDescriptor(descriptor)){diagnostic("not_started",-1);fail("回执订阅未启动，请重新连接。");}
             }catch(SecurityException e){fail("蓝牙权限不可用。");}
         });}
         @Override public void onDescriptorWrite(BluetoothGatt g,BluetoothGattDescriptor descriptor,int status){handler.post(()->{
-            if(g!=gatt)return;
-            if(status!=BluetoothGatt.GATT_SUCCESS){fail("设备回执订阅失败。");return;}
+            if(g!=gatt||pendingSubscription==null||descriptor!=pendingSubscription)return;
+            pendingSubscription=null;
+            diagnostic("complete",status);
+            if(status!=BluetoothGatt.GATT_SUCCESS){fail("设备回执订阅失败（GATT "+status+"，NAV"+(routeMaps?4:3)+"）。");return;}
             beginProtocol();
         });}
         @Override public void onCharacteristicWrite(BluetoothGatt g,BluetoothGattCharacteristic characteristic,int status){handler.post(()->{
             if(g!=gatt||pending==null)return;
-            if(status!=BluetoothGatt.GATT_SUCCESS){fail("写入失败（"+status+"）。");return;}writeNext();
+            if(status!=BluetoothGatt.GATT_SUCCESS){diagnostic("write_failed",status);fail("写入失败（"+status+"）。");return;}writeNext();
         });}
-        @Override public void onCharacteristicChanged(BluetoothGatt g,BluetoothGattCharacteristic characteristic){byte[] bytes=characteristic.getValue().clone();handler.post(()->{if(g==gatt)notification(bytes);});}
-        @Override public void onCharacteristicChanged(BluetoothGatt g,BluetoothGattCharacteristic characteristic,byte[] value){byte[] bytes=value.clone();handler.post(()->{if(g==gatt)notification(bytes);});}
+        @Override public void onCharacteristicChanged(BluetoothGatt g,BluetoothGattCharacteristic characteristic){byte[] value=characteristic.getValue();if(value!=null)receiveNotification(g,characteristic,value);}
+        @Override public void onCharacteristicChanged(BluetoothGatt g,BluetoothGattCharacteristic characteristic,byte[] value){if(value!=null)receiveNotification(g,characteristic,value);}
     };
+    private void receiveNotification(BluetoothGatt g,BluetoothGattCharacteristic characteristic,byte[] value){
+        byte[] bytes=value.clone();handler.post(()->{if(g==gatt&&characteristic==notifications)notification(bytes);});
+    }
 }
