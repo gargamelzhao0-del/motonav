@@ -1,6 +1,7 @@
 #pragma once
 #include "motonav/core/navigation_protocol.h"
 #include "motonav/core/route_scene.h"
+#include "motonav/core/basemap_scene.h"
 
 namespace motonav {
 // Live snapshots are atomic. Negotiated route plans survive guidance expiry but
@@ -14,7 +15,7 @@ public:
         bytes_[used_++]=byte;
         if(used_==4) {
             expected_=u16(2);
-            if(expected_!=17 && (expected_<31 || expected_>MaxBytes)) { used_=0; return reject(reply); }
+            if(expected_!=17 && (expected_<26 || expected_>MaxBytes)) { used_=0; return reject(reply); }
         }
         if(used_<4 || used_<expected_)return false;
         bool ok=parse(now,reply); used_=0;
@@ -23,12 +24,18 @@ public:
     void disconnect() {
         navigation_.disconnect(); scene_={}; plan_={}; used_=0; sequence_=0; checksum_=0;
         route_revision_=0; route_crc_=0; plan_crc_=0; preview_enabled_=false;
+        basemap_enabled_=false; map_={}; staging_={}; staged_=0;
     }
     const NavigationReceiver &navigation() const { return navigation_; }
     ReceiverStats stats() const { return stats_; }
+    const BasemapScene &basemap() const { return map_; }
     RouteScene scene(uint64_t now) const {
         if(!navigation_.handshaken())return {};
-        if(navigation_.guidance(now).mode==Live && scene_.count>=2)return scene_;
+        if(navigation_.guidance(now).mode==Live && scene_.count>=2) {
+            auto result=scene_;result.local_view=basemap_enabled_;
+            if(result.revision==plan_.revision){result.total_m=plan_.total_m;result.total_s=plan_.total_s;}
+            return result;
+        }
         if(plan_.count>=2)return plan_;
         // Older senders can retain their last real route as a static overview.
         auto result=scene_; result.overview=true; return result;
@@ -40,6 +47,9 @@ private:
     uint32_t route_revision_=0,route_crc_=0;
     uint32_t plan_crc_=0;
     bool preview_enabled_=false;
+    bool basemap_enabled_=false;
+    BasemapScene map_,staging_;
+    unsigned staged_=0;
     NavigationReceiver navigation_;
     RouteScene scene_,plan_;
     ReceiverStats stats_;
@@ -61,9 +71,9 @@ private:
         if(NavigationReceiver::crc32(reinterpret_cast<const char *>(bytes_),expected_-4)!=crc
                 ||!seq||seq>INT_MAX||!session||session>INT_MAX)return false;
         const unsigned type=bytes_[4];
-        const bool hello=type==1||type==3;
-        const char *ack=hello?(type==3?"NAV4P":"NAV4"):"OK";
-        if((hello && expected_!=17)||(!hello && type!=2 && type!=4))return false;
+        const bool hello=type==1||type==3||type==5;
+        const char *ack=hello?(type==5?"NAV4S":type==3?"NAV4P":"NAV4"):"OK";
+        if((hello && expected_!=17)||(!hello && type!=2 && type!=4 && type!=6 && type!=7))return false;
         if(navigation_.handshaken() && seq==sequence_ && session==session_ && crc==checksum_) {
             ++stats_.duplicates; std::snprintf(reply,sizeof(reply),"A,%lu,%s\n",static_cast<unsigned long>(seq),ack); return true;
         }
@@ -72,7 +82,48 @@ private:
             if(navigation_.handshaken()||seq!=1)return false;
             std::snprintf(body,sizeof(body),"H,3,%lu,%lu",static_cast<unsigned long>(seq),static_cast<unsigned long>(session));
             if(!core(body,now))return false;
-            scene_={}; plan_={}; preview_enabled_=type==3;
+            scene_={}; plan_={}; preview_enabled_=type==3;basemap_enabled_=type==5;
+            map_={};staging_={};staged_=0;
+        } else if(type==6) {
+            if(!basemap_enabled_||!navigation_.handshaken()||session!=session_||seq<=sequence_||expected_<45)return false;
+            unsigned count=bytes_[14],reason=bytes_[13];uint32_t revision=u32(15);
+            int x=i16(19),y=i16(21),heading=i16(23),total_m=i32(25),total_s=i32(29);
+            if(count<2||count>64||expected_!=37+4*count||reason>7||!revision||revision>INT_MAX
+                ||revision<plan_.revision||std::abs(x)>32000||std::abs(y)>32000||heading<-1||heading>3599
+                ||total_m<-1||total_m>50000000||total_s<-1||total_s>31536000)return false;
+            auto geometry_crc=NavigationReceiver::crc32(reinterpret_cast<const char *>(bytes_+33),4*count);
+            if(revision==plan_.revision&&geometry_crc!=plan_crc_)return false;
+            RouteScene next;next.revision=revision;next.count=count;next.overview=true;next.local_view=true;
+            next.waiting_reason=reason;next.x=x;next.y=y;next.heading=heading;next.total_m=total_m;next.total_s=total_s;
+            for(unsigned i=0;i<count;i++) {
+                int px=i16(33+4*i),py=i16(35+4*i);
+                if(std::abs(px)>32000||std::abs(py)>32000)return false;
+                next.points[i]={static_cast<int16_t>(px),static_cast<int16_t>(py)};
+            }
+            if(revision!=plan_.revision){map_={};staging_={};staged_=0;}
+            plan_=next;plan_crc_=geometry_crc;
+        } else if(type==7) {
+            if(!basemap_enabled_||!navigation_.handshaken()||session!=session_||seq<=sequence_||expected_<26)return false;
+            uint32_t revision=u32(13);unsigned total=u16(17),offset=u16(19),count=bytes_[21];
+            if(!revision||revision!=plan_.revision||total>BasemapScene::Capacity||count>19||expected_!=26+14*count
+                ||offset+count>total||(!count&&total)||(!offset&&map_.revision==revision))return false;
+            if(offset&&(staging_.revision!=revision||staging_.count!=total||offset!=staged_))return false;
+            // Validate the entire chunk before touching staging state.
+            for(unsigned i=0;i<count;i++) {
+                size_t p=22+14*i;unsigned kind=bytes_[p];
+                if(kind>5||bytes_[p+1])return false;
+                for(unsigned j=0;j<6;j++)if(std::abs(i16(p+2+2*j))>2048)return false;
+                if(kind<3&&(i16(p+10)||i16(p+12)))return false;
+            }
+            if(!offset){staging_={};staging_.revision=revision;staging_.count=total;staged_=0;}
+            for(unsigned i=0;i<count;i++) {
+                size_t p=22+14*i;auto &item=staging_.items[offset+i];item.kind=bytes_[p];
+                item.a={static_cast<int16_t>(i16(p+2)),static_cast<int16_t>(i16(p+4))};
+                item.b={static_cast<int16_t>(i16(p+6)),static_cast<int16_t>(i16(p+8))};
+                item.c={static_cast<int16_t>(i16(p+10)),static_cast<int16_t>(i16(p+12))};
+            }
+            staged_+=count;
+            if(staged_==total){map_=staging_;}
         } else if(type==4) {
             if(!preview_enabled_ || !navigation_.handshaken() || session!=session_ || seq<=sequence_ || expected_<31)return false;
             unsigned reason=bytes_[13],count=bytes_[14]; uint32_t revision=u32(15);
@@ -108,7 +159,7 @@ private:
                 static_cast<unsigned long>(seq),static_cast<unsigned long>(session),bytes_[13],bytes_[14],
                 i32(15),i32(19),i32(23),i16(27),u16(29),u16(31));
             if(!core(body,now))return false;
-            if(bytes_[13]==Stopped || bytes_[13]==Arrived) { scene_={}; plan_={}; plan_crc_=0; }
+            if(bytes_[13]==Stopped || bytes_[13]==Arrived) { scene_={}; plan_={}; plan_crc_=0;map_={};staging_={};staged_=0; }
             else if(bytes_[13]==Live)scene_=next;
             if(count) { route_revision_=revision; route_crc_=geometry_crc; }
         }

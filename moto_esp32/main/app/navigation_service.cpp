@@ -22,6 +22,11 @@ drivers::BleCallbacks NavigationService::callbacks() {
             return static_cast<NavigationService *>(context)->receive(data, size);
         }};
 }
+bool NavigationService::read_map(uint32_t revision,BasemapScene &out) {
+    xSemaphoreTake(mutex_,portMAX_DELAY);
+    bool result=session_.read_map(revision,out);
+    xSemaphoreGive(mutex_);return result;
+}
 void NavigationService::event(const drivers::BleEvent &input) {
     xSemaphoreTake(mutex_, portMAX_DELAY);
     switch (input.type) {

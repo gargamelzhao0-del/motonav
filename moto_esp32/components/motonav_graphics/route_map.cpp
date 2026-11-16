@@ -8,6 +8,8 @@
 #include "src/misc/cache/instance/lv_image_cache.h"
 #include <cstdlib>
 #include <new>
+#include <array>
+#include <initializer_list>
 #ifdef ESP_PLATFORM
 #include "esp_heap_caps.h"
 #endif
@@ -23,7 +25,16 @@ using Segment = MapRaster::PreparedLine;
 static_assert(sizeof(Segment) == 20, "Keep the prepared geometry cache bounded");
 struct MapScene {
     lv_image_dsc_t image{};
-    Segment roads[64]{}, route[511]{};
+    Segment roads[64]{}, route[63]{};
+    struct Feature {
+        uint8_t kind=0;
+        union Geometry {
+            ProjectedPoint points[3];Segment line;
+            Geometry():points{}{}
+        } geometry;
+    } features[192]{};
+    size_t feature_count=0;
+    bool compass=false;
     size_t road_count = 0, route_count = 0;
     bool show_position=true;
     lv_draw_buf_t strip{};
@@ -69,7 +80,17 @@ void line(MapRaster &raster, const Segment &segment, int width, uint32_t color, 
 }
 void paint(MapRaster &raster, MapScene &scene, int top, int bottom) {
     const uint64_t begin = scene.clock_us ? scene.clock_us() : 0;
-    raster.clear(panel_color(0x20292e));
+    raster.clear(panel_color(0x242455));
+    for(unsigned kind: {4u,5u,3u})for(size_t i=0;i<scene.feature_count;i++) {
+        const auto &f=scene.features[i];if(f.kind!=kind)continue;
+        raster.polygon(f.geometry.points,3,panel_color(kind==4?0x2455aa:kind==5?0x245500:0x555555));
+    }
+    for(unsigned kind=0;kind<3;kind++)for(size_t i=0;i<scene.feature_count;i++) {
+        const auto &f=scene.features[i];if(f.kind!=kind)continue;
+        const auto &segment=f.geometry.line;
+        if(kind==2)line(raster,segment,10,0x3a4144,top,bottom);
+        line(raster,segment,kind==2?6:kind==1?5:3,kind==2?0xc4cacc:kind==1?0x929ca1:0x6c787e,top,bottom);
+    }
     for (size_t i=0; i<scene.road_count; ++i) {
         line(raster, scene.roads[i], 8, 0x10191e, top, bottom);
         line(raster, scene.roads[i], 4, 0x66757c, top, bottom);
@@ -78,6 +99,17 @@ void paint(MapRaster &raster, MapScene &scene, int top, int bottom) {
         for (size_t i=0; i<scene.route_count; ++i)
             line(raster, scene.route[i], pass ? 7 : 12, pass ? 0xb66dff : 0x2a1440, top, bottom);
     if(scene.show_position)player(raster, scene.image.header.w/2, scene.image.header.h*7/10);
+    if(scene.compass) {
+        static const auto ticks=[] {
+            std::array<Segment,72> result{};
+            for(unsigned i=0;i<result.size();i++) {
+                float angle=i*0.0872664626f,r=i%6?216:211;
+                result[i]=Segment({233+std::sin(angle)*r,233-std::cos(angle)*r},
+                                  {233+std::sin(angle)*220,233-std::cos(angle)*220});
+            }return result;
+        }();
+        for(unsigned i=0;i<ticks.size();i++)line(raster,ticks[i],i%6?1:2,0x899398,top,bottom);
+    }
     if (scene.clock_us) {
         scene.stats.elapsed_us += scene.clock_us() - begin;
         ++scene.stats.calls;
@@ -217,15 +249,31 @@ lv_obj_t *create_route_map(lv_obj_t *parent, int width, int height) {
 }
 
 bool render_route_map(lv_obj_t *view, const MapCamera &camera, const MapGeometry &geometry) {
-    if (!view || geometry.route_count > 512 || geometry.road_count > 64 ||
+    if (!view || geometry.route_count > 64 || geometry.road_count > 64 ||geometry.feature_count>192||
+        (geometry.feature_count&&!geometry.features)||
         (geometry.route_count && !geometry.route) || (geometry.road_count && !geometry.roads)) return false;
+    for(size_t i=0;i<geometry.feature_count;i++) {
+        const auto &f=geometry.features[i];if(f.kind>5)return false;
+        for(auto p:{f.a,f.b,f.c})if(std::abs(int(p.x))>2048||std::abs(int(p.y))>2048)return false;
+    }
     auto *scene = scene_for(lv_image_get_src(view));
     if (!scene) return false;
     MapProjection projection(scene->image.header.w, scene->image.header.h, camera);
     if (!projection.valid()) return false;
     scene->road_count = scene->route_count = 0;
     scene->show_position=geometry.show_position;
+    scene->feature_count=0;scene->compass=geometry.compass;
     ProjectedPoint a, b;
+    for(size_t i=0;i<geometry.feature_count;i++) {
+        const auto &f=geometry.features[i];MapScene::Feature next;next.kind=f.kind;
+        if(f.kind<3) {
+            if(!projection.segment(f.a,f.b,a,b))continue;
+            new(&next.geometry.line) Segment(a,b);
+        } else {
+            next.geometry.points[0]=projection.project(f.a);next.geometry.points[1]=projection.project(f.b);next.geometry.points[2]=projection.project(f.c);
+        }
+        scene->features[scene->feature_count++]=next;
+    }
     for (size_t i=0; i<geometry.road_count; ++i) {
         if (projection.segment(geometry.roads[i].a, geometry.roads[i].b, a, b))
             scene->roads[scene->road_count++] = Segment(a, b);

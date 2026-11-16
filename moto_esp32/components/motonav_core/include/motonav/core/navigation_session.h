@@ -36,8 +36,16 @@ public:
         result.stream_fresh = receiver.connected(now_ms);
         result.source_expired = receiver.source_expired(now_ms);
         result.packets = protocol_==4?route_receiver_.stats():receiver.stats();
-        if(protocol_==4)result.route=route_receiver_.scene(now_ms);
+        if(protocol_==4) {
+            result.route=route_receiver_.scene(now_ms);
+            const auto &map=route_receiver_.basemap();
+            result.basemap_revision=map.revision;result.basemap_count=map.count;
+        }
         return result;
+    }
+    bool read_map(uint32_t revision,BasemapScene &out) const {
+        if(!can_receive()||protocol_!=4||!revision||route_receiver_.basemap().revision!=revision)return false;
+        out=route_receiver_.basemap();return true;
     }
 private:
     void reset_receivers() { receiver_.disconnect(); route_receiver_.disconnect(); }

@@ -46,12 +46,16 @@ java -m jdk.compiler/com.sun.tools.javac.Main -encoding UTF-8 -source 17 -target
 java -cp "$build" NavigationProtocolTests "$build/nav3.frames"
 g++ -std=c++17 -Wall -Wextra -Werror ../moto_esp32/tests/navigation_protocol_test.cpp -o "$build/navigation-protocol-test"
 "$build/navigation-protocol-test" "$build/nav3.frames"
-java -m jdk.compiler/com.sun.tools.javac.Main -encoding UTF-8 -source 17 -target 17 -cp "$build" -d "$build" app/src/main/java/com/motonav/companion/DeviceRoute.java app/src/main/java/com/motonav/companion/RouteProtocol.java tests/RouteProtocolTests.java
+java -m jdk.compiler/com.sun.tools.javac.Main -encoding UTF-8 -source 17 -target 17 -cp "$build" -d "$build" app/src/main/java/com/motonav/companion/DeviceRoute.java app/src/main/java/com/motonav/companion/Basemap.java app/src/main/java/com/motonav/companion/RouteProtocol.java tests/RouteProtocolTests.java
 java -cp "$build" RouteProtocolTests "$build/nav4.frames"
 java -m jdk.compiler/com.sun.tools.javac.Main -encoding UTF-8 -source 17 -target 17 -cp "$build" -d "$build" tests/RoutePlanTests.java
 java -cp "$build" RoutePlanTests "$build/nav4-plan.frames"
 g++ -std=c++17 -Wall -Wextra -Werror -I../moto_esp32/components/motonav_core/include ../moto_esp32/tests/host/route_protocol_test.cpp -o "$build/route-protocol-test"
 "$build/route-protocol-test" "$build/nav4.frames" "$build/nav4-plan.frames"
+java -m jdk.compiler/com.sun.tools.javac.Main -encoding UTF-8 -source 17 -target 17 -cp "$build" -d "$build" app/src/main/java/com/motonav/companion/VectorTile.java app/src/main/java/com/motonav/companion/LocalMapBuilder.java app/src/main/java/com/motonav/companion/MapTileStore.java tests/BasemapTests.java
+java -cp "$build" com.motonav.companion.BasemapTests "$build/nav4-scene.frames"
+g++ -std=c++17 -Wall -Wextra -Werror -I../moto_esp32/components/motonav_core/include ../moto_esp32/tests/host/basemap_protocol_test.cpp -o "$build/basemap-protocol-test"
+"$build/basemap-protocol-test" "$build/nav4-scene.frames"
 java -m jdk.compiler/com.sun.tools.javac.Main -encoding UTF-8 -source 17 -target 17 -cp "$build" -d "$build" app/src/main/java/com/motonav/companion/BleDiagnosticProtocol.java tests/BleDiagnosticProtocolTests.java
 java -cp "$build" BleDiagnosticProtocolTests "$build/diag1.frames"
 g++ -std=c++17 -Wall -Wextra -Werror -I../moto_esp32/components/motonav_diagnostics/include ../moto_esp32/tests/host/diagnostic_protocol_test.cpp ../moto_esp32/components/motonav_diagnostics/format.cpp -o "$build/diagnostic-protocol-test"

@@ -1,11 +1,13 @@
 #pragma once
 #include "motonav/core/display_model.h"
+#include "motonav/core/basemap_scene.h"
 #include "lvgl.h"
 
 namespace motonav {
 struct SnapshotReader {
     ScreenSnapshot (*read)(void *) = nullptr;
     void *context = nullptr;
+    bool (*read_map)(void *,uint32_t,BasemapScene &)=nullptr;
     ScreenSnapshot operator()() const { return read ? read(context) : ScreenSnapshot{}; }
 };
 enum class UiGesture { Tap, Hold };

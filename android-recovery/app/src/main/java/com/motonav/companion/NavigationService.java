@@ -45,6 +45,9 @@ public final class NavigationService extends Service implements JourneyControlle
     private JourneyController journey;
     private AmapLocationFeed feed;
     private BleLink link;
+    private BasemapLoader basemapLoader;
+    private Basemap.Scene basemapScene;
+    private long navigationSentMs=-1000;
     private View view;
     private BluetoothDevice selectedDevice;
     private PowerManager.WakeLock wakeLock;
@@ -88,6 +91,10 @@ public final class NavigationService extends Service implements JourneyControlle
         feed = new AmapLocationFeed(this, this::receiveLocation);
         link = new BleLink(getApplicationContext(), this);
         link.configureNavigation(new SecureRandom().nextInt(Integer.MAX_VALUE - 1) + 1);
+        basemapLoader=new BasemapLoader(this,new BasemapLoader.Listener(){
+            @Override public void loaded(Basemap.Scene scene){basemapScene=scene;if(!destroyed)publish();}
+            @Override public void unavailable(){if(!destroyed)status("圆屏已连接 · 底图暂不可用，30 秒后重试；导航路线保留");}
+        });
         handler.post(diagnosticTick);
         NotificationChannel channel = new NotificationChannel(CHANNEL, "正在导航", NotificationManager.IMPORTANCE_LOW);
         getSystemService(NotificationManager.class).createNotificationChannel(channel);
@@ -228,12 +235,24 @@ public final class NavigationService extends Service implements JourneyControlle
 
     private void publish() {
         NavigationFrame frame = journey.frame();
+        Basemap.Focus focus=stopping?null:journey.deviceFocus();
+        if(link.basemaps()&&focus!=null){
+            basemapLoader.request(focus);
+            if(basemapScene!=null&&basemapScene.revision()==focus.route().revision())link.offerBasemap(basemapScene);
+        }
         if (link.ready() && !link.busy()) {
             // Clear a previously sent live instruction before spending radio time
             // on a changed plan. The callback rereads current state after its ACK.
             boolean clearLive=frame.mode()!=NavigationFrame.LIVE && link.lastSentLive();
-            boolean planSent=!stopping && !clearLive && link.sendRoutePlanIfNeeded(journey.devicePreview(),this::publish);
-            if(!planSent)link.sendNavigation(frame,journey.deviceMap(),stopping?this::shutdownForeground:null);
+            long now=SystemClock.elapsedRealtime();
+            // Each acknowledged map chunk yields to fresh navigation/STOP.
+            if(stopping||clearLive||now-navigationSentMs>=1000){
+                navigationSentMs=now;
+                link.sendNavigation(frame,journey.deviceMap(),stopping?this::shutdownForeground:this::publish);
+            } else if(link.basemaps()) {
+                if(!link.sendFocusIfNeeded(focus,this::publish)&&focus!=null)
+                    link.sendMapChunkIfNeeded(focus.route().revision(),this::publish);
+            } else link.sendRoutePlanIfNeeded(journey.devicePreview(),this::publish);
         }
         if (!navigating || stopping) return;
         String text = frame.mode() == NavigationFrame.LIVE ? JourneyState.maneuver(frame.icon()) + " · " + frame.turnMeters() + " 米" : "等待可信定位和导航指令";
@@ -262,6 +281,7 @@ public final class NavigationService extends Service implements JourneyControlle
     }
 
     @Override public void finished() {
+        basemapLoader.clear();basemapScene=null;
         pendingStart = null;
         feed.stop(); fixes.clear();
         if (!navigating) { publish(); return; }
@@ -289,7 +309,8 @@ public final class NavigationService extends Service implements JourneyControlle
     @Override public void ready() {
         handler.removeCallbacks(reconnect); reconnecting = false; retries = 0;
         Diagnostics.record("ble_state", "state", "ready");
-        status(link.routeMaps() ? "圆屏已连接 · 支持完整圆屏路线地图" : "圆屏已连接 · 箭头导航（暂未发现路线地图服务）"); publish();
+        navigationSentMs=-1000;
+        status(link.basemaps()?"圆屏已连接 · OpenStreetMap 实景道路 / 局部导航":link.routeMaps() ? "圆屏已连接 · 路线地图，请更新圆屏固件以启用底图" : "圆屏已连接 · 箭头导航（暂未发现路线地图服务）"); publish();
     }
     @Override public void acknowledged(int sequence) { }
     @Override public void disconnected() {
@@ -303,6 +324,7 @@ public final class NavigationService extends Service implements JourneyControlle
 
     @Override public void onDestroy() {
         destroyed = true;
+        basemapLoader.close();
         journey.close(); shutdownForeground(); keys.clear(); view = null;
         handler.removeCallbacksAndMessages(null);
         super.onDestroy();

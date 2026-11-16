@@ -11,6 +11,7 @@ class NavigationService {
 public:
     esp_err_t init();
     ScreenSnapshot snapshot();
+    bool read_map(uint32_t revision,BasemapScene &out);
     drivers::BleCallbacks callbacks();
 private:
     void event(const drivers::BleEvent &event);

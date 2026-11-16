@@ -55,7 +55,7 @@ public final class BleLink {
     private boolean scanning;
     private int serviceChanges;
     private boolean retriedDiscovery, awaitingDiscoveryRetry;
-    private record Pending(int sequence,int helloVersion,boolean previewProbe,boolean plan) { }
+    private record Pending(int sequence,int helloVersion,int probe,boolean plan) { }
     private Pending pending;
     private Runnable completion;
     private List<byte[]> chunks;
@@ -70,6 +70,28 @@ public final class BleLink {
     private RouteProtocol routeProtocol;
     private boolean routeMaps;
     private boolean routePreview, previewFallback;
+    private boolean basemaps;
+    private int payloadBytes=20;
+    private Basemap.Scene pendingMap;
+    private int mapOffset,sentMapRevision;
+    public boolean basemaps(){return ready&&basemaps;}
+    public void offerBasemap(Basemap.Scene scene){
+        if(scene!=null&&scene.revision()!=sentMapRevision&&(pendingMap==null||pendingMap.revision()!=scene.revision())){
+            pendingMap=scene;mapOffset=0;
+        }
+    }
+    public boolean sendFocusIfNeeded(Basemap.Focus focus,Runnable done){
+        if(!basemaps()||busy()||focus==null||(focus.route().revision()==sentPlanRevision&&focus.reason()==sentPlanReason))return false;
+        send(routeProtocol.focus(focus),()->{sentPlanRevision=focus.route().revision();sentPlanReason=focus.reason();if(done!=null)done.run();});return true;
+    }
+    public boolean sendMapChunkIfNeeded(int revision,Runnable done){
+        if(!basemaps()||busy()||pendingMap==null||pendingMap.revision()!=revision||sentPlanRevision!=revision)return false;
+        Basemap.Scene scene=pendingMap;int offset=mapOffset,count=Math.min(19,scene.items().size()-offset);
+        send(routeProtocol.basemap(scene,offset),()->{
+            if(pendingMap==scene){mapOffset+=count;if(mapOffset==scene.items().size()){sentMapRevision=revision;pendingMap=null;}}
+            if(done!=null)done.run();
+        });return true;
+    }
     private int sentPlanRevision, sentPlanReason=-1;
     public boolean routeMaps(){return ready && routeMaps;}
     public boolean routePreview(){return ready && routePreview;}
@@ -223,6 +245,7 @@ public final class BleLink {
         if (navigation != null) navigation.reset();
         if (routeProtocol != null) routeProtocol.reset();
         routeMaps=false;routePreview=false;previewFallback=false;sentPlanRevision=0;sentPlanReason=-1;
+        basemaps=false;payloadBytes=20;pendingMap=null;mapOffset=sentMapRevision=0;
         pendingSubscription=null;notifications=null;phase="idle";
         awaitingDiscoveryRetry=false;
         BluetoothGatt old=gatt;gatt=null;
@@ -248,20 +271,21 @@ public final class BleLink {
     }
     private void beginProtocol(){
         phase="hello";diagnostic("start",0);
-        if (navigation != null && routeMaps) { send(routeProtocol.helloWithPreview(), () -> { ready=true; listener.ready(); }); return; }
+        if (navigation != null && routeMaps) { send(routeProtocol.helloWithBasemap(), () -> { ready=true; listener.ready(); }); return; }
         if (navigation != null) { send(navigation.hello(), () -> { ready = true; listener.ready(); }); return; }
         if(network==null){send(protocol.hello(),()->send(protocol.route(),()->{ready=true;listener.ready();}));return;}
         send(networkProtocol.hello(),()->{transfer=networkProtocol.transfer(network);transferIndex=0;sendNextNetworkFrame();});
     }
     private void send(Protocol.Command command,Runnable done){
-        pending=new Pending(command.sequence(),navigation!=null&&command.wire().startsWith("H,3,")?3:0,false,false);
+        pending=new Pending(command.sequence(),navigation!=null&&command.wire().startsWith("H,3,")?3:0,0,false);
         completion=done;chunks=Protocol.chunks(command.wire());chunkIndex=0;ackReceived=false;
         handler.removeCallbacks(timeout);handler.postDelayed(timeout,3000);writeNext();
     }
     private void send(RouteProtocol.Command command,Runnable done){
-        pending=new Pending(command.sequence(),command.hello()?4:0,command.bytes()[4]==3,command.bytes()[4]==4); completion=done;
+        int type=command.bytes()[4];
+        pending=new Pending(command.sequence(),command.hello()?4:0,type==3||type==5?type:0,type==4||type==6||type==7); completion=done;
         chunks=new ArrayList<>(); byte[] bytes=command.bytes();
-        for(int i=0;i<bytes.length;i+=20)chunks.add(Arrays.copyOfRange(bytes,i,Math.min(bytes.length,i+20)));
+        for(int i=0;i<bytes.length;i+=payloadBytes)chunks.add(Arrays.copyOfRange(bytes,i,Math.min(bytes.length,i+payloadBytes)));
         chunkIndex=0;ackReceived=false;handler.removeCallbacks(timeout);handler.postDelayed(timeout,3000);writeNext();
     }
     @SuppressWarnings("deprecation")
@@ -292,9 +316,10 @@ public final class BleLink {
     }
     private void finishIfAcknowledged(){
         if(pending==null||writing||!ackReceived)return;
-        if(pending.previewProbe() && previewFallback){
+        if(pending.probe()!=0 && previewFallback){
+            int probe=pending.probe();
             Runnable done=completion;pending=null;completion=null;previewFallback=false;handler.removeCallbacks(timeout);
-            routeProtocol.reset();send(routeProtocol.hello(),done);return;
+            routeProtocol.reset();send(probe==5?routeProtocol.helloWithPreview():routeProtocol.hello(),done);return;
         }
         if(pending.helloVersion()!=0){diagnostic("acknowledged",0);phase="stream";}
         int sequence=pending.sequence();boolean plan=pending.plan();Runnable done=completion;pending=null;completion=null;handler.removeCallbacks(timeout);
@@ -312,15 +337,21 @@ public final class BleLink {
                 if(pending==null)continue;
                 String expected = "A," + pending.sequence() + ",NAV" + pending.helloVersion();
                 boolean navHello = pending.helloVersion()!=0;
-                if(pending.previewProbe() && line.equals("E,NAV4")){
+                if(pending.probe()!=0 && line.equals("E,NAV4")){
                     previewFallback=true;ackReceived=true;finishIfAcknowledged();
-                }else if(pending.previewProbe() && line.equals("A,"+pending.sequence()+",NAV4P")){
+                }else if(pending.probe()==5 && line.equals("A,"+pending.sequence()+",NAV4S")){
+                    basemaps=true;ackReceived=true;finishIfAcknowledged();
+                }else if(pending.probe()==3 && line.equals("A,"+pending.sequence()+",NAV4P")){
                     routePreview=true;ackReceived=true;finishIfAcknowledged();
                 }else if(navHello ? line.equals(expected) : Protocol.acknowledged(line,pending.sequence())){ackReceived=true;finishIfAcknowledged();}
                 else {fail("设备拒绝数据或协议不匹配："+line);return;}
             } else if(b>=32&&b<=126&&incoming.length()<32) incoming.append((char)b);
             else {fail("设备返回无效数据。");return;}
         }
+    }
+    private void discover(BluetoothGatt g){
+        phase="discover";
+        try{if(!g.discoverServices())fail("服务发现失败。");}catch(SecurityException e){fail("蓝牙权限不可用。");}
     }
     private final BluetoothGattCallback callback=new BluetoothGattCallback(){
         @Override public void onServiceChanged(BluetoothGatt g){handler.post(()->{
@@ -334,7 +365,15 @@ public final class BleLink {
             if(g!=gatt)return;
             diagnostic(state==BluetoothProfile.STATE_CONNECTED?"connected":"connection_state",status);
             if(status!=BluetoothGatt.GATT_SUCCESS||state==BluetoothProfile.STATE_DISCONNECTED){fail("设备已断开（"+status+"）。");return;}
-            if(state==BluetoothProfile.STATE_CONNECTED){phase="discover";listener.status("连接成功，正在验证服务…");try{if(!g.discoverServices())fail("服务发现失败。");}catch(SecurityException e){fail("蓝牙权限不可用。");}}
+            if(state==BluetoothProfile.STATE_CONNECTED){
+                phase="mtu";listener.status("连接成功，正在验证服务…");
+                try{if(!g.requestMtu(247))discover(g);}catch(SecurityException e){fail("蓝牙权限不可用。");}
+            }
+        });}
+        @Override public void onMtuChanged(BluetoothGatt g,int mtu,int status){handler.post(()->{
+            if(g!=gatt||!phase.equals("mtu"))return;
+            if(status==BluetoothGatt.GATT_SUCCESS&&mtu>=23)payloadBytes=Math.min(244,mtu-3);
+            discover(g);
         });}
         @Override public void onServicesDiscovered(BluetoothGatt g,int status){handler.post(()->{
             if(g!=gatt||awaitingDiscoveryRetry||pendingSubscription!=null||pending!=null||ready)return;

@@ -141,7 +141,9 @@ int main(int argc, char **argv) {
         area->x1 &= ~1; area->y1 &= ~1; area->x2 |= 1; area->y2 |= 1;
     }, LV_EVENT_INVALIDATE_AREA, nullptr);
 #endif
-    motonav::SnapshotReader reader{[](void *) { return snapshot; }, nullptr};
+    static motonav::BasemapScene basemap;
+    motonav::SnapshotReader reader{[](void *) { return snapshot; }, nullptr,
+        [](void *,uint32_t revision,motonav::BasemapScene &out){if(basemap.revision!=revision)return false;out=basemap;return true;}};
     motonav::UiExtension extension;
 #if MOTONAV_DEVICE_TESTS
     static uint64_t fps_reset_us;
@@ -257,6 +259,23 @@ int main(int argc, char **argv) {
             }
         }
         snapshot=previous;save(display,directory/"plan-fallback.ppm");
+        if(pixels!=navigation_pixels)return 1;
+    }
+    {
+        auto previous=snapshot;motonav::NavigationSession session;
+        session.connected();session.protocol(4);session.security(true);session.subscription(true);
+        std::ifstream fixture(SCENE_FIXTURE_PATH);std::string row;char reply[32]{};unsigned frame=0;
+        while(std::getline(fixture,row)) {
+            for(size_t i=0;i<row.size();i+=2)session.feed(static_cast<char>(std::stoul(row.substr(i,2),nullptr,16)),clock_ms,reply);
+            if(reply[0]!='A')return 1;snapshot=session.snapshot(clock_ms);
+            session.read_map(snapshot.basemap_revision,basemap);
+            if(frame==13){save(display,directory/"real-map-waiting.ppm");require_label("WAIT GPS");if(basemap.count!=192)return 1;}
+            if(frame==14){save(display,directory/"real-map-live.ppm");require_label("36");require_label("120 m");}
+            if(frame==15){save(display,directory/"real-map-gps-lost.ppm");require_label("WAIT GPS");if(basemap.count!=192)return 1;}
+            frame++;
+        }
+        if(frame!=17)return 1;
+        snapshot=previous;save(display,directory/"real-map-stopped.ppm");
         if(pixels!=navigation_pixels)return 1;
     }
     snapshot.guidance = {motonav::Live, 47, 50000000, 50000000, 31536000, -1};

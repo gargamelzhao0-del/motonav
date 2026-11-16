@@ -20,12 +20,19 @@ public final class DeviceRoute {
     private int revision;
     private List<Point> overview = List.of();
     private int overviewRevision;
+    private Frame lastFrame;
     public void replace(List<Coordinate> coordinates) {
-        route = List.copyOf(coordinates); window = List.of();
+        route = List.copyOf(coordinates); window = List.of(); lastFrame=null;
         overview = overview(route);
         overviewRevision = overview.isEmpty() || revision == Integer.MAX_VALUE ? 0 : ++revision;
     }
-    public void clear() { route = List.of(); window = List.of(); overview = List.of(); overviewRevision = 0; }
+    public void clear() { route = List.of(); window = List.of(); overview = List.of(); overviewRevision = 0; lastFrame=null; }
+    /** A fixed metre view, retained through GPS loss. Never fit the whole journey. */
+    public Frame localFrame() {
+        if(lastFrame==null && route.size()>=2)frame(route.get(0).latitude(),route.get(0).longitude(),-1);
+        return lastFrame;
+    }
+    public Coordinate origin() { return new Coordinate(originLat,originLon); }
     public Preview preview(int waitingReason) {
         if (waitingReason < 0 || waitingReason > 7) throw new IllegalArgumentException("waiting reason");
         return overviewRevision == 0 ? null : new Preview(overviewRevision, overview, waitingReason);
@@ -108,10 +115,11 @@ public final class DeviceRoute {
         }
         Point p=project(position);
         int heading=Float.isFinite(bearing)&&bearing>=0&&bearing<360?Math.round(bearing*10)%3600:-1;
-        return new Frame(revision,window,p.x(),p.y(),heading);
+        lastFrame=new Frame(revision,window,p.x(),p.y(),heading);
+        return lastFrame;
     }
     private static double distance(Point a,Point b) { return Math.hypot((double)a.x()-b.x(),(double)a.y()-b.y()); }
-    private static List<Point> simplify(List<Point> input,double tolerance) {
+    static List<Point> simplify(List<Point> input,double tolerance) {
         boolean[] keep=new boolean[input.size()]; keep[0]=keep[keep.length-1]=true;
         ArrayList<int[]> ranges=new ArrayList<>(); ranges.add(new int[]{0,input.size()-1});
         while(!ranges.isEmpty()) {

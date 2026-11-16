@@ -10,5 +10,7 @@ struct RouteScene {
     // Overview coordinates have no vehicle pose and are uniformly normalized.
     bool overview=false;
     uint8_t waiting_reason=0;
+    bool local_view=false;
+    int32_t total_m=-1,total_s=-1;
 };
 }

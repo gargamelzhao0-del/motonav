@@ -24,6 +24,33 @@ public final class RouteProtocol {
     }
     public Command hello() { return finish(begin(17,1),true); }
     public Command helloWithPreview() { return finish(begin(17,3),true); }
+    public Command helloWithBasemap() { return finish(begin(17,5),true); }
+    public Command focus(Basemap.Focus focus) {
+        var route=focus.route();int count=route.points().size();
+        if(count<2||count>64||route.revision()<=0||focus.reason()<0||focus.reason()>7
+                ||Math.abs((long)route.x())>32000||Math.abs((long)route.y())>32000||route.heading()<-1||route.heading()>3599
+                ||focus.totalMeters()<-1||focus.totalMeters()>50000000||focus.totalSeconds()<-1||focus.totalSeconds()>31536000)
+            throw new IllegalArgumentException("local focus");
+        ByteBuffer b=begin(37+4*count,6).put((byte)focus.reason()).put((byte)count).putInt(route.revision())
+                .putShort((short)route.x()).putShort((short)route.y()).putShort((short)route.heading())
+                .putInt(focus.totalMeters()).putInt(focus.totalSeconds());
+        for(var p:route.points()) {
+            if(Math.abs((long)p.x())>32000||Math.abs((long)p.y())>32000)throw new IllegalArgumentException("local point");
+            b.putShort((short)p.x()).putShort((short)p.y());
+        }
+        return finish(b,false);
+    }
+    public Command basemap(Basemap.Scene scene,int offset) {
+        int total=scene.items().size();
+        if(offset<0||offset>total||(offset==total&&total!=0))throw new IllegalArgumentException("map offset");
+        int count=Math.min(19,total-offset);
+        ByteBuffer b=begin(26+14*count,7).putInt(scene.revision()).putShort((short)total).putShort((short)offset).put((byte)count);
+        for(int i=offset;i<offset+count;i++) {
+            var p=scene.items().get(i);b.put((byte)p.kind()).put((byte)0);
+            for(var q:java.util.List.of(p.a(),p.b(),p.c()))b.putShort((short)q.x()).putShort((short)q.y());
+        }
+        return finish(b,false);
+    }
     public Command plan(DeviceRoute.Preview preview) {
         if(preview==null || preview.revision()<=0 || preview.waitingReason()<0 || preview.waitingReason()>7
                 || preview.points().size()<2 || preview.points().size()>64)throw new IllegalArgumentException("route preview");

@@ -1,5 +1,6 @@
 #include "motonav/ui/navigation_ui.h"
 #include "motonav/ui/dashboard.h"
+#include "motonav/ui/navigation_hud.h"
 #include "motonav/graphics/route_map.h"
 #include <initializer_list>
 
@@ -9,6 +10,10 @@ constexpr uint32_t Lime = 0xc4fa64, Amber = 0xffc265;
 SnapshotReader snapshot;
 UiExtension extension;
 Dashboard view;
+NavigationHud hud;
+BasemapScene basemap;
+MapFeature features[BasemapScene::Capacity]{};
+bool local_layout=false;
 const char *name;
 uint32_t last_title_color = 0;
 lv_obj_t *map_view=nullptr;
@@ -45,7 +50,7 @@ void route_map(const ScreenSnapshot &state) {
         mode!=ScreenMode::Stopped && mode!=ScreenMode::Arrived && state.route.count>=2;
     if(!visible) {
         if(map_view) { lv_obj_delete(map_view); map_view=nullptr; }
-        map_revision=0; map_failed=false; map_live=false; layout(false); return;
+        map_revision=0;basemap={}; map_failed=false; map_live=false; layout(false); return;
     }
     if(!map_view && !map_failed) {
         map_view=create_route_map(lv_obj_get_parent(view.top),466,466);
@@ -58,7 +63,13 @@ void route_map(const ScreenSnapshot &state) {
     const bool live=mode==ScreenMode::Live && !r.overview;
     const bool changed_mode=live!=map_live;
     map_live=live;
-    if(!live) {
+    bool base_changed=false;
+    if(basemap.revision&&basemap.revision!=r.revision){basemap={};base_changed=true;}
+    if(state.basemap_revision==r.revision&&basemap.revision!=r.revision&&snapshot.read_map&&snapshot.read_map(snapshot.context,r.revision,basemap)) {
+        for(unsigned i=0;i<basemap.count;i++) {const auto &p=basemap.items[i];features[i]={p.kind,{p.a.x,p.a.y},{p.b.x,p.b.y},{p.c.x,p.c.y}};}
+        base_changed=true;
+    }
+    if(!live&&!r.local_view) {
         if(map_revision==r.revision && !changed_mode)return;
         map_revision=r.revision;
         // Fit both normalized plans and legacy metre windows without implying a
@@ -83,25 +94,28 @@ void route_map(const ScreenSnapshot &state) {
         return;
     }
     float heading=r.heading<0?0:static_cast<float>(r.heading)*0.001745329252f;
-    bool changed=false;
+    bool changed=base_changed;
+    const float scale=r.local_view?0.7f:1.0f;
+    const float tilt=r.local_view&&live&&state.guidance.speed_kmh>=10?0.25f:0;
     uint32_t now=lv_tick_get();
     if(map_revision!=r.revision || changed_mode) {
-        map_revision=r.revision; camera={static_cast<float>(r.x),static_cast<float>(r.y),heading,1};
+        map_revision=r.revision; camera={static_cast<float>(r.x),static_cast<float>(r.y),heading,scale,tilt};
         from_camera=target_camera=camera; transition_at=now; changed=true;
-    } else if(target_camera.x!=r.x || target_camera.y!=r.y || std::abs(target_camera.heading-heading)>0.0001f) {
-        from_camera=camera; target_camera={static_cast<float>(r.x),static_cast<float>(r.y),heading,1}; transition_at=now;
+    } else if(target_camera.x!=r.x || target_camera.y!=r.y || std::abs(target_camera.heading-heading)>0.0001f||target_camera.perspective!=tilt) {
+        from_camera=camera; target_camera={static_cast<float>(r.x),static_cast<float>(r.y),heading,scale,tilt}; transition_at=now;
     }
     float fraction=std::min(1.0f,static_cast<float>(now-transition_at)/900);
     float turn=std::remainder(target_camera.heading-from_camera.heading,6.283185307f);
     MapCamera next{from_camera.x+(target_camera.x-from_camera.x)*fraction,
-        from_camera.y+(target_camera.y-from_camera.y)*fraction,from_camera.heading+turn*fraction,1};
+        from_camera.y+(target_camera.y-from_camera.y)*fraction,from_camera.heading+turn*fraction,scale,
+        from_camera.perspective+(target_camera.perspective-from_camera.perspective)*fraction};
     next.heading=std::remainder(next.heading,6.283185307f);
-    changed=changed||std::abs(next.x-camera.x)>0.001f||std::abs(next.y-camera.y)>0.001f||std::abs(next.heading-camera.heading)>0.0001f;
+    changed=changed||std::abs(next.x-camera.x)>0.001f||std::abs(next.y-camera.y)>0.001f||std::abs(next.heading-camera.heading)>0.0001f||std::abs(next.perspective-camera.perspective)>0.0001f;
     camera=next;
     if(changed) {
         MapPoint points[64];
         for(unsigned i=0;i<r.count;i++)points[i]={r.points[i].x,r.points[i].y};
-        if(!render_route_map(map_view,camera,{points,r.count,nullptr,0})) {
+        if(!render_route_map(map_view,camera,{points,r.count,nullptr,0,live,features,basemap.count,r.local_view})) {
             lv_obj_delete(map_view); map_view=nullptr; map_failed=true; layout(false);
         }
     }
@@ -115,6 +129,14 @@ void refresh(lv_timer_t *) {
     if (extension.refresh && extension.refresh(extension.context, state)) return;
     ScreenMode mode = screen_mode(state);
     route_map(state);
+    bool local=map_layout&&state.route.local_view;
+    if(local!=local_layout) {
+        local_layout=local;
+        lv_obj_set_flag(hud.root,LV_OBJ_FLAG_HIDDEN,!local);
+        for(auto *object:{view.top,view.title,view.number,view.speed,view.remaining,view.footer,view.arrow})lv_obj_set_flag(object,LV_OBJ_FLAG_HIDDEN,local);
+        view.last_icon=-1;
+    }
+    if(local){update_navigation_hud(hud,state,camera.heading);return;}
     set_label_text(view.top, state.linked ? (state.encrypted ? "PHONE CONNECTED" : "PHONE CONNECTING") : name);
     const bool overview=map_layout && mode!=ScreenMode::Live;
     lv_obj_set_flag(view.number,LV_OBJ_FLAG_HIDDEN,overview);
@@ -177,6 +199,7 @@ void create_navigation_ui(lv_display_t *display, const char *device_name,
     name = device_name; snapshot = read; extension = feature;
     lv_obj_t *screen = lv_display_get_screen_active(display);
     create_dashboard(screen, view);
+    create_navigation_hud(screen,hud);
     if (extension.gesture) {
         lv_obj_add_event_cb(screen, touch, LV_EVENT_LONG_PRESSED, nullptr);
         lv_obj_add_event_cb(screen, touch, LV_EVENT_SHORT_CLICKED, nullptr);

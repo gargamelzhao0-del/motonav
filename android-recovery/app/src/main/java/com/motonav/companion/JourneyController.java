@@ -137,6 +137,15 @@ final class JourneyController {
         Location fix=guidanceFix();
         return fix==null?null:deviceRoute.frame(fix.getLatitude(),fix.getLongitude(),fix.hasBearing()?fix.getBearing():Float.NaN);
     }
+    private int plannedMeters=-1,plannedSeconds=-1;
+    Basemap.Focus deviceFocus() {
+        if(state.phase()==JourneyState.Phase.IDLE || state.phase()==JourneyState.Phase.LOCATING)return null;
+        deviceMap();
+        var local=deviceRoute.localFrame();
+        if(local==null)return null;
+        int reason=state.rerouting()?7:gpsWeak?1:frame().mode()==NavigationFrame.LIVE?0:diagnosticObservation(true).reason();
+        return new Basemap.Focus(local,deviceRoute.origin(),reason,plannedMeters,plannedSeconds);
+    }
     DeviceRoute.Preview devicePreview() {
         if(state.phase()==JourneyState.Phase.IDLE || state.phase()==JourneyState.Phase.LOCATING)return null;
         int reason=state.rerouting()?7:gpsWeak?1:frame().mode()==NavigationFrame.LIVE?0:diagnosticObservation(true).reason();
@@ -517,6 +526,7 @@ final class JourneyController {
         List<DeviceRoute.Coordinate> deviceCoordinates=new ArrayList<>();
         for(LatLng point:next)deviceCoordinates.add(new DeviceRoute.Coordinate(point.latitude,point.longitude));
         deviceRoute.replace(deviceCoordinates);
+        plannedMeters=path.getAllLength();plannedSeconds=path.getAllTime();
         return true;
     }
     private static String safeName(String name){return name==null||name.trim().isEmpty()?"等待道路信息":name;}
@@ -608,6 +618,7 @@ final class JourneyController {
     }
     private void clearRoute() {
         deviceRoute.clear();
+        plannedMeters=plannedSeconds=-1;
         if (line != null) { line.remove(); line = null; }
         routePoints.clear(); plannedStart = null;
     }

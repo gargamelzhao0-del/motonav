@@ -152,7 +152,7 @@ public final class AmapActivity extends Activity {
         button("定位诊断与实时日志",()->startActivity(new Intent(this,DiagnosticsActivity.class)));
         button("SDK 模拟导航测试",()->{if(NavigationService.navigating){configurationMessage("请先结束真实导航，再运行模拟测试。");return;}startActivity(new Intent(this,SdkReplayActivity.class));});
         button("功能演示 · 模拟数据",()->{if(NavigationService.navigating){configurationMessage("请先结束当前导航，再进入功能演示。");return;}if(navigationService!=null)navigationService.disconnectScreen();startActivity(new Intent(this,MainActivity.class));});
-        label("隐私与地图绑定",18);button("高德隐私政策",()->policy(PRIVACY));button("高德服务条款",()->policy(TERMS));
+        label("隐私与地图绑定",18);button("圆屏底图 © OpenStreetMap / 数据许可",()->policy("https://www.openstreetmap.org/copyright"));button("OpenStreetMap 隐私政策",()->policy("https://osmfoundation.org/wiki/Privacy_Policy"));button("高德隐私政策",()->policy(PRIVACY));button("高德服务条款",()->policy(TERMS));
         label("绑定包名："+getPackageName()+"\n本安装签名 SHA1："+certificateSha1(),12);
         Button clear=button("清除地图配置并撤回同意",()->new AlertDialog.Builder(this).setTitle("清除地图配置？").setMessage("将结束当前导航、断开圆屏并删除本机保存的 Key。之后需要重新配置地图。").setNegativeButton("保留配置",null).setPositiveButton("清除配置",(d,w)->clearKey()).show());clear.setTextColor(AppUi.DANGER);
         controls=new ScrollView(this);controls.setFillViewport(true);controls.addView(root);
@@ -283,7 +283,7 @@ public final class AmapActivity extends Activity {
     private void policy(String url){try{startActivity(new Intent(Intent.ACTION_VIEW,Uri.parse(url)));}catch(ActivityNotFoundException e){status.setText(getString(R.string.amap_no_browser,url));}}
     private void askConsent(){
         if(map!=null||!keys.configured()||!foreground||consentDialog!=null)return;
-        consentDialog=new AlertDialog.Builder(this).setTitle("启用高德联网地图？").setMessage("本应用使用高德地图、定位、搜索及导航SDK，联网时向高德提交Android Key、包信息及服务必需的网络、设备和位置信息，服务端可见IP。浏览地图时在前台定位。主动开始导航后，通过持续通知在锁屏或切换应用时继续定位，直到结束导航。主动搜索或规划路线时会把搜索词和起终点提交高德；显式开始后提供GPS普通驾车导航（不含摩托车禁限行避让），并向你选择并配对的ESP32发送当前位置、路线片段、转向、距离、车速和数据有效状态。圆屏连接通过系统蓝牙授权和配对。本次版本扩展了数据用途，因此需要重新同意一次。请先阅读页面中的隐私政策和条款。\n\nKey将用Android Keystore保护的AES-GCM加密保存于本应用私有存储，应用备份关闭。此次同意会保存，今后打开自动加载地图及定位；可在设置中删除Key并撤回同意。SDK自身缓存无法保证彻底清除。系统首次定位授权仍需本人操作。")
+        consentDialog=new AlertDialog.Builder(this).setTitle("启用高德联网地图？").setMessage("本应用使用高德地图、定位、搜索及导航SDK，联网时向高德提交Android Key、包信息及服务必需的网络、设备和位置信息，服务端可见IP。浏览地图时在前台定位。主动开始导航后，通过持续通知在锁屏或切换应用时继续定位，直到结束导航。主动搜索或规划路线时会把搜索词和起终点提交高德；显式开始后提供GPS普通驾车导航（不含摩托车禁限行避让），并向你选择并配对的ESP32发送当前位置、路线片段、转向、距离、车速和数据有效状态。圆屏连接通过系统蓝牙授权和配对。圆屏底图使用 OpenStreetMap 道路、建筑与水域数据，连接支持底图的圆屏后，会向 vector.openstreetmap.org 请求当前视野的地图瓦片，服务方可见 IP 和大致地图区域；瓦片在本应用私有存储缓存至少 7 天，地图几何通过已配对蓝牙传到圆屏。本次版本扩展了数据用途，因此需要重新同意一次。请先阅读页面中的隐私政策和条款。\n\nKey将用Android Keystore保护的AES-GCM加密保存于本应用私有存储，应用备份关闭。此次同意会保存，今后打开自动加载地图及定位；可在设置中删除Key并撤回同意。SDK自身缓存无法保证彻底清除。系统首次定位授权仍需本人操作。")
             .setNegativeButton("不同意并关闭",(d,w)->{consent=false;dispose();boolean recorded=saved.consent(false);if(!recorded){saved.clear();keys.clear();open.setEnabled(false);}status.setText(recorded?"已撤回同意，不会自动联网定位":"已停止地图，但无法确认撤回记录已保存。请在系统中清除本测试应用数据后再使用。");})
             .setPositiveButton("同意并联网打开",(d,w)->{if(!foreground||isFinishing())return;if(!saved.consent(true)){status.setText("无法保存同意，请重试");return;}consent=true;initialize();}).create();
         consentDialog.setOnDismissListener(d->consentDialog=null);consentDialog.show();

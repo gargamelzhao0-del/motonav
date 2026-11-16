@@ -2,11 +2,12 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <algorithm>
 
 namespace motonav {
 struct MapPoint { int16_t x, y; }; // Local coordinates, not latitude/longitude.
 struct MapSegment { MapPoint a, b; };
-struct MapCamera { float x, y, heading, scale; }; // Heading radians, scale pixels/local unit.
+struct MapCamera { float x, y, heading, scale; float perspective=0; }; // Radians, pixels/metre, bounded forward tilt.
 struct ProjectedPoint { float x, y; };
 
 class MapProjection {
@@ -17,14 +18,17 @@ public:
                  std::isfinite(camera.x) && std::abs(camera.x) <= 32768 &&
                  std::isfinite(camera.y) && std::abs(camera.y) <= 32768 &&
                  std::isfinite(camera.heading) && std::abs(camera.heading) <= 360 &&
-                 std::isfinite(camera.scale) && camera.scale >= 0.1f && camera.scale <= 4.0f) {
+                 std::isfinite(camera.scale) && camera.scale >= 0.1f && camera.scale <= 4.0f &&
+                 std::isfinite(camera.perspective) && camera.perspective>=0 && camera.perspective<=0.35f) {
         if (valid_) { sine_ = std::sin(camera.heading); cosine_ = std::cos(camera.heading); }
     }
     bool valid() const { return valid_; }
     ProjectedPoint project(MapPoint p) const {
         float x = p.x - camera_.x, y = p.y - camera_.y;
-        return {width_ * 0.5f + (x * cosine_ - y * sine_) * camera_.scale,
-                height_ * 0.7f - (x * sine_ + y * cosine_) * camera_.scale};
+        float forward=x*sine_+y*cosine_;
+        float depth=std::max(0.35f,1+forward*camera_.perspective/500);
+        return {width_ * 0.5f + (x * cosine_ - y * sine_) * camera_.scale/depth,
+                height_ * 0.7f - forward * camera_.scale/depth};
     }
     // Liang-Barsky clips BEFORE drawing. Far-off geometry never creates
     // oversized LVGL draw tasks; padding preserves thick strokes at an edge.

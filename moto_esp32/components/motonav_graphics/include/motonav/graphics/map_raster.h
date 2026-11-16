@@ -50,7 +50,7 @@ public:
     }
     void polygon(const ProjectedPoint *points, size_t count, uint16_t color) {
         if (!valid_ || !points || count < 3 || count > 4) return;
-        float min_y = 1024, max_y = -1024;
+        float min_y = 8192, max_y = -8192;
         for (size_t i=0; i<count; ++i) {
             if (!bounded(points[i])) return;
             min_y = std::min(min_y, points[i].y); max_y = std::max(max_y, points[i].y);
@@ -78,7 +78,7 @@ public:
             }
             if (active_count < 2) { y=end+1; continue; }
             for (;y<=end;++y) {
-                float scan=y+0.5f, left=1024, right=-1024;
+                float scan=y+0.5f, left=8192, right=-8192;
                 for(size_t i=0;i<active_count;++i) {
                     const auto &edge=*active[i];
                     float x=edge.a.x+(scan-edge.a.y)*edge.slope;
@@ -109,7 +109,7 @@ private:
     static int floor_int(float value) { int n=static_cast<int>(value); return n-(n>value); }
     static int ceil_int(float value) { int n=static_cast<int>(value); return n+(n<value); }
     static bool bounded(ProjectedPoint p) {
-        return std::isfinite(p.x) && std::isfinite(p.y) && std::abs(p.x)<=1024 && std::abs(p.y)<=1024;
+        return std::isfinite(p.x) && std::isfinite(p.y) && std::abs(p.x)<=8192 && std::abs(p.y)<=8192;
     }
     void span(int y, int first, int last, uint16_t color) {
         if (y < origin_y_ || y >= origin_y_ + height_) return;
