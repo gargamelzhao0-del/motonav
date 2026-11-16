@@ -57,7 +57,7 @@ final class JourneyController {
     private AMapNavi navi;
     private SimpleNaviListener listener;
     private DestinationSearchDialog dialog;
-    private String lastSearch="", nextRoad="";
+    private String lastSearch="", nextRoad="", currentRoad="";
     private Polyline line;
     private Marker destinationMarker;
     private PoiItem destination;
@@ -138,6 +138,16 @@ final class JourneyController {
         return fix==null?null:deviceRoute.frame(fix.getLatitude(),fix.getLongitude(),fix.hasBearing()?fix.getBearing():Float.NaN);
     }
     private int plannedMeters=-1,plannedSeconds=-1;
+    NavigationDetails deviceDetails() {
+        NavigationFrame live=frame();
+        if(live.mode()!=NavigationFrame.LIVE)return null;
+        java.util.Calendar arrival=java.util.Calendar.getInstance();
+        arrival.setTimeInMillis(System.currentTimeMillis()+live.remainingSeconds()*1000L);
+        // The SDK does not expose a road speed limit in NaviInfo. Keep it unknown;
+        // an upcoming camera's limit must not be mistaken for the current road.
+        return new NavigationDetails(currentRoad,nextRoad,
+                arrival.get(java.util.Calendar.HOUR_OF_DAY)*60+arrival.get(java.util.Calendar.MINUTE),-1);
+    }
     Basemap.Focus deviceFocus() {
         if(state.phase()==JourneyState.Phase.IDLE || state.phase()==JourneyState.Phase.LOCATING)return null;
         deviceMap();
@@ -411,6 +421,7 @@ final class JourneyController {
                     if (frame.mode() != NavigationFrame.LIVE) { syncVoice(false); icon(null); report("等待有效的导航指令。"); return; }
                     lastWaitingReason = null;
                     nextRoad=info.getNextRoadName();
+                    currentRoad=info.getCurrentRoadName();
                     icon(info.getIconBitmap());
                     report(JourneyState.maneuver(info.getIconType())+" · 剩余"+Math.max(0,info.getPathRetainDistance())+"米 / "+Math.max(0,info.getPathRetainTime()/60)+"分钟\n下一路段："+safeName(info.getNextRoadName())+" · 距当前段末"+Math.max(0,info.getCurStepRetainDistance())+"米");
                 }
@@ -526,6 +537,7 @@ final class JourneyController {
         List<DeviceRoute.Coordinate> deviceCoordinates=new ArrayList<>();
         for(LatLng point:next)deviceCoordinates.add(new DeviceRoute.Coordinate(point.latitude,point.longitude));
         deviceRoute.replace(deviceCoordinates);
+        currentRoad=nextRoad="";
         plannedMeters=path.getAllLength();plannedSeconds=path.getAllTime();
         return true;
     }
@@ -623,7 +635,7 @@ final class JourneyController {
         routePoints.clear(); plannedStart = null;
     }
     private void stopEngine() {
-        nextRoad="";
+        currentRoad=nextRoad="";
         sdkFixes.clear();
         lastInstructionReceivedMs = -1; lastSdkFixNanos = 0; lastWaitingReason = null;
         nextRouteRetryMs = -1; retryRequestId = -1; retryFailures = 0; voicePlaying = false; settledRouteRequests.clear();

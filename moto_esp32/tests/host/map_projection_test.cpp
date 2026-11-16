@@ -18,6 +18,13 @@ int main() {
     assert(map.segment({0,0},{0,0},a,b));
     assert(!MapProjection(0,300,{0,0,0,1}).valid());
     assert(!MapProjection(320,467,{0,0,0,1}).valid());
+    MapProjection pitched(466,466,{0,0,0,1,0.872664626f,306.0f/466});
+    auto forward=pitched.project({100,200});
+    const float factor=700/(700+200*std::sin(0.872664626f));
+    assert(std::abs(forward.x-(233+100*factor))<0.001f);
+    assert(std::abs(forward.y-(306-200*std::cos(0.872664626f)*factor))<0.001f);
+    assert(!MapProjection(466,466,{0,0,0,1,1.2f}).valid());
+    assert(!MapProjection(466,466,{0,0,0,1,0,0.9f}).valid());
     for (float invalid : {std::numeric_limits<float>::infinity(),std::numeric_limits<float>::quiet_NaN()}) {
         MapProjection bad(320,300,{invalid,0,0,1});
         assert(!bad.valid() && !bad.segment({0,0},{1,1},a,b));

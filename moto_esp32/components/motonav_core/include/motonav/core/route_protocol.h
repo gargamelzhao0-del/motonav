@@ -2,6 +2,7 @@
 #include "motonav/core/navigation_protocol.h"
 #include "motonav/core/route_scene.h"
 #include "motonav/core/basemap_scene.h"
+#include "motonav/core/navigation_details.h"
 
 namespace motonav {
 // Live snapshots are atomic. Negotiated route plans survive guidance expiry but
@@ -25,10 +26,16 @@ public:
         navigation_.disconnect(); scene_={}; plan_={}; used_=0; sequence_=0; checksum_=0;
         route_revision_=0; route_crc_=0; plan_crc_=0; preview_enabled_=false;
         basemap_enabled_=updates_enabled_=false; map_={}; staging_={}; staged_=0;
+        details_enabled_=false;details_={};navigation_sequence_=0;details_at_=0;
     }
     const NavigationReceiver &navigation() const { return navigation_; }
     ReceiverStats stats() const { return stats_; }
     const BasemapScene &basemap() const { return map_; }
+    NavigationDetails details(uint64_t now) const {
+        if(!navigation_.connected(now)||navigation_.source_expired(now)||navigation_.guidance(now).mode!=Live
+                ||details_.revision!=scene_.revision||now<details_at_||now-details_at_>3000)return {};
+        return details_;
+    }
     RouteScene scene(uint64_t now) const {
         if(!navigation_.handshaken())return {};
         if(navigation_.guidance(now).mode==Live && scene_.count>=2) {
@@ -49,6 +56,10 @@ private:
     bool preview_enabled_=false;
     bool basemap_enabled_=false;
     bool updates_enabled_=false;
+    bool details_enabled_=false;
+    NavigationDetails details_;
+    uint32_t navigation_sequence_=0;
+    uint64_t details_at_=0;
     BasemapScene map_,staging_;
     unsigned staged_=0;
     NavigationReceiver navigation_;
@@ -72,9 +83,9 @@ private:
         if(NavigationReceiver::crc32(reinterpret_cast<const char *>(bytes_),expected_-4)!=crc
                 ||!seq||seq>INT_MAX||!session||session>INT_MAX)return false;
         const unsigned type=bytes_[4];
-        const bool hello=type==1||type==3||type==5||type==8;
-        const char *ack=hello?(type==8?"NAV4S2":type==5?"NAV4S":type==3?"NAV4P":"NAV4"):"OK";
-        if((hello && expected_!=17)||(!hello && type!=2 && type!=4 && type!=6 && type!=7 && type!=9))return false;
+        const bool hello=type==1||type==3||type==5||type==8||type==11;
+        const char *ack=hello?(type==11?"NAV4S3":type==8?"NAV4S2":type==5?"NAV4S":type==3?"NAV4P":"NAV4"):"OK";
+        if((hello && expected_!=17)||(!hello && type!=2 && type!=4 && type!=6 && type!=7 && type!=9 && type!=10))return false;
         if(navigation_.handshaken() && seq==sequence_ && session==session_ && crc==checksum_) {
             ++stats_.duplicates; std::snprintf(reply,sizeof(reply),"A,%lu,%s\n",static_cast<unsigned long>(seq),ack); return true;
         }
@@ -83,8 +94,24 @@ private:
             if(navigation_.handshaken()||seq!=1)return false;
             std::snprintf(body,sizeof(body),"H,3,%lu,%lu",static_cast<unsigned long>(seq),static_cast<unsigned long>(session));
             if(!core(body,now))return false;
-            scene_={}; plan_={}; preview_enabled_=type==3;basemap_enabled_=type==5||type==8;updates_enabled_=type==8;
+            scene_={}; plan_={}; preview_enabled_=type==3;basemap_enabled_=type==5||type==8||type==11;updates_enabled_=type==8||type==11;
+            details_enabled_=type==11;details_={};navigation_sequence_=0;details_at_=0;
             map_={};staging_={};staged_=0;
+        } else if(type==10) {
+            if(!details_enabled_||!navigation_.handshaken()||session!=session_||seq<=sequence_||expected_<31)return false;
+            unsigned current=bytes_[25],next=bytes_[26];
+            int eta=i16(21),limit=i16(23);uint32_t revision=u32(13);
+            if(!revision||revision!=scene_.revision||u32(17)!=navigation_sequence_
+                    ||current>NavigationDetails::MaxNameBytes||next>NavigationDetails::MaxNameBytes
+                    ||expected_!=31+current+next||eta<-1||eta>=1440||limit<-1||limit==0||limit>300
+                    ||!valid_road_name(bytes_+27,current)||!valid_road_name(bytes_+27+current,next))return false;
+            NavigationDetails value;value.revision=revision;value.eta_minute=eta;value.speed_limit=limit;
+            std::memcpy(value.current_road,bytes_+27,current);std::memcpy(value.next_road,bytes_+27+current,next);
+            // Optional HUD arriving near the source's expiry is acknowledged but
+            // discarded; it must not disconnect an otherwise healthy radio link.
+            if(navigation_.guidance(now).mode==Live&&navigation_.connected(now)&&!navigation_.source_expired(now)){
+                details_=value;details_at_=now;
+            }else details_={};
         } else if(type==6) {
             if(!basemap_enabled_||!navigation_.handshaken()||session!=session_||seq<=sequence_||expected_<45)return false;
             unsigned count=bytes_[14],reason=bytes_[13];uint32_t revision=u32(15);
@@ -162,6 +189,8 @@ private:
                 static_cast<unsigned long>(seq),static_cast<unsigned long>(session),bytes_[13],bytes_[14],
                 i32(15),i32(19),i32(23),i16(27),u16(29),u16(31));
             if(!core(body,now))return false;
+            navigation_sequence_=seq;
+            if(bytes_[13]!=Live||revision!=details_.revision)details_={};
             if(bytes_[13]==Stopped || bytes_[13]==Arrived) { scene_={}; plan_={}; plan_crc_=0;map_={};staging_={};staged_=0; }
             else if(bytes_[13]==Live)scene_=next;
             if(count) { route_revision_=revision; route_crc_=geometry_crc; }

@@ -38,6 +38,7 @@ public:
         result.packets = protocol_==4?route_receiver_.stats():receiver.stats();
         if(protocol_==4) {
             result.route=route_receiver_.scene(now_ms);
+            result.details=route_receiver_.details(now_ms);
             const auto &map=route_receiver_.basemap();
             result.basemap_revision=map.revision;result.basemap_count=map.count;
             result.basemap_generation=map.generation;result.basemap_complete=map.complete;

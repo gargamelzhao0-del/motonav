@@ -5,8 +5,11 @@ namespace motonav {
 struct NavigationHud {
     lv_obj_t *root=nullptr,*distance=nullptr,*maneuver=nullptr,*speed=nullptr,*time=nullptr,*remaining=nullptr,*status=nullptr,*arrow=nullptr;
     lv_obj_t *compass[4]{};
+    lv_obj_t *unit=nullptr,*progress=nullptr;
+    lv_obj_t *current_road=nullptr,*road_accent=nullptr,*speed_limit=nullptr;
     lv_point_precise_t points[6]{};
     int icon=-1;
+    int live=-1;
 };
 void create_navigation_hud(lv_obj_t *parent,NavigationHud &hud);
 void update_navigation_hud(NavigationHud &hud,const ScreenSnapshot &state,float heading);

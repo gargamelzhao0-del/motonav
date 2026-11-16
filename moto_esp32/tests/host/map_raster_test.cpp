@@ -14,6 +14,9 @@ int main() {
         std::fill(expected.begin()+offset,expected.begin()+offset+length,color);
         fill_rgb565(pixels.data()+offset,length,color);
         assert(pixels==expected);
+        for(size_t i=0;i<length;i++)expected[offset+i]=(i&1)?0x5678:0x1234;
+        fill_rgb565_pair(pixels.data()+offset,length,0x1234,0x5678);
+        assert(pixels==expected);
     }
     constexpr int w=320,h=300,stride=324,guard=32;
     constexpr uint16_t sentinel=0x1234;
@@ -67,8 +70,14 @@ int main() {
         assert(strip.valid()); paint(strip,true);
     }
     assert(whole==strips);
+    full.navigation_style(true);paint(full);
+    for(int y=0;y<466;y+=16){
+        MapRaster strip(strips.data()+y*466,strips.size()-y*466,466,std::min(16,466-y),466,0,y);
+        strip.navigation_style(true);paint(strip,true);
+    }
+    assert(whole==strips);
     std::vector<uint16_t> clipped(173*101);
-    MapRaster tile(clipped.data(),clipped.size(),173,101,173,19,41); paint(tile,true);
+    MapRaster tile(clipped.data(),clipped.size(),173,101,173,19,41);tile.navigation_style(true);paint(tile,true);
     for (int y=0;y<101;++y) for(int x=0;x<173;++x) assert(clipped[y*173+x]==whole[(y+41)*466+x+19]);
     assert(!MapRaster(clipped.data(),clipped.size(),173,101,173,-1,41).valid());
     assert(!MapRaster(clipped.data(),clipped.size(),173,101,173,300,41).valid());

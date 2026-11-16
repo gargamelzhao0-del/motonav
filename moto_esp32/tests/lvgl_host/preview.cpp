@@ -17,9 +17,12 @@ static uint64_t clock_ms;
 static std::array<uint16_t, 466 * 466> pixels;
 static std::array<uint16_t, 466 * 64> buffer;
 static unsigned rim_draws;
+static std::array<bool,4> boundary_seen{};
 static uint64_t host_time_us() { return clock_ms * 1000; }
 void advance_host_clock(uint32_t milliseconds) { clock_ms += milliseconds; lv_tick_inc(milliseconds); }
 static void flush(lv_display_t *display, const lv_area_t *area, uint8_t *data) {
+    constexpr int x[]{233,0,465,233},y[]{0,233,233,465};
+    for(unsigned i=0;i<4;i++)if(x[i]>=area->x1&&x[i]<=area->x2&&y[i]>=area->y1&&y[i]<=area->y2)boundary_seen[i]=true;
     auto input = reinterpret_cast<uint16_t *>(data);
 #if MOTONAV_PREVIEW_RGB332
     const size_t count = lv_area_get_size(area);
@@ -269,9 +272,11 @@ int main(int argc, char **argv) {
             for(size_t i=0;i<row.size();i+=2)session.feed(static_cast<char>(std::stoul(row.substr(i,2),nullptr,16)),clock_ms,reply);
             if(reply[0]!='A')return 1;snapshot=session.snapshot(clock_ms);
             session.read_map(snapshot.basemap_revision,basemap);
-            if(snapshot.basemap_count>192&&snapshot.guidance.mode==motonav::Waiting&&!saw_live){save(display,directory/"real-map-waiting.ppm");require_label("WAIT GPS");saw_wait=true;}
-            if(snapshot.guidance.mode==motonav::Live){save(display,directory/"real-map-live.ppm");require_label("36");require_label("120 m");saw_live=true;}
-            if(saw_live&&snapshot.guidance.mode==motonav::Waiting){save(display,directory/"real-map-gps-lost.ppm");require_label("WAIT GPS");if(basemap.count<300)return 1;saw_lost=true;}
+            if(snapshot.basemap_count>192&&snapshot.guidance.mode==motonav::Waiting&&!saw_live){save(display,directory/"real-map-waiting.ppm");require_label("等待定位");saw_wait=true;}
+            if(snapshot.guidance.mode==motonav::Live){save(display,directory/"real-map-live.ppm");require_label("36");require_label("120");require_label("m");saw_live=true;}
+            if(snapshot.details.revision){require_label("测试道路");require_label("11:26");}
+            if(saw_live&&snapshot.guidance.mode==motonav::Waiting){save(display,directory/"real-map-gps-lost.ppm");require_label("等待定位");if(basemap.count<300)return 1;saw_lost=true;}
+            if(snapshot.guidance.mode!=motonav::Live&&contains_label(lv_screen_active(),"测试道路"))return 1;
         }
         if(!saw_wait||!saw_live||!saw_lost)return 1;
         snapshot=previous;save(display,directory/"real-map-stopped.ppm");
@@ -315,15 +320,10 @@ int main(int argc, char **argv) {
         std::cerr << "Benchmark is mutating the production screen\n"; return 1;
     }
     lv_obj_add_event_cb(lv_obj_get_child(lv_screen_active(), 0), [](lv_event_t *) { ++rim_draws; }, LV_EVENT_DRAW_MAIN, nullptr);
-    constexpr uint16_t normal_background = ((0x09 >> 3) << 11) | ((0x0f >> 2) << 5) | (0x0c >> 3);
-    for (size_t edge : {size_t(233),size_t(233*466),size_t(233*466+465),size_t(465*466+233)}) {
-        if (pixels[edge] == normal_background) {
-            std::cerr << "Map does not cover the full round-screen edge\n"; return 1;
-        }
-    }
     clock_ms += 500; lv_tick_inc(500);
-    rim_draws=0;
+    rim_draws=0;boundary_seen={};
     save(display, directory / "map-moving.ppm");
+    for(bool covered:boundary_seen)if(!covered){std::cerr<<"Map did not refresh every physical edge\n";return 1;}
     if (rim_draws) { std::cerr << "Hidden instrument background was redrawn under full-screen map\n"; return 1; }
     if (pixels == map_pixels) { std::cerr << "Map did not animate\n"; return 1; }
     snapshot.linked = snapshot.encrypted = snapshot.subscribed = snapshot.handshaken = true;

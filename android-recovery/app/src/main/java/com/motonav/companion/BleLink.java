@@ -71,12 +71,25 @@ public final class BleLink {
     private boolean routeMaps;
     private boolean routePreview, previewFallback;
     private boolean basemaps,mapUpdates;
+    private boolean navigationDetails;
+    private NavigationDetails pendingDetails;
+    private int detailsRevision,detailsNavigationSequence;
+    private long detailsOfferedMs;
     private int payloadBytes=20;
     private Basemap.Scene pendingMap;
     private Basemap.Scene nextMap;
     private int mapOffset,sentMapRevision,sentMapUpdate;
     public boolean basemaps(){return ready&&basemaps;}
     public boolean mapUpdates(){return ready&&mapUpdates;}
+    public boolean sendDetailsIfNeeded(Runnable done){
+        if(!ready||!navigationDetails||busy()||pendingDetails==null)return false;
+        if(SystemClock.elapsedRealtime()-detailsOfferedMs>2000){pendingDetails=null;return false;}
+        NavigationDetails value=pendingDetails;
+        send(routeProtocol.details(detailsRevision,detailsNavigationSequence,value),()->{
+            if(pendingDetails==value)pendingDetails=null;
+            if(done!=null)done.run();
+        });return true;
+    }
     public void offerBasemap(Basemap.Scene scene){
         if(scene==null||scene.revision()==sentMapRevision&&(!mapUpdates||scene.update()<=sentMapUpdate))return;
         if(pendingMap!=null&&pendingMap.revision()==scene.revision()){
@@ -135,12 +148,19 @@ public final class BleLink {
         return sendNavigation(frame,null,done);
     }
     public boolean sendNavigation(NavigationFrame frame, DeviceRoute.Frame map, Runnable done) {
+        return sendNavigation(frame,map,null,done);
+    }
+    public boolean sendNavigation(NavigationFrame frame, DeviceRoute.Frame map, NavigationDetails details, Runnable done) {
         if (!ready || busy() || navigation == null) return false;
+        pendingDetails=null;
         long now=SystemClock.elapsedRealtime();
         int points=map==null?0:map.points().size();
         if(routeMaps){
             RouteProtocol.Command command=routeProtocol.snapshot(frame,map,now);
             lastNavigation=BleDiagnosticProtocol.navigation(frame,points,command.bytes()[13]&255,command.bytes()[37]&255,4,command.sequence(),now);
+            if(navigationDetails&&details!=null&&map!=null&&(command.bytes()[13]&255)==NavigationFrame.LIVE){
+                pendingDetails=details;detailsRevision=map.revision();detailsNavigationSequence=command.sequence();detailsOfferedMs=now;
+            }
             send(command,done);
         }else{
             Protocol.Command command=navigation.snapshot(frame,now);
@@ -253,6 +273,7 @@ public final class BleLink {
         if (routeProtocol != null) routeProtocol.reset();
         routeMaps=false;routePreview=false;previewFallback=false;sentPlanRevision=0;sentPlanReason=-1;
         basemaps=mapUpdates=false;payloadBytes=20;pendingMap=nextMap=null;mapOffset=sentMapRevision=sentMapUpdate=0;
+        navigationDetails=false;pendingDetails=null;detailsRevision=detailsNavigationSequence=0;detailsOfferedMs=0;
         pendingSubscription=null;notifications=null;phase="idle";
         awaitingDiscoveryRetry=false;
         BluetoothGatt old=gatt;gatt=null;
@@ -278,7 +299,7 @@ public final class BleLink {
     }
     private void beginProtocol(){
         phase="hello";diagnostic("start",0);
-        if (navigation != null && routeMaps) { send(routeProtocol.helloWithMapUpdates(), () -> { ready=true; listener.ready(); }); return; }
+        if (navigation != null && routeMaps) { send(routeProtocol.helloWithDetails(), () -> { ready=true; listener.ready(); }); return; }
         if (navigation != null) { send(navigation.hello(), () -> { ready = true; listener.ready(); }); return; }
         if(network==null){send(protocol.hello(),()->send(protocol.route(),()->{ready=true;listener.ready();}));return;}
         send(networkProtocol.hello(),()->{transfer=networkProtocol.transfer(network);transferIndex=0;sendNextNetworkFrame();});
@@ -290,7 +311,7 @@ public final class BleLink {
     }
     private void send(RouteProtocol.Command command,Runnable done){
         int type=command.bytes()[4];
-        pending=new Pending(command.sequence(),command.hello()?4:0,type==3||type==5||type==8?type:0,type==4||type==6||type==7||type==9); completion=done;
+        pending=new Pending(command.sequence(),command.hello()?4:0,type==3||type==5||type==8||type==11?type:0,type==4||type==6||type==7||type==9||type==10); completion=done;
         chunks=new ArrayList<>(); byte[] bytes=command.bytes();
         for(int i=0;i<bytes.length;i+=payloadBytes)chunks.add(Arrays.copyOfRange(bytes,i,Math.min(bytes.length,i+payloadBytes)));
         chunkIndex=0;ackReceived=false;handler.removeCallbacks(timeout);handler.postDelayed(timeout,3000);writeNext();
@@ -326,7 +347,7 @@ public final class BleLink {
         if(pending.probe()!=0 && previewFallback){
             int probe=pending.probe();
             Runnable done=completion;pending=null;completion=null;previewFallback=false;handler.removeCallbacks(timeout);
-            routeProtocol.reset();send(probe==8?routeProtocol.helloWithBasemap():probe==5?routeProtocol.helloWithPreview():routeProtocol.hello(),done);return;
+            routeProtocol.reset();send(probe==11?routeProtocol.helloWithMapUpdates():probe==8?routeProtocol.helloWithBasemap():probe==5?routeProtocol.helloWithPreview():routeProtocol.hello(),done);return;
         }
         if(pending.helloVersion()!=0){diagnostic("acknowledged",0);phase="stream";}
         int sequence=pending.sequence();boolean plan=pending.plan();Runnable done=completion;pending=null;completion=null;handler.removeCallbacks(timeout);
@@ -346,6 +367,8 @@ public final class BleLink {
                 boolean navHello = pending.helloVersion()!=0;
                 if(pending.probe()!=0 && line.equals("E,NAV4")){
                     previewFallback=true;ackReceived=true;finishIfAcknowledged();
+                }else if(pending.probe()==11 && line.equals("A,"+pending.sequence()+",NAV4S3")){
+                    basemaps=mapUpdates=navigationDetails=true;ackReceived=true;finishIfAcknowledged();
                 }else if(pending.probe()==8 && line.equals("A,"+pending.sequence()+",NAV4S2")){
                     basemaps=mapUpdates=true;ackReceived=true;finishIfAcknowledged();
                 }else if(pending.probe()==5 && line.equals("A,"+pending.sequence()+",NAV4S")){

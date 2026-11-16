@@ -26,6 +26,9 @@ static_assert(sizeof(Segment) == 20, "Keep the prepared geometry cache bounded")
 struct MapScene {
     lv_image_dsc_t image{};
     Segment roads[64]{}, route[63]{};
+    Segment highlights[48]{};
+    size_t highlight_count=0;
+    float player_y=326;
     struct Feature {
         uint8_t kind=0;
         union Geometry {
@@ -69,10 +72,12 @@ lv_result_t open(lv_image_decoder_t *, lv_image_decoder_dsc_t *dsc) {
     return dsc->user_data ? LV_RESULT_OK : LV_RESULT_INVALID;
 }
 void player(MapRaster &raster, float x, float y) {
-    ProjectedPoint outline[]{{x,y-17},{x-12,y+11},{x+12,y+11}};
-    ProjectedPoint inner[]{{x,y-12},{x-8,y+7},{x+8,y+7}};
+    ProjectedPoint outline[]{{x,y-17},{x-13,y+14},{x+13,y+14}};
+    ProjectedPoint left[]{{x,y-14},{x-10.5f,y+11},{x,y+5}};
+    ProjectedPoint right[]{{x,y-14},{x+10.5f,y+11},{x,y+5}};
     raster.polygon(outline,3,panel_color(0x12171c));
-    raster.polygon(inner,3,panel_color(0xf2f3e9));
+    raster.polygon(left,3,panel_color(0xf2f3e9));
+    raster.polygon(right,3,panel_color(0xf2f3e9));
 }
 void line(MapRaster &raster, const Segment &segment, int width, uint32_t color, int top, int bottom) {
     if (!segment.intersects_y(top, bottom, width)) return;
@@ -80,6 +85,7 @@ void line(MapRaster &raster, const Segment &segment, int width, uint32_t color, 
 }
 void paint(MapRaster &raster, MapScene &scene, int top, int bottom) {
     const uint64_t begin = scene.clock_us ? scene.clock_us() : 0;
+    raster.navigation_style(scene.compass);
     raster.clear(panel_color(0x283033));
     for(unsigned kind: {4u,5u,3u})for(size_t i=0;i<scene.feature_count;i++) {
         const auto &f=scene.features[i];if(f.kind!=kind)continue;
@@ -98,7 +104,8 @@ void paint(MapRaster &raster, MapScene &scene, int top, int bottom) {
     for (int pass=0; pass<2; ++pass)
         for (size_t i=0; i<scene.route_count; ++i)
             line(raster, scene.route[i], pass ? 7 : 12, pass ? 0xb66dff : 0x2a1440, top, bottom);
-    if(scene.show_position)player(raster, scene.image.header.w/2, scene.image.header.h*7/10);
+    for(size_t i=0;i<scene.highlight_count;i++)line(raster,scene.highlights[i],3,0xe3cfff,top,bottom);
+    if(scene.show_position)player(raster, scene.image.header.w/2, scene.player_y);
     if(scene.compass) {
         static const auto ticks=[] {
             std::array<Segment,72> result{};
@@ -262,6 +269,8 @@ bool render_route_map(lv_obj_t *view, const MapCamera &camera, const MapGeometry
     if (!projection.valid()) return false;
     scene->road_count = scene->route_count = 0;
     scene->show_position=geometry.show_position;
+    scene->player_y=scene->image.header.h*camera.anchor_y;
+    scene->highlight_count=0;
     scene->feature_count=0;scene->compass=geometry.compass;
     ProjectedPoint a, b;
     for(size_t i=0;i<geometry.feature_count;i++) {
@@ -282,8 +291,16 @@ bool render_route_map(lv_obj_t *view, const MapCamera &camera, const MapGeometry
             scene->roads[scene->road_count++] = Segment(a, b);
     }
     for (size_t i=1; i<geometry.route_count; ++i) {
-        if (projection.segment(geometry.route[i-1], geometry.route[i], a, b))
+        if (projection.segment(geometry.route[i-1], geometry.route[i], a, b)) {
             scene->route[scene->route_count++] = Segment(a, b);
+            if(geometry.compass) {
+                float dx=b.x-a.x,dy=b.y-a.y,length=std::sqrt(dx*dx+dy*dy);
+                if(length>0.01f)for(float d=10;d<length&&scene->highlight_count<48;d+=35) {
+                    float first=d/length,last=std::min(length,d+5)/length;
+                    scene->highlights[scene->highlight_count++]=Segment({a.x+dx*first,a.y+dy*first},{a.x+dx*last,a.y+dy*last});
+                }
+            }
+        }
     }
     if (scene->image.header.w == 466 && scene->image.header.h == 466 &&
         lv_obj_get_x(view) == 0 && lv_obj_get_y(view) == 0 &&

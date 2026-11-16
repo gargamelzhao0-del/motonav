@@ -71,16 +71,21 @@ public final class BasemapTests {
             System.out.println("REAL TILE: features="+features.size()+" primitives="+scene.items().size()+" kinds="+scene.items().stream().map(Basemap.Primitive::kind).collect(java.util.stream.Collectors.groupingBy(k->k,java.util.stream.Collectors.counting())));
             check(scene.items().size()>50,"actual public tile produces map detail");
             if(args.length>2){
-                var radio=new RouteProtocol(123);var lines=new ArrayList<String>();lines.add(HexFormat.of().formatHex(radio.helloWithMapUpdates().bytes()));
+                var radio=new RouteProtocol(123);var lines=new ArrayList<String>();lines.add(HexFormat.of().formatHex(radio.helloWithDetails().bytes()));
                 lines.add(HexFormat.of().formatHex(radio.snapshot(NavigationFrame.status(1),null,100000).bytes()));
                 // Route for visual QA only, following a real decoded street path.
                 var street=features.stream().filter(f->f.type()==2&&f.layer().equals("streets")).flatMap(f->f.paths().stream())
                     .filter(p->p.size()>=4&&p.size()<=64&&p.stream().anyMatch(q->Math.hypot(q.x()-800,q.y()-3000)<600)).findFirst().orElseThrow();
                 List<DeviceRoute.Point> points=new ArrayList<>();for(var q:street){var c=Basemap.coordinate(tile,4096,q.x(),q.y());points.add(p((int)Math.round((c.longitude()-center.longitude())*111319.49079327358*Math.cos(Math.toRadians(center.latitude()))),(int)Math.round((c.latitude()-center.latitude())*111319.49079327358)));}
-                var view=new DeviceRoute.Frame(1,points,0,0,0);
+                int nearest=0;for(int i=1;i<points.size()-1;i++)if(Math.hypot(points.get(i).x(),points.get(i).y())<Math.hypot(points.get(nearest).x(),points.get(nearest).y()))nearest=i;
+                var pose=points.get(nearest);var ahead=points.get(nearest+1);
+                int bearing=(int)Math.round(Math.toDegrees(Math.atan2(ahead.x()-pose.x(),ahead.y()-pose.y()))*10);
+                var view=new DeviceRoute.Frame(1,points,pose.x(),pose.y(),Math.floorMod(bearing,3600));
                 lines.add(HexFormat.of().formatHex(radio.focus(new Basemap.Focus(view,center,1,5000,600)).bytes()));
                 for(int i=0;i<scene.items().size();i+=19)lines.add(HexFormat.of().formatHex(radio.basemap(scene,i,true).bytes()));
-                lines.add(HexFormat.of().formatHex(radio.snapshot(new NavigationFrame(2,3,120,4000,360,36,100000,100000),view,100000).bytes()));
+                var live=radio.snapshot(new NavigationFrame(2,3,120,4000,360,36,100000,100000),view,100000);
+                lines.add(HexFormat.of().formatHex(live.bytes()));
+                lines.add(HexFormat.of().formatHex(radio.details(1,live.sequence(),new NavigationDetails("测试道路","下一路段",686,-1)).bytes()));
                 lines.add(HexFormat.of().formatHex(radio.snapshot(NavigationFrame.status(1),null,104002).bytes()));
                 lines.add(HexFormat.of().formatHex(radio.snapshot(NavigationFrame.status(4),null,104003).bytes()));
                 Files.write(Path.of(args[2]),lines);

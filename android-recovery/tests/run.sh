@@ -46,7 +46,7 @@ java -m jdk.compiler/com.sun.tools.javac.Main -encoding UTF-8 -source 17 -target
 java -cp "$build" NavigationProtocolTests "$build/nav3.frames"
 g++ -std=c++17 -Wall -Wextra -Werror ../moto_esp32/tests/navigation_protocol_test.cpp -o "$build/navigation-protocol-test"
 "$build/navigation-protocol-test" "$build/nav3.frames"
-java -m jdk.compiler/com.sun.tools.javac.Main -encoding UTF-8 -source 17 -target 17 -cp "$build" -d "$build" app/src/main/java/com/motonav/companion/DeviceRoute.java app/src/main/java/com/motonav/companion/Basemap.java app/src/main/java/com/motonav/companion/RouteProtocol.java tests/RouteProtocolTests.java
+java -m jdk.compiler/com.sun.tools.javac.Main -encoding UTF-8 -source 17 -target 17 -cp "$build" -d "$build" app/src/main/java/com/motonav/companion/DeviceRoute.java app/src/main/java/com/motonav/companion/Basemap.java app/src/main/java/com/motonav/companion/NavigationDetails.java app/src/main/java/com/motonav/companion/RouteProtocol.java tests/RouteProtocolTests.java
 java -cp "$build" RouteProtocolTests "$build/nav4.frames"
 java -m jdk.compiler/com.sun.tools.javac.Main -encoding UTF-8 -source 17 -target 17 -cp "$build" -d "$build" tests/RoutePlanTests.java
 java -cp "$build" RoutePlanTests "$build/nav4-plan.frames"
@@ -60,3 +60,8 @@ java -m jdk.compiler/com.sun.tools.javac.Main -encoding UTF-8 -source 17 -target
 java -cp "$build" BleDiagnosticProtocolTests "$build/diag1.frames"
 g++ -std=c++17 -Wall -Wextra -Werror -I../moto_esp32/components/motonav_diagnostics/include ../moto_esp32/tests/host/diagnostic_protocol_test.cpp ../moto_esp32/components/motonav_diagnostics/format.cpp -o "$build/diagnostic-protocol-test"
 "$build/diagnostic-protocol-test" "$build/diag1.frames"
+
+java -m jdk.compiler/com.sun.tools.javac.Main -encoding UTF-8 -source 17 -target 17 -cp "$build" -d "$build" tests/NavigationDetailsTests.java
+java -cp "$build" NavigationDetailsTests "$build/nav4-details.frames"
+g++ -std=c++17 -Wall -Wextra -Werror -I../moto_esp32/components/motonav_core/include ../moto_esp32/tests/host/navigation_details_test.cpp -o "$build/navigation-details-test"
+"$build/navigation-details-test" "$build/nav4-details.frames"

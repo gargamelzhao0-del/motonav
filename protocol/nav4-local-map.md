@@ -62,7 +62,8 @@ exists only for old senders. New local navigation includes heading-up camera
 interpolation, limited tilt while moving, turn card, speed, planned/remaining time
 and distance, compass and visible OSM attribution. GPS loss hides the vehicle and
 shows unknown speed with a retained local view. No fabricated streets, speed limit,
-weather, traffic, POIs or Chinese road-name glyphs are introduced.
+weather, traffic or POIs are introduced. Version 0.3.9 adds licensed Chinese fonts
+and real SDK road names through the optional details message below.
 
 Geometry is intentionally bounded/generalized. Courtyard/island holes are omitted
 per polygon; other polygons in the same MVT multipolygon remain usable. Missing OSM
@@ -75,3 +76,51 @@ and the verified 40 MHz QSPI clock. Protocol state and transactional scratch use
 external PSRAM through the platform allocation interface; the renderer's hot
 geometry and DMA buffers remain in internal RAM. Allocation failure aborts
 initialization. Device benchmarks remain removable test-only code.
+
+## NAV4S3 navigation HUD (Android 0.7.18 / ESP32 0.3.9)
+
+HELLO type 11 (17 bytes) negotiates `NAV4S3`, including NAV4S2 capabilities.
+Older receivers reject it normally; the phone retries HELLO types 8, 5, 3, 1
+in order, resetting the probe sequence to 1. Existing GATT UUIDs are unchanged.
+
+Type 10 contains the common 13-byte header, then:
+
+| Offset | Field |
+| --- | --- |
+| 13 | local origin revision u32 |
+| 17 | sequence of the latest accepted NAV type 2, u32 |
+| 21 | phone-local ETA minute of day i16: -1 unknown, otherwise 0–1439 |
+| 23 | current road speed limit i16: -1 unknown, otherwise 1–300 km/h |
+| 25 | current road UTF-8 byte length u8, 0–63 |
+| 26 | next road UTF-8 byte length u8, 0–63 |
+| 27 | current road bytes followed by next road bytes, without NUL terminators |
+| end − 4 | CRC32 |
+
+Length is `31 + current_length + next_length`, maximum 157 bytes. Whole-frame
+validation precedes atomic publication. Names must be valid UTF-8, without control
+characters or bidi overrides. The sender removes formatting/control characters
+and truncates at complete Unicode characters. Missing glyphs remain placeholders.
+
+The phone captures these fields with the trusted instruction and sends them after
+the navigation ACK, before the next map chunk. Unsent details expire after two
+seconds and are cleared by a new WAIT/STOP frame. Details never renew navigation
+or fix timestamps. The receiver requires the referenced navigation sequence and
+origin, expires details after three seconds, and hides them on WAIT, source expiry,
+STOP, arrival, disconnect or security loss. Exact retries do not extend expiry.
+Well-formed optional details that arrive after guidance expiry are acknowledged
+and discarded, so an expiring fix cannot unnecessarily disconnect BLE.
+
+Road names come from `NaviInfo.getCurrentRoadName()` and `getNextRoadName()`;
+ETA is phone-local wall time plus the accepted remaining route duration.
+[SDK reference](https://a.amap.com/lbs/static/unzip/Android_Navi_Doc/com/amap/api/navi/model/NaviInfo.html).
+Android 0.7.18 sends speed limit -1: it does not substitute a nearby speed camera's
+limit for the current road. The reserved validated field permits a later verified
+road-limit source without fabricating today's value.
+
+The HUD and benchmark share the same UI implementation. Only removable test code
+supplies synthetic navigation fields; production never imports test fixtures.
+Anton/Barlow/Noto fonts use pinned OFL sources documented alongside generated C
+assets. The navigation view uses the simulator's 700-pixel perspective distance,
+speed-dependent scale/tilt, lower vehicle anchor, condensed speed numerals and
+bounded route highlights. Scanline shading uses ordered RGB565 dithering and
+compile-time ring geometry, without a full-frame canvas or per-frame allocation.

@@ -248,9 +248,9 @@ public final class NavigationService extends Service implements JourneyControlle
             // Each acknowledged map chunk yields to fresh navigation/STOP.
             if(stopping||clearLive||now-navigationSentMs>=1000){
                 navigationSentMs=now;
-                link.sendNavigation(frame,journey.deviceMap(),stopping?this::shutdownForeground:this::publish);
+                link.sendNavigation(frame,journey.deviceMap(),journey.deviceDetails(),stopping?this::shutdownForeground:this::publish);
             } else if(link.basemaps()) {
-                if(!link.sendFocusIfNeeded(focus,this::publish)&&focus!=null)
+                if(!link.sendFocusIfNeeded(focus,this::publish)&&!link.sendDetailsIfNeeded(this::publish)&&focus!=null)
                     link.sendMapChunkIfNeeded(focus.route().revision(),this::publish);
             } else link.sendRoutePlanIfNeeded(journey.devicePreview(),this::publish);
         }

@@ -13,6 +13,12 @@ function(add_preview target tests)
     add_executable(${target} preview.cpp
         ${COMPONENTS_DIR}/motonav_ui/navigation_ui.cpp ${COMPONENTS_DIR}/motonav_ui/navigation_hud.cpp ${COMPONENTS_DIR}/motonav_ui/dashboard.cpp
         ${COMPONENTS_DIR}/motonav_ui/label_cache.cpp ${COMPONENTS_DIR}/motonav_graphics/route_map.cpp)
+    target_sources(${target} PRIVATE
+        ${COMPONENTS_DIR}/motonav_ui/fonts/motonav_speed_66.c
+        ${COMPONENTS_DIR}/motonav_ui/fonts/motonav_distance_36.c
+        ${COMPONENTS_DIR}/motonav_ui/fonts/motonav_small_14.c
+        ${COMPONENTS_DIR}/motonav_ui/fonts/motonav_ui_18.c)
+    target_sources(${target} PRIVATE ${COMPONENTS_DIR}/motonav_ui/fonts/motonav_ui_18_ext.c)
     target_include_directories(${target} PRIVATE .
         ${COMPONENTS_DIR}/motonav_core/include ${COMPONENTS_DIR}/motonav_ui/include ${COMPONENTS_DIR}/motonav_graphics/include)
     target_compile_definitions(${target} PRIVATE MOTONAV_DEVICE_TESTS=${tests})

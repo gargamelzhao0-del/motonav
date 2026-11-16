@@ -3,6 +3,21 @@
 #include <cstdint>
 
 namespace motonav {
+// Alternating pixels for ordered RGB565 shading; the first/second colors are
+// already chosen in global screen coordinates so clipping cannot introduce seams.
+inline void fill_rgb565_pair(uint16_t *pixels,size_t count,uint16_t first,uint16_t second) {
+    if(!pixels||!count)return;
+    if(reinterpret_cast<uintptr_t>(pixels)&2U){*pixels++=first;--count;auto swap=first;first=second;second=swap;}
+    uint32_t pair=static_cast<uint32_t>(first)|(static_cast<uint32_t>(second)<<16);
+    auto *out=static_cast<uint8_t *>(__builtin_assume_aligned(pixels,4));
+    while(count>=8){
+        __builtin_memcpy(out,&pair,4);__builtin_memcpy(out+4,&pair,4);
+        __builtin_memcpy(out+8,&pair,4);__builtin_memcpy(out+12,&pair,4);
+        out+=16;count-=8;
+    }
+    while(count>=2){__builtin_memcpy(out,&pair,4);out+=4;count-=2;}
+    if(count)__builtin_memcpy(out,&first,2);
+}
 // Fill a caller-owned RGB565 span. Arbitrary pixel counts and 16-bit alignment
 // are supported. No padding writes, byte-order conversion, DMA or allocation.
 inline void fill_rgb565(uint16_t *pixels, size_t count, uint16_t color) {

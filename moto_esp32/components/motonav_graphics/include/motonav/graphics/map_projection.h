@@ -7,7 +7,11 @@
 namespace motonav {
 struct MapPoint { int16_t x, y; }; // Local coordinates, not latitude/longitude.
 struct MapSegment { MapPoint a, b; };
-struct MapCamera { float x, y, heading, scale; float perspective=0; }; // Radians, pixels/metre, bounded forward tilt.
+struct MapCamera {
+    float x, y, heading, scale;
+    float perspective=0; // Ground-plane camera pitch in radians, 0..61 degrees.
+    float anchor_y=0.7f; // Vehicle anchor as a fraction of display height.
+};
 struct ProjectedPoint { float x, y; };
 
 class MapProjection {
@@ -19,17 +23,23 @@ public:
                  std::isfinite(camera.y) && std::abs(camera.y) <= 32768 &&
                  std::isfinite(camera.heading) && std::abs(camera.heading) <= 360 &&
                  std::isfinite(camera.scale) && camera.scale >= 0.1f && camera.scale <= 4.0f &&
-                 std::isfinite(camera.perspective) && camera.perspective>=0 && camera.perspective<=0.35f) {
-        if (valid_) { sine_ = std::sin(camera.heading); cosine_ = std::cos(camera.heading); }
+                 std::isfinite(camera.perspective) && camera.perspective>=0 && camera.perspective<=1.065f &&
+                 std::isfinite(camera.anchor_y) && camera.anchor_y>=0.4f && camera.anchor_y<=0.8f) {
+        if (valid_) {
+            sine_=std::sin(camera.heading);cosine_=std::cos(camera.heading);
+            pitch_sine_=std::sin(camera.perspective);pitch_cosine_=std::cos(camera.perspective);
+        }
     }
     bool valid() const { return valid_; }
     ProjectedPoint project(MapPoint p) const {
         float x = p.x - camera_.x, y = p.y - camera_.y;
         float forward=x*sine_+y*cosine_;
-        float depth=std::max(0.35f,1+forward*(camera_.perspective*0.002f));
+        // Same ground-plane projection as sim/index.html (F=700). Clamp the
+        // near plane so bounded off-screen geometry cannot cross the camera.
+        float depth=std::max(80.0f/700,1+forward*camera_.scale*(pitch_sine_/700));
         const float scale=camera_.scale/depth;
         return {width_ * 0.5f + (x * cosine_ - y * sine_) * scale,
-                height_ * 0.7f - forward * scale};
+                height_ * camera_.anchor_y - forward * pitch_cosine_ * scale};
     }
     // Liang-Barsky clips BEFORE drawing. Far-off geometry never creates
     // oversized LVGL draw tasks; padding preserves thick strokes at an edge.
@@ -62,6 +72,6 @@ private:
     int width_, height_;
     MapCamera camera_;
     bool valid_;
-    float sine_ = 0, cosine_ = 1;
+    float sine_ = 0, cosine_ = 1, pitch_sine_=0, pitch_cosine_=1;
 };
 } // namespace motonav

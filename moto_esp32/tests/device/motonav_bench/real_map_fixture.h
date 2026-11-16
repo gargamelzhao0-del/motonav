@@ -427,3 +427,5 @@ static constexpr motonav::MapPoint RealMapRoute[]{
     {454,1111},
     {480,1139},
 };
+static constexpr motonav::MapPoint RealMapCamera{-64,136};
+static constexpr float RealMapHeading=1.106538746f;

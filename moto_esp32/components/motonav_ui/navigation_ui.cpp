@@ -95,22 +95,28 @@ void route_map(const ScreenSnapshot &state) {
     }
     float heading=r.heading<0?0:static_cast<float>(r.heading)*0.001745329252f;
     bool changed=base_changed;
-    const float scale=r.local_view?1.2f:1.0f;
-    const float tilt=r.local_view&&live&&state.guidance.speed_kmh>=10?0.25f:0;
+    const float speed=live?std::max(0,state.guidance.speed_kmh):0;
+    // Waiting preview uses a fixed framing preset, never a simulated speed/fix.
+    const float zoom=live?0.85f+std::clamp((speed-12)/68,0.0f,1.0f)*1.6f:1.13f;
+    const float scale=r.local_view?1/zoom:1.0f;
+    const float tilt=r.local_view?0.872664626f*(live?std::clamp((speed-6)/16,0.0f,1.0f):1.0f):0;
+    const float anchor=r.local_view?(270+36*tilt/0.872664626f)/466:0.7f;
     uint32_t now=lv_tick_get();
     if(map_revision!=r.revision || changed_mode) {
-        map_revision=r.revision; camera={static_cast<float>(r.x),static_cast<float>(r.y),heading,scale,tilt};
+        map_revision=r.revision; camera={static_cast<float>(r.x),static_cast<float>(r.y),heading,scale,tilt,anchor};
         from_camera=target_camera=camera; transition_at=now; changed=true;
-    } else if(target_camera.x!=r.x || target_camera.y!=r.y || std::abs(target_camera.heading-heading)>0.0001f||target_camera.perspective!=tilt) {
-        from_camera=camera; target_camera={static_cast<float>(r.x),static_cast<float>(r.y),heading,scale,tilt}; transition_at=now;
+    } else if(target_camera.x!=r.x || target_camera.y!=r.y || std::abs(target_camera.heading-heading)>0.0001f||target_camera.perspective!=tilt||target_camera.scale!=scale) {
+        from_camera=camera; target_camera={static_cast<float>(r.x),static_cast<float>(r.y),heading,scale,tilt,anchor}; transition_at=now;
     }
     float fraction=std::min(1.0f,static_cast<float>(now-transition_at)/900);
     float turn=std::remainder(target_camera.heading-from_camera.heading,6.283185307f);
     MapCamera next{from_camera.x+(target_camera.x-from_camera.x)*fraction,
-        from_camera.y+(target_camera.y-from_camera.y)*fraction,from_camera.heading+turn*fraction,scale,
-        from_camera.perspective+(target_camera.perspective-from_camera.perspective)*fraction};
+        from_camera.y+(target_camera.y-from_camera.y)*fraction,from_camera.heading+turn*fraction,
+        from_camera.scale+(target_camera.scale-from_camera.scale)*fraction,
+        from_camera.perspective+(target_camera.perspective-from_camera.perspective)*fraction,
+        from_camera.anchor_y+(target_camera.anchor_y-from_camera.anchor_y)*fraction};
     next.heading=std::remainder(next.heading,6.283185307f);
-    changed=changed||std::abs(next.x-camera.x)>0.001f||std::abs(next.y-camera.y)>0.001f||std::abs(next.heading-camera.heading)>0.0001f||std::abs(next.perspective-camera.perspective)>0.0001f;
+    changed=changed||std::abs(next.x-camera.x)>0.001f||std::abs(next.y-camera.y)>0.001f||std::abs(next.heading-camera.heading)>0.0001f||std::abs(next.perspective-camera.perspective)>0.0001f||std::abs(next.scale-camera.scale)>0.0001f||std::abs(next.anchor_y-camera.anchor_y)>0.0001f;
     camera=next;
     if(changed) {
         MapPoint points[64];

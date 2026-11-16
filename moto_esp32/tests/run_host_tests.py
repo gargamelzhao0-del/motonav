@@ -19,18 +19,23 @@ with tempfile.TemporaryDirectory(prefix='motonav-firmware-tests-') as directory:
     plan_fixture = root / 'tests/fixtures/nav4-plan.frames'
     diagnostic_fixture = root / 'tests/fixtures/diag1.frames'
     scene_fixture = root / 'tests/fixtures/nav4-scene.frames'
+    details_fixture = root / 'tests/fixtures/nav4-details.frames'
     if args.android_source:
         java = Path(os.environ['JAVA_HOME']) / 'bin' / ('java.exe' if os.name == 'nt' else 'java')
         source = args.android_source.resolve()
-        classes = ['Simulation', 'Protocol', 'NavigationFrame', 'NavigationProtocol', 'DeviceRoute', 'Basemap', 'VectorTile', 'LocalMapBuilder', 'MapTileStore', 'RouteProtocol', 'BleDiagnosticProtocol']
+        classes = ['Simulation', 'Protocol', 'NavigationFrame', 'NavigationProtocol', 'DeviceRoute', 'Basemap', 'VectorTile', 'LocalMapBuilder', 'MapTileStore', 'RouteProtocol', 'NavigationDetails', 'BleDiagnosticProtocol']
         sources = [source / 'app/src/main/java/com/motonav/companion' / (name + '.java') for name in classes]
         sources.append(source / 'tests/NavigationProtocolTests.java')
         sources.append(source / 'tests/RouteProtocolTests.java')
         sources.append(source / 'tests/RoutePlanTests.java')
         sources.append(source / 'tests/BasemapTests.java')
         sources.append(source / 'tests/BleDiagnosticProtocolTests.java')
+        sources.append(source / 'tests/NavigationDetailsTests.java')
         subprocess.run([str(java), '-m', 'jdk.compiler/com.sun.tools.javac.Main', '-encoding', 'UTF-8',
                         '-d', str(output), *map(str, sources)], check=True)
+        details_fixture = output / 'nav4-details.frames'
+        subprocess.run([str(java), '-cp', str(output), 'NavigationDetailsTests', str(details_fixture)], check=True)
+        assert details_fixture.read_bytes() == (root / 'tests/fixtures/nav4-details.frames').read_bytes(), 'HUD fixture changed'
         fixture = output / 'nav3.frames'
         subprocess.run([str(java), '-cp', str(output), 'NavigationProtocolTests', str(fixture)], check=True)
         assert fixture.read_bytes() == (root / 'tests/fixtures/nav3.frames').read_bytes(), 'Android protocol fixture changed'
@@ -57,7 +62,7 @@ with tempfile.TemporaryDirectory(prefix='motonav-firmware-tests-') as directory:
         'display_runtime_test': ['components/motonav_display/display.cpp', 'components/motonav_display/pixel_pack.cpp',
                                  'main/app/device_supervisor.cpp'],
     }
-    for name in ['basemap_protocol_test', 'navigation_protocol_test', 'route_protocol_test', 'ble_channel_test', 'display_model_test', 'map_projection_test', 'map_raster_test',
+    for name in ['navigation_details_test', 'basemap_protocol_test', 'navigation_protocol_test', 'route_protocol_test', 'ble_channel_test', 'display_model_test', 'map_projection_test', 'map_raster_test',
                  'navigation_session_test', 'display_qspi_test', 'pixel_pack_test',
                  'navigation_service_test', 'notification_queue_test', 'ble_transport_test', 'display_runtime_test', 'diagnostic_protocol_test', 'diagnostic_bridge_test']:
         executable = output / (name + ('.exe' if os.name == 'nt' else ''))
@@ -82,4 +87,4 @@ with tempfile.TemporaryDirectory(prefix='motonav-firmware-tests-') as directory:
                          'brightness_timeout', 'metrics_timeout', 'start_fault', 'fps_lock_fault', 'fps_lock_race']:
                 subprocess.run([str(executable), mode], check=True)
         else:
-            subprocess.run([str(executable), *([str(scene_fixture),str(scene_fixture.with_name('nav4-map-updates.frames'))] if name == 'basemap_protocol_test' else [str(fixture)] if name == 'navigation_protocol_test' else [str(route_fixture),str(plan_fixture)] if name == 'route_protocol_test' else [str(route_fixture)] if name == 'navigation_service_test' else [str(diagnostic_fixture)] if name in {'diagnostic_protocol_test', 'diagnostic_bridge_test'} else [])], check=True)
+            subprocess.run([str(executable), *([str(details_fixture)] if name == 'navigation_details_test' else [str(scene_fixture),str(scene_fixture.with_name('nav4-map-updates.frames'))] if name == 'basemap_protocol_test' else [str(fixture)] if name == 'navigation_protocol_test' else [str(route_fixture),str(plan_fixture)] if name == 'route_protocol_test' else [str(route_fixture)] if name == 'navigation_service_test' else [str(diagnostic_fixture)] if name in {'diagnostic_protocol_test', 'diagnostic_bridge_test'} else [])], check=True)

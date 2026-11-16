@@ -7,6 +7,9 @@
 #include "motonav/ui/navigation_ui.h"
 #include "freertos/task.h"
 #include "esp_log.h"
+#include "sdkconfig.h"
+static_assert(CONFIG_ESP_MAIN_TASK_STACK_SIZE >= 6144,
+              "Update existing sdkconfig: CONFIG_ESP_MAIN_TASK_STACK_SIZE must be at least 6144");
 #if MOTONAV_BLE_DIAGNOSTICS
 #include "motonav/diagnostics/serial_bridge.h"
 #endif
@@ -80,6 +83,7 @@ void run() {
         auto state = navigation.snapshot();
         auto memory = drivers::memory_stats();
         auto ble = drivers::ble_runtime_status();
+        ESP_LOGI("motonav", "main_stack_min=%lu", static_cast<unsigned long>(uxTaskGetStackHighWaterMark(nullptr)));
         ESP_LOGI("motonav", "state=%d link=%d secure=%d protocol=%u route_points=%u route_revision=%lu rx=%lu dup=%lu rejected=%lu heap=%lu internal=%lu diag_rx=%u diag_writes=%lu diag_rejected=%lu ble_stack_min=%lu map_items=%u map_revision=%lu local=%d map_generation=%lu map_complete=%d",
             static_cast<int>(screen_mode(state)), state.linked, state.encrypted, state.protocol,
             static_cast<unsigned>(state.route.count), static_cast<unsigned long>(state.route.revision),

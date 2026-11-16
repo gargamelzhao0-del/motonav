@@ -26,6 +26,15 @@ public final class RouteProtocol {
     public Command helloWithPreview() { return finish(begin(17,3),true); }
     public Command helloWithBasemap() { return finish(begin(17,5),true); }
     public Command helloWithMapUpdates() { return finish(begin(17,8),true); }
+    public Command helloWithDetails() { return finish(begin(17,11),true); }
+    public Command details(int revision,int navigationSequence,NavigationDetails details) {
+        if(revision<=0||navigationSequence<=0||details==null)throw new IllegalArgumentException("details reference");
+        byte[] current=details.currentRoad().getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        byte[] next=details.nextRoad().getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        return finish(begin(31+current.length+next.length,10).putInt(revision).putInt(navigationSequence)
+                .putShort((short)details.etaMinute()).putShort((short)details.speedLimit())
+                .put((byte)current.length).put((byte)next.length).put(current).put(next),false);
+    }
     public Command focus(Basemap.Focus focus) {
         var route=focus.route();int count=route.points().size();
         if(count<2||count>64||route.revision()<=0||focus.reason()<0||focus.reason()>7

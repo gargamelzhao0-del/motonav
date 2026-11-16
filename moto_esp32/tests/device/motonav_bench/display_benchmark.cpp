@@ -1,5 +1,7 @@
 #include "motonav/testing/display_benchmark.h"
 #include "motonav/ui/dashboard.h"
+#include "motonav/ui/navigation_hud.h"
+#include "motonav/ui/fonts.h"
 #include "map_fixture.h"
 #include "esp_log.h"
 #include <climits>
@@ -14,6 +16,7 @@ constexpr uint32_t Amber = 0xffc265;
 lv_display_t *display;
 lv_obj_t *normal_screen, *test_screen, *test_marker;
 Dashboard view;
+NavigationHud map_hud;
 SnapshotReader snapshot;
 BenchmarkServices services;
 bool exit_requested = false, pending_autorun = false;
@@ -44,6 +47,8 @@ void benchmark_layout() {
     } else if (!map && map_canvas) {
         lv_obj_delete(map_canvas); map_canvas = nullptr;
     }
+    if(map&&!map_hud.root)create_navigation_hud(lv_screen_active(),map_hud);
+    if(map_hud.root)lv_obj_set_flag(map_hud.root,LV_OBJ_FLAG_HIDDEN,!map);
     lv_obj_set_flag(view.speed, LV_OBJ_FLAG_HIDDEN, map);
     lv_obj_set_flag(view.remaining, LV_OBJ_FLAG_HIDDEN, map);
     lv_obj_set_flag(view.arrow, LV_OBJ_FLAG_HIDDEN, map);
@@ -60,6 +65,10 @@ void benchmark_layout() {
         lv_obj_set_style_radius(overlay, map ? 6 : 0, 0);
     }
     view.last_icon = -1;
+    lv_obj_set_flag(view.title,LV_OBJ_FLAG_HIDDEN,map);lv_obj_set_flag(view.footer,LV_OBJ_FLAG_HIDDEN,map);
+    lv_obj_set_pos(view.top,map?101:63,map?114:52);lv_obj_set_width(view.top,map?264:340);
+    lv_obj_set_style_text_font(view.top,map?&motonav_small_14:&lv_font_montserrat_16,0);
+    if(map){lv_obj_set_pos(view.number,292,335);lv_obj_set_width(view.number,85);lv_obj_set_style_text_font(view.number,&motonav_small_14,0);}
 }
 
 uint64_t milliseconds() { return services.now_us() / 1000; }
@@ -103,6 +112,7 @@ void set_test(bool enabled) {
     if (enabled && !testing) {
         test_screen = lv_obj_create(nullptr);
         view = {};
+        map_hud = {};
         create_dashboard(test_screen, view);
         lv_obj_t *screen = test_screen;
         test_marker = lv_obj_create(screen); lv_obj_remove_style_all(test_marker);
@@ -122,6 +132,7 @@ void set_test(bool enabled) {
         lv_obj_delete(test_screen);
         test_screen = map_canvas = test_marker = nullptr;
         view = {};
+        map_hud = {};
     }
     testing = enabled;
     exit_requested = false;
@@ -179,7 +190,17 @@ bool refresh(void *, const ScreenSnapshot &state) {
         if (map) {
             if (!map_canvas) { set_label_text(view.title, "MAP MEMORY ERROR"); return true; }
             uint64_t begin = static_cast<uint64_t>(services.now_us());
-            render_map_benchmark(map_canvas, now - test_started);
+            auto camera=render_map_benchmark(map_canvas, now - test_started);
+            // The removable test exercises the production HUD, with an explicit
+            // DISPLAY TEST marker and no synthetic input sent to the navigation service.
+            ScreenSnapshot test{};test.linked=test.encrypted=test.subscribed=test.handshaken=true;
+            test.details.revision=1;test.details.eta_minute=686;
+            std::snprintf(test.details.current_road,sizeof(test.details.current_road),"测试道路");
+            std::snprintf(test.details.next_road,sizeof(test.details.next_road),"下一路段");
+            test.has_guidance=test.stream_fresh=true;test.guidance={Live,3,120,4000,360,36};
+            test.route.local_view=true;test.route.revision=test.basemap_revision=1;
+            test.basemap_count=383;test.basemap_complete=true;
+            update_navigation_hud(map_hud,test,camera.heading);
             uint64_t duration = static_cast<uint64_t>(services.now_us()) - begin;
             if (now - test_started >= 2500) {
                 map_render_us += duration; ++map_frames;
