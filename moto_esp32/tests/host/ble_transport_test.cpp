@@ -6,6 +6,9 @@
 #include <string>
 #include <vector>
 using namespace motonav::drivers;
+static const ble_gatt_svc_def *diagnostic_services;
+static int diagnostic_resets=0,diagnostic_receives=0;
+static BleReceiveResult diagnostic_result=BleReceiveResult::Accepted;
 ble_hs_config ble_hs_cfg{};
 static int (*gap)(ble_gap_event *,void *);
 static const ble_gatt_svc_def *services;
@@ -61,6 +64,7 @@ void ble_svc_gatt_changed(uint16_t first, uint16_t last) { assert(first==1 && la
 int ble_svc_gap_device_name_set(const char *) { return 0; }
 int ble_gatts_count_cfg(const ble_gatt_svc_def *) { return 0; }
 int ble_gatts_add_svcs(const ble_gatt_svc_def *value) {
+    if(value[1].type==0){diagnostic_services=value;return 0;}
     services=value; *services[0].characteristics[1].val_handle=42;
     *services[2].characteristics[1].val_handle=43; return 0;
 }
@@ -78,14 +82,33 @@ static int write(const std::string &bytes, unsigned channel=3) {
     const auto &characteristic=services[channel==4?2:0].characteristics[0];
     return characteristic.access_cb(7,1,&ctx,characteristic.arg);
 }
+static int write_diagnostic(const std::string &bytes,uint16_t connection=7) {
+    os_mbuf p{};os_mbuf_append(&p,bytes.data(),bytes.size());
+    ble_gatt_access_ctxt ctx{BLE_GATT_ACCESS_OP_WRITE_CHR,&p};
+    const auto &c=diagnostic_services[0].characteristics[0];
+    return c.access_cb(connection,1,&ctx,c.arg);
+}
 int main() {
     const BleCallbacks cb{nullptr,[](void *,const BleEvent &e){events.push_back(e);},
         [](void *,const uint8_t *p,size_t size) {
             const auto result=ble_notify(p,size);
             return result==ESP_OK?BleReceiveResult::Accepted:result==ESP_ERR_NO_MEM?BleReceiveResult::NoMemory:BleReceiveResult::Rejected;
         }};
-    assert(ble_start("MotoNav-test","test",cb)==ESP_OK);
-    ble_hs_cfg.sync_cb(); connect();
+    const BleDiagnosticCallbacks diag{nullptr,[](void *,const uint8_t *,size_t){++diagnostic_receives;return diagnostic_result;},
+        [](void *){++diagnostic_resets;}};
+    assert(ble_start("MotoNav-test","test",cb,diag)==ESP_OK);
+    assert(diagnostic_services && diagnostic_services[0].characteristics[0].flags & BLE_GATT_CHR_F_WRITE_AUTHEN);
+    ble_hs_cfg.sync_cb();
+    assert(write_diagnostic("x")==BLE_ATT_ERR_UNLIKELY && diagnostic_receives==0);
+    connect();
+    assert(diagnostic_resets==1);
+    const auto before_diagnostic=events.size();
+    assert(write_diagnostic("x")==0 && diagnostic_receives==1 && events.size()==before_diagnostic);
+    assert(write_diagnostic("x",99)==BLE_ATT_ERR_UNLIKELY && diagnostic_receives==1);
+    assert(write_diagnostic(std::string(21,'x'))==BLE_ATT_ERR_INVALID_ATTR_VALUE_LEN);
+    diagnostic_result=BleReceiveResult::NoMemory;assert(write_diagnostic("x")==BLE_ATT_ERR_INSUFFICIENT_RES);
+    diagnostic_result=BleReceiveResult::Rejected;assert(write_diagnostic("x")==BLE_ATT_ERR_UNLIKELY);
+    diagnostic_result=BleReceiveResult::Accepted;
     assert(service_changes==1);
     // Restored CCCDs do not choose the protocol; authenticated RX does.
     const uint8_t first='x';
@@ -114,6 +137,7 @@ int main() {
         const auto before=sent.size();
         ble_gap_event event{}; event.type=cause; event.subscribe={42,false}; event.enc_change={1,7};
         gap(&event,nullptr);
+        if(cause!=BLE_GAP_EVENT_SUBSCRIBE)assert(write_diagnostic("no security")==BLE_ATT_ERR_UNLIKELY);
         assert(!timers[1]->active);
         timers[1]->cb(nullptr); assert(sent.size()==before);
         connect(); assert(write("NEW")==0); fire(); assert(sent.back()=="NEW");

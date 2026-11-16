@@ -24,6 +24,8 @@ public final class BleLink {
     public static final UUID MAP_SERVICE=UUID.fromString("91c40001-6b5d-4f1a-b817-52e0baf8a430");
     private static final UUID MAP_RX=UUID.fromString("91c40002-6b5d-4f1a-b817-52e0baf8a430");
     private static final UUID MAP_TX=UUID.fromString("91c40003-6b5d-4f1a-b817-52e0baf8a430");
+    public static final UUID DIAGNOSTIC_SERVICE=UUID.fromString("91d10001-6b5d-4f1a-b817-52e0baf8a430");
+    private static final UUID DIAGNOSTIC_RX=UUID.fromString("91d10002-6b5d-4f1a-b817-52e0baf8a430");
     private static final UUID CCCD=UUID.fromString("00002902-0000-1000-8000-00805f9b34fb");
     public interface Listener { void status(String text); void found(BluetoothDevice device); void ready(); void disconnected(); void acknowledged(int seq); }
     private final Context context;
@@ -31,6 +33,19 @@ public final class BleLink {
     private final Handler handler=new Handler(Looper.getMainLooper());
     private BluetoothGatt gatt;
     private BluetoothGattCharacteristic rx;
+    private BluetoothGattCharacteristic diagnosticRx, inFlightWrite;
+    private byte[] diagnosticFrame, nextDiagnostic;
+    private int diagnosticOffset, diagnosticSession, activeDiagnosticSession, diagnosticSequence;
+    private long diagnosticSent, diagnosticDropped, diagnosticSampleMs = -1, diagnosticOfferedMs;
+    private int lastAckSequence;
+    private long lastAckLatency = BleDiagnosticProtocol.UNKNOWN;
+    private BleDiagnosticProtocol.Transmission lastNavigation;
+    private final Runnable diagnosticTimeout=()->{
+        if (inFlightWrite != null && inFlightWrite == diagnosticRx) {
+            diagnosticStatus("回执超时，正在断开以恢复连接");
+            fail("蓝牙诊断回执超时，请重新连接圆屏。");
+        }
+    };
     private BluetoothGattCharacteristic notifications;
     private BluetoothGattDescriptor pendingSubscription;
     private String phase="idle";
@@ -79,9 +94,43 @@ public final class BleLink {
     }
     public boolean sendNavigation(NavigationFrame frame, DeviceRoute.Frame map, Runnable done) {
         if (!ready || busy() || navigation == null) return false;
-        if(routeMaps)send(routeProtocol.snapshot(frame,map,SystemClock.elapsedRealtime()),done);
-        else send(navigation.snapshot(frame, SystemClock.elapsedRealtime()), done);
+        long now=SystemClock.elapsedRealtime();
+        int points=map==null?0:map.points().size();
+        if(routeMaps){
+            RouteProtocol.Command command=routeProtocol.snapshot(frame,map,now);
+            lastNavigation=BleDiagnosticProtocol.navigation(frame,points,command.bytes()[13]&255,command.bytes()[37]&255,4,command.sequence(),now);
+            send(command,done);
+        }else{
+            Protocol.Command command=navigation.snapshot(frame,now);
+            int mode=Integer.parseInt(command.wire().split(",",6)[4]);
+            lastNavigation=BleDiagnosticProtocol.navigation(frame,points,mode,0,3,command.sequence(),now);
+            send(command,done);
+        }
         return true;
+    }
+    public void stopDiagnostic(){
+        nextDiagnostic=null;
+        if(inFlightWrite==null || inFlightWrite!=diagnosticRx)diagnosticFrame=null;
+    }
+    private void diagnosticStatus(String text){Diagnostics.bluetoothStatus(diagnosticSession,text,diagnosticSent,diagnosticDropped);}
+    public void offerDiagnostic(BleDiagnosticProtocol.Observation observation){
+        int session=Diagnostics.bluetoothSession();
+        if(session==0){stopDiagnostic();return;}
+        if(session!=diagnosticSession){
+            stopDiagnostic();diagnosticSession=session;diagnosticSequence=0;diagnosticSent=0;diagnosticDropped=0;diagnosticSampleMs=-1;
+        }
+        if(!ready){diagnosticStatus("等待圆屏连接");return;}
+        if(diagnosticRx==null){diagnosticStatus("圆屏固件不支持，请更新固件后重新连接");return;}
+        long now=SystemClock.elapsedRealtime();
+        if(diagnosticSampleMs>=0 && now-diagnosticSampleMs<1000)return;
+        diagnosticSampleMs=now;
+        if(nextDiagnostic!=null)diagnosticDropped++;
+        if(diagnosticSequence==Integer.MAX_VALUE){diagnosticStatus("本次序号已用尽，请重新开启诊断");return;}
+        nextDiagnostic=BleDiagnosticProtocol.snapshot(session,++diagnosticSequence,now,observation,lastNavigation,
+                routeMaps?4:3,lastAckSequence,lastAckLatency,diagnosticDropped,Diagnostics.bluetoothMarkers(),BuildConfig.VERSION_CODE,busy());
+        diagnosticOfferedMs=now;
+        diagnosticStatus(busy()?"导航优先，等待发送":"正在转发");
+        writeNext();
     }
     public void scan(){
         disconnect();
@@ -155,6 +204,9 @@ public final class BleLink {
     public void disconnect(){
         clearBondWait();
         stopScan();handler.removeCallbacks(timeout);ready=false;pending=null;completion=null;chunks=null;chunkIndex=0;ackReceived=false;rx=null;writing=false;incoming.setLength(0);protocol.reset();networkProtocol.reset();transfer=null;transferIndex=0;
+        handler.removeCallbacks(diagnosticTimeout);inFlightWrite=null;diagnosticRx=null;diagnosticFrame=null;nextDiagnostic=null;
+        lastNavigation=null;lastAckSequence=0;lastAckLatency=BleDiagnosticProtocol.UNKNOWN;
+        diagnosticStatus("等待圆屏连接");
         if (navigation != null) navigation.reset();
         if (routeProtocol != null) routeProtocol.reset();
         routeMaps=false;
@@ -201,16 +253,38 @@ public final class BleLink {
     }
     @SuppressWarnings("deprecation")
     private void writeNext(){
-        if(gatt==null||pending==null)return;
+        if(gatt==null||inFlightWrite!=null)return;
+        if(pending==null){writeDiagnostic();return;}
         if(chunkIndex==chunks.size()){writing=false;finishIfAcknowledged();return;}
         writing=true;rx.setWriteType(BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT);rx.setValue(chunks.get(chunkIndex++));
+        inFlightWrite=rx;
         try{if(!gatt.writeCharacteristic(rx))fail("BLE 写入未启动，已断开。");}catch(SecurityException e){fail("蓝牙权限已被撤回。");}
+    }
+    @SuppressWarnings("deprecation")
+    private void writeDiagnostic(){
+        if(!ready || diagnosticRx==null || diagnosticSession!=Diagnostics.bluetoothSession()){stopDiagnostic();return;}
+        if(diagnosticFrame!=null && activeDiagnosticSession!=diagnosticSession)diagnosticFrame=null;
+        if(diagnosticFrame==null){
+            if(nextDiagnostic==null)return;
+            if(SystemClock.elapsedRealtime()-diagnosticOfferedMs>2000){nextDiagnostic=null;diagnosticDropped++;diagnosticStatus("导航优先，略过旧状态");return;}
+            diagnosticFrame=nextDiagnostic;nextDiagnostic=null;diagnosticOffset=0;activeDiagnosticSession=diagnosticSession;
+        }
+        diagnosticRx.setWriteType(BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT);
+        diagnosticRx.setValue(BleDiagnosticProtocol.fragment(diagnosticFrame,diagnosticOffset));
+        inFlightWrite=diagnosticRx;
+        try{
+            if(gatt.writeCharacteristic(diagnosticRx)){handler.postDelayed(diagnosticTimeout,1000);return;}
+        }catch(SecurityException e){fail("蓝牙权限已被撤回。");return;}
+        inFlightWrite=null;diagnosticFrame=null;diagnosticDropped++;diagnosticStatus("诊断写入未启动，稍后重试");
     }
     private void finishIfAcknowledged(){
         if(pending==null||writing||!ackReceived)return;
         if(pending.helloVersion()!=0){diagnostic("acknowledged",0);phase="stream";}
         int sequence=pending.sequence();Runnable done=completion;pending=null;completion=null;handler.removeCallbacks(timeout);
+        lastAckSequence=sequence;
+        if(lastNavigation!=null && lastNavigation.sequence()==sequence)lastAckLatency=SystemClock.elapsedRealtime()-lastNavigation.atMs();
         listener.acknowledged(sequence);if(done!=null)done.run();
+        handler.post(this::writeNext);
     }
     private void notification(byte[] bytes){
         for(byte b:bytes){
@@ -246,6 +320,9 @@ public final class BleLink {
             BluetoothGattService service=g.getService(SERVICE);
             BluetoothGattService mapService=navigation==null?null:g.getService(MAP_SERVICE);
             routeMaps=mapService!=null&&mapService.getCharacteristic(MAP_RX)!=null&&mapService.getCharacteristic(MAP_TX)!=null;
+            BluetoothGattService diag=navigation==null?null:g.getService(DIAGNOSTIC_SERVICE);
+            diagnosticRx=diag==null?null:diag.getCharacteristic(DIAGNOSTIC_RX);
+            if(diagnosticRx!=null && (diagnosticRx.getProperties()&BluetoothGattCharacteristic.PROPERTY_WRITE)==0)diagnosticRx=null;
             Diagnostics.record("ble_state","phase","discover","state","capabilities",
                     "selected",routeMaps,"count",g.getServices().size(),"map_service",mapService!=null,
                     "map_rx",mapService!=null&&mapService.getCharacteristic(MAP_RX)!=null,
@@ -285,7 +362,19 @@ public final class BleLink {
             beginProtocol();
         });}
         @Override public void onCharacteristicWrite(BluetoothGatt g,BluetoothGattCharacteristic characteristic,int status){handler.post(()->{
-            if(g!=gatt||pending==null)return;
+            if(g!=gatt||characteristic!=inFlightWrite)return;
+            inFlightWrite=null;
+            if(characteristic==diagnosticRx){
+                handler.removeCallbacks(diagnosticTimeout);
+                if(activeDiagnosticSession!=Diagnostics.bluetoothSession() || activeDiagnosticSession!=diagnosticSession){diagnosticFrame=null;}
+                else if(status!=BluetoothGatt.GATT_SUCCESS){diagnosticFrame=null;diagnosticDropped++;diagnosticStatus("圆屏暂未接收，稍后重试（"+status+"）");}
+                else{
+                    diagnosticOffset+=Math.min(BleDiagnosticProtocol.FRAGMENT_BYTES,BleDiagnosticProtocol.FRAME_BYTES-diagnosticOffset);
+                    if(diagnosticOffset==BleDiagnosticProtocol.FRAME_BYTES){diagnosticFrame=null;diagnosticSent++;diagnosticStatus("正在转发至圆屏 USB");}
+                }
+                writeNext();return;
+            }
+            if(pending==null)return;
             if(status!=BluetoothGatt.GATT_SUCCESS){diagnostic("write_failed",status);fail("写入失败（"+status+"）。");return;}writeNext();
         });}
         @Override public void onCharacteristicChanged(BluetoothGatt g,BluetoothGattCharacteristic characteristic){byte[] value=characteristic.getValue();if(value!=null)receiveNotification(g,characteristic,value);}

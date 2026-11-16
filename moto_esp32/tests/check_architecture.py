@@ -15,6 +15,7 @@ allowed = {
     'motonav_touch': {'drivers'},
     'motonav_ble': {'drivers'},
     'motonav_platform': {'drivers'},
+    'motonav_diagnostics': {'diagnostics', 'drivers'},
 }
 errors = []
 for owner, namespaces in allowed.items():

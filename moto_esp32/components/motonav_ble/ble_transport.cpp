@@ -22,6 +22,7 @@ namespace motonav::drivers {
 namespace {
 constexpr const char *Tag = "motonav";
 BleCallbacks callbacks;
+BleDiagnosticCallbacks diagnostic_callbacks;
 bool secure = false;
 char revision[33];
 uint16_t connection_handle = BLE_HS_CONN_HANDLE_NONE, tx_handle, map_tx_handle;
@@ -42,10 +43,15 @@ const ble_uuid128_t tx_uuid = BLE_UUID128_INIT(0x9e,0xca,0xdc,0x24,0x0e,0xe5,0xa
 const ble_uuid128_t map_service_uuid = BLE_UUID128_INIT(0x30,0xa4,0xf8,0xba,0xe0,0x52,0x17,0xb8,0x1a,0x4f,0x5d,0x6b,0x01,0x00,0xc4,0x91);
 const ble_uuid128_t map_rx_uuid = BLE_UUID128_INIT(0x30,0xa4,0xf8,0xba,0xe0,0x52,0x17,0xb8,0x1a,0x4f,0x5d,0x6b,0x02,0x00,0xc4,0x91);
 const ble_uuid128_t map_tx_uuid = BLE_UUID128_INIT(0x30,0xa4,0xf8,0xba,0xe0,0x52,0x17,0xb8,0x1a,0x4f,0x5d,0x6b,0x03,0x00,0xc4,0x91);
+const ble_uuid128_t diag_service_uuid = BLE_UUID128_INIT(0x30,0xa4,0xf8,0xba,0xe0,0x52,0x17,0xb8,0x1a,0x4f,0x5d,0x6b,0x01,0x00,0xd1,0x91);
+const ble_uuid128_t diag_rx_uuid = BLE_UUID128_INIT(0x30,0xa4,0xf8,0xba,0xe0,0x52,0x17,0xb8,0x1a,0x4f,0x5d,0x6b,0x02,0x00,0xd1,0x91);
 const ble_uuid16_t info_uuid = BLE_UUID16_INIT(0x180a);
 const ble_uuid16_t revision_uuid = BLE_UUID16_INIT(0x2a26);
 
 void emit(BleEventType type, uint32_t value = 0) {
+    if (diagnostic_callbacks.reset && (type == BleEventType::Connected || type == BleEventType::Disconnected ||
+            type == BleEventType::PairingPin || (type == BleEventType::Security && !value)))
+        diagnostic_callbacks.reset(diagnostic_callbacks.context);
     if (callbacks.event) callbacks.event(callbacks.context, {type, value});
 }
 
@@ -139,6 +145,20 @@ int notification_access(uint16_t, uint16_t, ble_gatt_access_ctxt *ctx, void *) {
     return ctx->op == BLE_GATT_ACCESS_OP_READ_CHR ? BLE_ATT_ERR_READ_NOT_PERMITTED : BLE_ATT_ERR_WRITE_NOT_PERMITTED;
 }
 
+int write_diagnostic(uint16_t connection, uint16_t, ble_gatt_access_ctxt *ctx, void *) {
+    if (ctx->op != BLE_GATT_ACCESS_OP_WRITE_CHR) return BLE_ATT_ERR_WRITE_NOT_PERMITTED;
+    if (connection != connection_handle || !secure || closing || !diagnostic_callbacks.receive) return BLE_ATT_ERR_UNLIKELY;
+    uint8_t data[20];
+    const uint16_t length = OS_MBUF_PKTLEN(ctx->om);
+    if (!length || length > sizeof(data) || ble_hs_mbuf_to_flat(ctx->om, data, sizeof(data), nullptr))
+        return BLE_ATT_ERR_INVALID_ATTR_VALUE_LEN;
+    switch (diagnostic_callbacks.receive(diagnostic_callbacks.context, data, length)) {
+        case BleReceiveResult::Accepted: return 0;
+        case BleReceiveResult::NoMemory: return BLE_ATT_ERR_INSUFFICIENT_RES;
+        default: return BLE_ATT_ERR_UNLIKELY;
+    }
+}
+
 const ble_gatt_chr_def characteristics[] = {
     {.uuid = &rx_uuid.u, .access_cb = write_bytes, .arg = reinterpret_cast<void *>(3),
      .flags = BLE_GATT_CHR_F_WRITE | BLE_GATT_CHR_F_WRITE_ENC | BLE_GATT_CHR_F_WRITE_AUTHEN},
@@ -156,6 +176,13 @@ const ble_gatt_svc_def services[] = {
     {.type = BLE_GATT_SVC_TYPE_PRIMARY, .uuid = &service_uuid.u, .characteristics = characteristics},
     {.type = BLE_GATT_SVC_TYPE_PRIMARY, .uuid = &info_uuid.u, .characteristics = info_characteristics},
     {.type = BLE_GATT_SVC_TYPE_PRIMARY, .uuid = &map_service_uuid.u, .characteristics = map_characteristics}, {}
+};
+const ble_gatt_chr_def diagnostic_characteristics[] = {
+    {.uuid = &diag_rx_uuid.u, .access_cb = write_diagnostic,
+     .flags = BLE_GATT_CHR_F_WRITE | BLE_GATT_CHR_F_WRITE_ENC | BLE_GATT_CHR_F_WRITE_AUTHEN}, {}
+};
+const ble_gatt_svc_def diagnostic_services[] = {
+    {.type = BLE_GATT_SVC_TYPE_PRIMARY, .uuid = &diag_service_uuid.u, .characteristics = diagnostic_characteristics}, {}
 };
 
 void advertise();
@@ -260,14 +287,14 @@ void ble_task(void *) { nimble_port_run(); nimble_port_freertos_deinit(); }
 } // namespace
 
 
-esp_err_t ble_start(const char *name, const char *version, const BleCallbacks &handlers) {
+esp_err_t ble_start(const char *name, const char *version, const BleCallbacks &handlers, const BleDiagnosticCallbacks &diagnostics) {
     static bool attempted = false;
     if (!name || !version || !handlers.receive || !handlers.event ||
         !*name || std::strlen(name) >= sizeof(device_name) || std::strlen(version) >= sizeof(revision))
         return ESP_ERR_INVALID_ARG;
     if (attempted) return ESP_ERR_INVALID_STATE;
     attempted = true;
-    std::strcpy(device_name, name); std::strcpy(revision, version); callbacks = handlers;
+    std::strcpy(device_name, name); std::strcpy(revision, version); callbacks = handlers; diagnostic_callbacks = diagnostics;
     if (nimble_port_init()) return ESP_FAIL;
     if (ble_npl_callout_init(&advertising_retry, nimble_port_get_dflt_eventq(), retry_advertising, nullptr)) return ESP_FAIL;
     if (ble_npl_callout_init(&notification_retry, nimble_port_get_dflt_eventq(), send_notifications, nullptr)) return ESP_FAIL;
@@ -281,6 +308,9 @@ esp_err_t ble_start(const char *name, const char *version, const BleCallbacks &h
     if (ble_svc_gap_device_name_set(device_name)) return ESP_FAIL;
     if (ble_gatts_count_cfg(services)) return ESP_FAIL;
     if (ble_gatts_add_svcs(services)) return ESP_FAIL;
+    if (diagnostic_callbacks.receive) {
+        if (ble_gatts_count_cfg(diagnostic_services) || ble_gatts_add_svcs(diagnostic_services)) return ESP_FAIL;
+    }
     ble_store_config_init(); nimble_port_freertos_init(ble_task);
     return ESP_OK;
 }

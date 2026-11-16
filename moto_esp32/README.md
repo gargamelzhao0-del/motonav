@@ -1,6 +1,8 @@
 # MotoNav 1.75C 导航接收固件
 
-固件版本 **0.3.3**，配套支持 NAV3 的 Android 0.7.0 及以后版本，将真实转向、距离、预计时间及车速显示在 Waveshare ESP32-S3-Touch-AMOLED-1.75C 上。本地开发以 ESP-IDF 5.5.4、官方 BSP 3.0.0、LVGL 9.5.0 为基线，依赖版本由 `dependencies.lock` 记录。界面当前使用英文，支持左右转、斜转、急转、直行及保持左/右方向的箭头，其他转向以明确文字表示。
+固件版本 **0.3.4**，配套支持 NAV3 的 Android 0.7.0 及以后版本，将真实转向、距离、预计时间及车速显示在 Waveshare ESP32-S3-Touch-AMOLED-1.75C 上。本地开发以 ESP-IDF 5.5.4、官方 BSP 3.0.0、LVGL 9.5.0 为基线，依赖版本由 `dependencies.lock` 记录。界面当前使用英文，支持左右转、斜转、急转、直行及保持左/右方向的箭头，其他转向以明确文字表示。
+
+0.3.4 新增独立的手机蓝牙诊断转发组件，配合 Android 0.7.14 把每秒关键状态摘要转为 USB 串口 JSON。导航写入优先，接收队列有界，格式化/输出在低优先级任务完成；不改动地图和导航协议。用 `tools/diagnostic_monitor.py --port COM21 --output dist/ble-diagnostic-session` 收集，完整约定见 [DIAG1](../protocol/DIAG1.md)。不需要此功能时使用 `tools/build.ps1 -NoBluetoothDiagnostics` 排除整个组件。真实链路验收与并发帧率应单独记录。
 
 0.3.3 在 0.3.2 上修复接收分片与 ACK 排队的原子性，增加绑定协议通道的有界通知队列及失败恢复；显示层锁存 DMA/传输故障，应用通过独立状态接口安排重启。NAV4 接收候选状态移出蓝牙任务栈，地图线段长度按帧预计算，减少条带与双描边中的重复平方根计算。保留 NAV4、Android 指示确认、订阅恢复、40 MHz QSPI 和 RGB332。接口与验证范围见 [分层说明](FIRMWARE_LAYERS.md#033-修复与验证)。本轮未刷写 COM21，也未测量 0.3.3 的实机帧率。
 

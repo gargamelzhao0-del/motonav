@@ -116,6 +116,24 @@ public final class DiagnosticsThreadingTests {
         @Override public Certificate[] getServerCertificates(){return null;}
     }
 
+    private static void bluetoothSessionControls() throws Exception {
+        int requests=FakeHttps.requests;
+        responsive(()->Diagnostics.startBluetooth(false));
+        int session=Diagnostics.bluetoothSession();check(session>0,"Bluetooth session is explicit and nonzero");
+        responsive(()->Diagnostics.record("user_mark","reason","problem_observed"));
+        check(Diagnostics.bluetoothMarkers()==1,"Problem markers reach the next Bluetooth summary");
+        Diagnostics.bluetoothStatus(session,"connected",3,2);
+        check(Diagnostics.status().contains("圆屏已接收 3 份"),"Status separates receiver acceptance from computer capture");
+        Diagnostics.bluetoothStatus(session+1,"wrong_session",99,99);
+        check(!Diagnostics.status().contains("wrong_session"),"Late status from another diagnostic session ignored");
+        responsive(Diagnostics::stop);check(Diagnostics.bluetoothSession()==0,"Stop disables Bluetooth promptly");
+        responsive(()->Diagnostics.startBluetooth(false));
+        var limit=Diagnostics.class.getDeclaredField("sessionLimitMs");limit.setAccessible(true);limit.setLong(null,0);
+        check(Diagnostics.bluetoothSession()==0,"Expiry gates Bluetooth even before the heartbeat executes");
+        responsive(Diagnostics::stop);drain();
+        check(FakeHttps.requests==requests,"Bluetooth diagnosis does not create a public upload");
+    }
+
     public static void main(String[] args) throws Exception {
         // A test-only handler prevents all real network access by the production class.
         URL.setURLStreamHandlerFactory(protocol->protocol.equals("https")?new URLStreamHandler(){
@@ -126,6 +144,7 @@ public final class DiagnosticsThreadingTests {
             Diagnostics.initialize(new android.content.Context(new File(args[0])));
             recoveryDoesNotBlockUi();acknowledgementDoesNotBlockUi();disconnectDoesNotBlockUi();backpressureIsBounded();
             initializationFailureIsVisibleAndLocalRecordingSurvives(new File(args[0]));
+            bluetoothSessionControls();
             System.out.println("PASS: "+checks+" real Diagnostics checks with blocked I/O, bounded queues and initialization failure");
             success=true;
         } catch(Throwable error){error.printStackTrace();}

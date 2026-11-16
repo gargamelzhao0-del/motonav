@@ -16,13 +16,15 @@ with tempfile.TemporaryDirectory(prefix='motonav-firmware-tests-') as directory:
     output = Path(directory)
     fixture = root / 'tests/fixtures/nav3.frames'
     route_fixture = root / 'tests/fixtures/nav4.frames'
+    diagnostic_fixture = root / 'tests/fixtures/diag1.frames'
     if args.android_source:
         java = Path(os.environ['JAVA_HOME']) / 'bin' / ('java.exe' if os.name == 'nt' else 'java')
         source = args.android_source.resolve()
-        classes = ['Simulation', 'Protocol', 'NavigationFrame', 'NavigationProtocol', 'DeviceRoute', 'RouteProtocol']
+        classes = ['Simulation', 'Protocol', 'NavigationFrame', 'NavigationProtocol', 'DeviceRoute', 'RouteProtocol', 'BleDiagnosticProtocol']
         sources = [source / 'app/src/main/java/com/motonav/companion' / (name + '.java') for name in classes]
         sources.append(source / 'tests/NavigationProtocolTests.java')
         sources.append(source / 'tests/RouteProtocolTests.java')
+        sources.append(source / 'tests/BleDiagnosticProtocolTests.java')
         subprocess.run([str(java), '-m', 'jdk.compiler/com.sun.tools.javac.Main', '-encoding', 'UTF-8',
                         '-d', str(output), *map(str, sources)], check=True)
         fixture = output / 'nav3.frames'
@@ -31,27 +33,34 @@ with tempfile.TemporaryDirectory(prefix='motonav-firmware-tests-') as directory:
         route_fixture = output / 'nav4.frames'
         subprocess.run([str(java), '-cp', str(output), 'RouteProtocolTests', str(route_fixture)], check=True)
         assert route_fixture.read_bytes() == (root / 'tests/fixtures/nav4.frames').read_bytes(), 'Android NAV4 fixture changed'
+        diagnostic_fixture = output / 'diag1.frames'
+        subprocess.run([str(java), '-cp', str(output), 'BleDiagnosticProtocolTests', str(diagnostic_fixture)], check=True)
+        assert diagnostic_fixture.read_bytes() == (root / 'tests/fixtures/diag1.frames').read_bytes(), 'Android DIAG1 fixture changed'
     extra_sources = {
         'display_qspi_test': ['components/motonav_display/qspi_panel.cpp'],
         'pixel_pack_test': ['components/motonav_display/pixel_pack.cpp'],
         'navigation_service_test': ['main/app/navigation_service.cpp'],
         'ble_transport_test': ['components/motonav_ble/ble_transport.cpp'],
+        'diagnostic_protocol_test': ['components/motonav_diagnostics/format.cpp'],
+        'diagnostic_bridge_test': ['components/motonav_diagnostics/format.cpp', 'components/motonav_diagnostics/serial_bridge.cpp'],
         'display_runtime_test': ['components/motonav_display/display.cpp', 'components/motonav_display/pixel_pack.cpp',
                                  'main/app/device_supervisor.cpp'],
     }
     for name in ['navigation_protocol_test', 'route_protocol_test', 'ble_channel_test', 'display_model_test', 'map_projection_test', 'map_raster_test',
                  'navigation_session_test', 'display_qspi_test', 'pixel_pack_test',
-                 'navigation_service_test', 'notification_queue_test', 'ble_transport_test', 'display_runtime_test']:
+                 'navigation_service_test', 'notification_queue_test', 'ble_transport_test', 'display_runtime_test', 'diagnostic_protocol_test', 'diagnostic_bridge_test']:
         executable = output / (name + ('.exe' if os.name == 'nt' else ''))
         subprocess.run([args.cxx, '-std=c++17', '-Wall', '-Wextra', '-Werror',
                         *[f'-I{path}' for path in [root / 'components/motonav_core/include',
                             root / 'components/motonav_graphics/include', root / 'components/motonav_display',
                             root / 'components/motonav_graphics', root / 'components/motonav_display/include',
                             root / 'components/motonav_ble', root / 'components/motonav_ble/include',
+                            root / 'components/motonav_diagnostics/include',
                             root / 'components/motonav_platform/include', root / 'main/app']],
                         *([f'-I{root / "tests/host/qspi_sdk"}'] if name == 'display_qspi_test' else []),
+                        *([f'-I{root / "tests/host/diagnostic_sdk"}'] if name == 'diagnostic_bridge_test' else []),
                         *([f'-I{root / "tests/host/runtime_sdk"}'] if name in {
-                            'navigation_service_test', 'notification_queue_test', 'ble_transport_test', 'display_runtime_test'} else []),
+                            'navigation_service_test', 'notification_queue_test', 'ble_transport_test', 'display_runtime_test', 'diagnostic_bridge_test'} else []),
                         *([f'-I{root / "tests/host/ble_sdk"}'] if name == 'ble_transport_test' else []),
                         *([f'-I{root / "tests/host/display_sdk"}'] if name == 'display_runtime_test' else []),
                         str(root / 'tests/host' / (name + '.cpp')),
@@ -62,4 +71,4 @@ with tempfile.TemporaryDirectory(prefix='motonav-firmware-tests-') as directory:
                          'brightness_timeout', 'metrics_timeout', 'start_fault', 'fps_lock_fault', 'fps_lock_race']:
                 subprocess.run([str(executable), mode], check=True)
         else:
-            subprocess.run([str(executable), *([str(fixture)] if name == 'navigation_protocol_test' else [str(route_fixture)] if name in {'route_protocol_test', 'navigation_service_test'} else [])], check=True)
+            subprocess.run([str(executable), *([str(fixture)] if name == 'navigation_protocol_test' else [str(route_fixture)] if name in {'route_protocol_test', 'navigation_service_test'} else [str(diagnostic_fixture)] if name in {'diagnostic_protocol_test', 'diagnostic_bridge_test'} else [])], check=True)

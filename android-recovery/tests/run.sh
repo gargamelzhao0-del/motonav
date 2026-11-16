@@ -50,3 +50,7 @@ java -m jdk.compiler/com.sun.tools.javac.Main -encoding UTF-8 -source 17 -target
 java -cp "$build" RouteProtocolTests "$build/nav4.frames"
 g++ -std=c++17 -Wall -Wextra -Werror -I../moto_esp32/components/motonav_core/include ../moto_esp32/tests/host/route_protocol_test.cpp -o "$build/route-protocol-test"
 "$build/route-protocol-test" "$build/nav4.frames"
+java -m jdk.compiler/com.sun.tools.javac.Main -encoding UTF-8 -source 17 -target 17 -cp "$build" -d "$build" app/src/main/java/com/motonav/companion/BleDiagnosticProtocol.java tests/BleDiagnosticProtocolTests.java
+java -cp "$build" BleDiagnosticProtocolTests "$build/diag1.frames"
+g++ -std=c++17 -Wall -Wextra -Werror -I../moto_esp32/components/motonav_diagnostics/include ../moto_esp32/tests/host/diagnostic_protocol_test.cpp ../moto_esp32/components/motonav_diagnostics/format.cpp -o "$build/diagnostic-protocol-test"
+"$build/diagnostic-protocol-test" "$build/diag1.frames"

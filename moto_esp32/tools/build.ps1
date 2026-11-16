@@ -4,6 +4,7 @@ param(
     [string]$PythonEnvironment = 'C:/Espressif/python_env/idf5.5_py3.11_env',
     [switch]$DeviceTests,
     [switch]$NavigationMetrics,
+    [switch]$NoBluetoothDiagnostics,
     [switch]$DisplayBench,
     [switch]$MapBench,
     [switch]$LegacyQspi,
@@ -30,11 +31,12 @@ try {
     . (Join-Path $IdfPath 'export.ps1')
     if ($LASTEXITCODE -ne 0) { throw 'ESP-IDF environment initialization failed' }
     $metricsSetting = if ($NavigationMetrics) { 'ON' } else { 'OFF' }
+    $diagnosticsSetting = if ($NoBluetoothDiagnostics) { 'OFF' } else { 'ON' }
     $benchSetting = if ($DisplayBench) { 'ON' } else { 'OFF' }
     $mapBenchSetting = if ($MapBench) { 'ON' } else { 'OFF' }
     $testSetting = if ($DeviceTests -or $DisplayBench -or $MapBench) { 'ON' } else { 'OFF' }
     $directSetting = if ($LegacyQspi) { 'OFF' } else { 'ON' }
     $holdSetting = if ($HoldMap) { 'ON' } else { 'OFF' }
-    idf.py -B $BuildDirectory "-DMOTONAV_NAV_METRICS=$metricsSetting" "-DMOTONAV_DEVICE_TESTS=$testSetting" "-DMOTONAV_AUTORUN_BENCH=$benchSetting" "-DMOTONAV_AUTORUN_MAP_BENCH=$mapBenchSetting" "-DMOTONAV_BENCH_SECONDS=$BenchSeconds" "-DMOTONAV_DISPLAY_ROWS=$DisplayRows" "-DMOTONAV_DIRECT_QSPI=$directSetting" "-DMOTONAV_COLOR_MODE=$ColorMode" "-DMOTONAV_HOLD_MAP_AFTER_BENCH=$holdSetting" build
+    idf.py -B $BuildDirectory "-DMOTONAV_BLE_DIAGNOSTICS=$diagnosticsSetting" "-DMOTONAV_NAV_METRICS=$metricsSetting" "-DMOTONAV_DEVICE_TESTS=$testSetting" "-DMOTONAV_AUTORUN_BENCH=$benchSetting" "-DMOTONAV_AUTORUN_MAP_BENCH=$mapBenchSetting" "-DMOTONAV_BENCH_SECONDS=$BenchSeconds" "-DMOTONAV_DISPLAY_ROWS=$DisplayRows" "-DMOTONAV_DIRECT_QSPI=$directSetting" "-DMOTONAV_COLOR_MODE=$ColorMode" "-DMOTONAV_HOLD_MAP_AFTER_BENCH=$holdSetting" build
     if ($LASTEXITCODE -ne 0) { throw 'Firmware build failed' }
 } finally { Pop-Location }

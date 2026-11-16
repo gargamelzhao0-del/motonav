@@ -1,4 +1,4 @@
-# 固件分层与接口（0.3.3）
+# 固件分层与接口（0.3.4）
 
 本文件描述当前已实现的结构。主程序只组装模块；板级实现由独立 ESP-IDF 组件管理，应用不直接调用 BSP、NimBLE 或 LCD/I²C 接口。NAV3 协议保持兼容；NAV4 接收器和路线状态属于核心层，正式 UI 通过图形接口渲染路线。
 
@@ -21,6 +21,7 @@ moto_esp32/
 │   │   └── pixel_pack.* / *_s3.S    私有 RGB332 转换，S3 批量内核与标量回退
 │   ├── motonav_touch/                CST9217、方向映射、LVGL 输入适配
 │   ├── motonav_ble/                  安全连接、NUS 字节传输、配对事件
+│   ├── motonav_diagnostics/          可选 DIAG1 解码、有界队列、USB 串口输出
 │   ├── motonav_platform/             NVS 初始化、设备名、版本、时钟、内存
 │   ├── motonav_core/                 纯 C++ 协议、会话、显示状态模型
 │   ├── motonav_ui/                   导航页面、仪表控件、可选页面扩展接口
@@ -36,6 +37,7 @@ moto_esp32/
 └── tools/
     ├── build.ps1                    正式/测试构建开关，不访问串口
     ├── capture_serial.py            指定串口的限时日志
+    ├── diagnostic_monitor.py        被动采集手机诊断 JSON 与设备日志
     └── export_source.py             导出干净源码，默认不含 tests
 ```
 
@@ -56,6 +58,9 @@ flowchart TD
     Supervisor --> Platform
     App --> Display[显示驱动接口]
     App --> Touch[触摸驱动接口]
+    App -. 构建开关 .-> Diagnostics[诊断转发组件]
+    Diagnostics --> BLE
+    Diagnostics --> Platform
     App -. 构建开关 .-> Bench[tests/device 测试组件]
     Bench --> UI
     Bench --> Graphics[地图图形组件]
@@ -77,8 +82,9 @@ flowchart TD
 | 同上 | `DisplayConfig` | 默认 RGB332、双 64 行内部 DMA 缓冲；可选 RGB565，保留厂商 IO 对照路径 |
 | 同上 | `display_enable_metrics / display_read_metrics` | 默认关闭的传输字节、像素转换、命令、提交、DMA 和等待耗时；自行加锁 |
 | `motonav/drivers/touch.h` | `touch_init(display, &input)` | 初始化并绑定 LVGL 输入；应用使用 LVGL 点击/长按事件 |
-| `motonav/drivers/ble_transport.h` | `ble_start(name, revision, callbacks)` | 启动单连接加密认证 NUS 服务和广播；复制名称/版本 |
+| `motonav/drivers/ble_transport.h` | `ble_start(name, revision, callbacks, diagnostics={})` | 启动单连接加密认证服务和广播；复制名称/版本；可选独立诊断接收/重置回调 |
 | 同上 | `ble_notify / ble_notify_batch` | BLE 回调内全有或全无地入队；成功代表复制完成，不代表无线送达 |
+| `motonav/diagnostics/serial_bridge.h` | `SerialBridge::init / callbacks` | 有界 DIAG1 接收与低优先级串口任务；对象与固件同寿命 |
 | `motonav/drivers/display_status.h` | `display_status()` | 不获取 LVGL 锁的健康状态快照，故障锁存到重启 |
 | `motonav/drivers/platform.h` | `restart_device()` | 应用调用的整机重启，不擦除 NVS |
 | `motonav/drivers/platform.h` | `platform_init / device_name / firmware_version` | 初始化 NVS、板级身份、版本 |
@@ -118,6 +124,7 @@ ESP_ERROR_CHECK(drivers::display_init(&display, config));
 ### 线程与数据所有权
 
 - BLE 回调运行于 NimBLE 主机任务（CPU0），只更新业务状态和回复短通知，不调用 LVGL。不在其他任务或 ISR 中直接调用 `ble_notify / ble_notify_batch`。驱动已有 BLE 主机线程拥有的有界发送队列；后续跨任务主动上报仍需独立的线程间入口。
+- 可选 `BleDiagnosticCallbacks` 在同一 BLE 主机线程串行调用，必须保持短时、非阻塞。驱动只路由独立特征字节，不解析 DIAG1 或选择导航通道。`SerialBridge` 负责校验/重组，复制入四项队列；优先级 1 的任务进行 JSON 格式化及串口输出，断连通过 epoch 丢弃旧排队项。组件不依赖导航应用、UI 或 LVGL。详细协议与移除方式见 [DIAG1](../protocol/DIAG1.md)。
 - RX 回调中的字节数组只在回调期间有效；一个回调可以包含半帧、多帧或任意片段。驱动不解析 NAV3/NAV4 内容。业务会话在取消订阅、失去安全状态或断连时清理半帧与握手；新握手后才恢复诱导。
 - `NavigationService` 是业务状态的唯一持有者。BLE 事件与输入由主机线程串行调用；候选状态在锁外解析，ACK 全批入队成功后才在锁内提交状态。候选会话和回复存储由服务持有，不占用小任务栈。UI 只读取已提交快照，入队期间不持业务锁。UI 在 LVGL 线程通过读取器拉取快照，因此没有 BLE → LVGL 的跨线程写对象。
 - LVGL 服务运行于 CPU1；SPI 中断仍在 CPU1 分配。双 64 行内部 RAM 缓冲、466 × 466、40 MHz QSPI、RGB565_SWAPPED 绘制、真实 DMA 完成信号量及 CO5300 连续条带逻辑保留。RGB332 在已拥有的绘制缓冲中原地压缩，再提交一字节/像素的传输；16 字节对齐块使用 S3 PIE，短尾与其他四字节对齐地址使用标量路径。代码在 IRAM、掩码在内部 RAM，无每帧分配，不能在 ISR 调用转换内核。

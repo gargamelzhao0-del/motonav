@@ -107,6 +107,31 @@ final class JourneyController {
         ui = null; map = null; activity = null;
     }
     NavigationFrame frame() { return frame.at(SystemClock.elapsedRealtime()); }
+    BleDiagnosticProtocol.Observation diagnosticObservation(boolean navigating) {
+        long now = SystemClock.elapsedRealtime();
+        Location fix = guidanceFix();
+        long trusted = fix == null ? 0 : fix.getElapsedRealtimeNanos()/1_000_000L;
+        int flags = (gpsWeak ? 1 : 0) | (navigating ? 2 : 0)
+                | (context.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ? 4 : 0)
+                | (host.navigationAllowed() ? 8 : 0);
+        int reason = 0;
+        if (state.phase() == JourneyState.Phase.NAVIGATING && frame().mode() == NavigationFrame.WAITING) {
+            reason = switch (GuidanceHealth.reason(SystemClock.elapsedRealtimeNanos(), gpsWeak,
+                    trusted * 1_000_000L, lastSdkFixNanos, lastInstructionReceivedMs)) {
+                case GPS_WEAK -> 1;
+                case MAP_FIX_STALE -> 2;
+                case MAP_FIX_STALE_SDK_LIVE -> 3;
+                case INSTRUCTION_MISSING -> 4;
+                case INSTRUCTION_STALE -> 5;
+                case AWAITING_NEW_POSITION -> 6;
+            };
+        }
+        long accuracy = fix != null && fix.hasAccuracy() && Float.isFinite(fix.getAccuracy()) && fix.getAccuracy() >= 0
+                ? Math.min(BleDiagnosticProtocol.UNKNOWN-1, Math.round(fix.getAccuracy()*10.0)) : BleDiagnosticProtocol.UNKNOWN;
+        return new BleDiagnosticProtocol.Observation(flags,state.phase().ordinal(),reason,frame().mode(),
+                BleDiagnosticProtocol.age(now,trusted),BleDiagnosticProtocol.age(now,host.fixNanos()/1_000_000L),
+                BleDiagnosticProtocol.age(now,lastSdkFixNanos/1_000_000L),BleDiagnosticProtocol.age(now,lastInstructionReceivedMs),accuracy);
+    }
     DeviceRoute.Frame deviceMap() {
         if(frame().mode()!=NavigationFrame.LIVE)return null;
         Location fix=guidanceFix();

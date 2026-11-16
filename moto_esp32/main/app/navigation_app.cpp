@@ -7,6 +7,9 @@
 #include "motonav/ui/navigation_ui.h"
 #include "freertos/task.h"
 #include "esp_log.h"
+#if MOTONAV_BLE_DIAGNOSTICS
+#include "motonav/diagnostics/serial_bridge.h"
+#endif
 #if MOTONAV_DEVICE_TESTS
 #include "motonav/testing/display_benchmark.h"
 #include "motonav/testing/driver_probe.h"
@@ -16,6 +19,9 @@
 namespace motonav::app {
 namespace {
 NavigationService navigation;
+#if MOTONAV_BLE_DIAGNOSTICS
+diagnostics::SerialBridge diagnostic_bridge;
+#endif
 char name[20];
 }
 void run() {
@@ -47,9 +53,14 @@ void run() {
     create_navigation_ui(display, name, reader, extension);
     drivers::display_unlock();
     ESP_ERROR_CHECK(drivers::display_start());
-    ESP_ERROR_CHECK(drivers::ble_start(name, drivers::firmware_version(), navigation.callbacks()));
-    ESP_LOGI("motonav", "Firmware %s / NAV3+NAV4 / %s / device_tests=%d",
-             drivers::firmware_version(), name, MOTONAV_DEVICE_TESTS);
+    drivers::BleDiagnosticCallbacks diagnostics;
+#if MOTONAV_BLE_DIAGNOSTICS
+    ESP_ERROR_CHECK(diagnostic_bridge.init());
+    diagnostics = diagnostic_bridge.callbacks();
+#endif
+    ESP_ERROR_CHECK(drivers::ble_start(name, drivers::firmware_version(), navigation.callbacks(), diagnostics));
+    ESP_LOGI("motonav", "Firmware %s / NAV3+NAV4 / %s / device_tests=%d / ble_diagnostics=%d",
+             drivers::firmware_version(), name, MOTONAV_DEVICE_TESTS, MOTONAV_BLE_DIAGNOSTICS);
 
 #if MOTONAV_NAV_METRICS
     ESP_ERROR_CHECK(drivers::display_enable_fps(display, true));

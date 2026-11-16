@@ -55,6 +55,10 @@ final class Diagnostics {
     private static Context context;
     private static File directory;
     private static boolean enabled, uploadEligible;
+    private static boolean bluetoothForwarding;
+    private static int bluetoothSession;
+    private static long bluetoothMarkers, bluetoothSent, bluetoothDropped;
+    private static String bluetoothState = "等待圆屏连接";
     private static volatile boolean storageFailed;
     private static volatile String storageFailureClass = "";
     private static String session = "", transportState = "未连接";
@@ -92,6 +96,27 @@ final class Diagnostics {
     static void start(DiagnosticEndpoint destination) {
         start(destination, false);
     }
+    static void startBluetooth(boolean extended) {
+        start(null, extended);
+        synchronized (LOCK) {
+            bluetoothForwarding = true;
+            bluetoothSession = (int)(Long.parseLong(session.substring(0,8),16) & 0x7fff_ffffL);
+            if (bluetoothSession == 0) bluetoothSession = 1;
+            bluetoothMarkers = 0; bluetoothSent = 0; bluetoothDropped = 0; bluetoothState = "等待圆屏连接";
+        }
+    }
+    static int bluetoothSession() {
+        synchronized (LOCK) {
+            return enabled && bluetoothForwarding && SystemClock.elapsedRealtime()-started < sessionLimitMs ? bluetoothSession : 0;
+        }
+    }
+    static long bluetoothMarkers() { synchronized (LOCK) { return bluetoothMarkers; } }
+    static void bluetoothStatus(int expectedSession, String state, long sent, long skipped) {
+        synchronized (LOCK) {
+            if (!bluetoothForwarding || bluetoothSession != expectedSession) return;
+            bluetoothState = state; bluetoothSent = sent; bluetoothDropped = skipped;
+        }
+    }
     static void start(DiagnosticEndpoint destination, boolean extended) {
         stop();
         synchronized (LOCK) {
@@ -114,7 +139,7 @@ final class Diagnostics {
         HttpsURLConnection previous;
         synchronized (LOCK) {
             emit(false, "session_stop", "reason", "user_or_expiry");
-            enabled = false; endpoint = null; uploadEligible = false;
+            enabled = false; endpoint = null; uploadEligible = false; bluetoothForwarding = false;
             if (pump != null) { pump.cancel(false); pump = null; }
             previous = connection; connection = null;
         }
@@ -130,6 +155,7 @@ final class Diagnostics {
         FutureTask<Void> saved;
         synchronized (LOCK) {
             if (!enabled || (SystemClock.elapsedRealtime() - started >= sessionLimitMs && !event.equals("session_stop"))) return;
+            if (bluetoothForwarding && event.equals("user_mark")) bluetoothMarkers++;
             final String line;
             try { line = DiagnosticRecord.line(session, ++sequence, SystemClock.elapsedRealtime() - started, event, fields); }
             catch (RuntimeException ignored) { return; }
@@ -211,7 +237,9 @@ final class Diagnostics {
         synchronized (LOCK) {
             String state = enabled ? "诊断记录中 · 剩余 " + Math.max(0, (sessionLimitMs - (SystemClock.elapsedRealtime() - started)) / 60000) + " 分钟"
                 : "诊断已停止；现有本地记录仍可导出";
-            if (enabled) state += "\n" + transportState + " · 待发送 " + pendingCount + " 条 · 丢弃 " + (dropped + persistedDropped) + " 条";
+            if (enabled && bluetoothForwarding) state += "\n蓝牙转发：" + bluetoothState
+                    + "\n圆屏已接收 " + bluetoothSent + " 份 · 略过 " + bluetoothDropped + " 份 · 问题标记 " + bluetoothMarkers;
+            else if (enabled) state += "\n" + transportState + " · 待发送 " + pendingCount + " 条 · 丢弃 " + (dropped + persistedDropped) + " 条";
             if (enabled && lastDelivered > 0) state += "\n最近上传确认：" + (SystemClock.elapsedRealtime() - lastDelivered) / 1000 + " 秒前";
             if (enabled && endpoint != null) state += "\n接收端：" + endpoint.host;
             return state + (storageFailed ? "\n日志存储异常（" + storageFailureClass + "）" : "");

@@ -1,5 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
-set(PROJECT_VER "0.3.3")
+set(PROJECT_VER "0.3.4")
+option(MOTONAV_BLE_DIAGNOSTICS "Include optional phone-to-serial diagnostics bridge" ON)
 option(MOTONAV_NAV_METRICS "Log real navigation display FPS without synthetic input" OFF)
 option(MOTONAV_DEVICE_TESTS "Include removable on-device test screens" OFF)
 option(MOTONAV_AUTORUN_BENCH "Run all display workloads once at boot" OFF)
@@ -46,4 +47,5 @@ idf_build_set_property(MINIMAL_BUILD ON)
 # this option as a build property so both dependency discovery and compilation
 # see the same value (ordinary cache variables are not inherited there).
 idf_build_set_property(MOTONAV_DEVICE_TESTS ${MOTONAV_DEVICE_TESTS})
+idf_build_set_property(MOTONAV_BLE_DIAGNOSTICS ${MOTONAV_BLE_DIAGNOSTICS})
 project(motonav)

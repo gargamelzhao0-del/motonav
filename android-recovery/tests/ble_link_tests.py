@@ -16,7 +16,7 @@ stubs = {
     'android/content/Intent.java': 'package android.content; public class Intent {public <T> T getParcelableExtra(String name){return null;}}',
     'android/content/IntentFilter.java': 'package android.content; public class IntentFilter {public IntentFilter(String action){}}',
     'android/os/Build.java': 'package android.os; public class Build {public static class VERSION {public static int SDK_INT=35;}}',
-    'android/os/SystemClock.java': 'package android.os; public class SystemClock {public static long elapsedRealtime(){return 10000;}}',
+    'android/os/SystemClock.java': 'package android.os; public class SystemClock {public static long now=10000; public static long elapsedRealtime(){return now;}}',
     'android/os/Looper.java': 'package android.os; public class Looper {public static Looper getMainLooper(){return new Looper();}}',
     'android/os/Handler.java': '''package android.os; public class Handler {
         static java.util.List<Runnable> queue=new java.util.ArrayList<>();
@@ -75,7 +75,11 @@ stubs = {
     'android/bluetooth/le/ScanSettings.java': 'package android.bluetooth.le; public class ScanSettings {public static final int SCAN_MODE_LOW_LATENCY=2; public static class Builder {public Builder setScanMode(int m){return this;} public ScanSettings build(){return new ScanSettings();}}}',
     'com/motonav/companion/Diagnostics.java': '''package com.motonav.companion; public class Diagnostics {
         public static java.util.List<String> lines=new java.util.ArrayList<>();
+        public static int session; public static String bridgeStatus=""; public static long delivered,skipped;
+        public static int bluetoothSession(){return session;} public static long bluetoothMarkers(){return 2;}
+        public static void bluetoothStatus(int s,String text,long sent,long dropped){if(s==session){bridgeStatus=text;delivered=sent;skipped=dropped;}}
         public static void record(String event,Object... fields){lines.add(DiagnosticRecord.line("0".repeat(32),1,1,event,fields));} }''',
+    'com/motonav/companion/BuildConfig.java': 'package com.motonav.companion; public class BuildConfig {public static final int VERSION_CODE=22;}',
 }
 
 harness = r'''
@@ -92,7 +96,7 @@ public class BleLinkTests implements BleLink.Listener {
     public void status(String s){status=s;} public void found(BluetoothDevice d){} public void ready(){readyCount++;}
     public void disconnected(){} public void acknowledged(int seq){}
     BluetoothGatt start(boolean maps){
-        Handler.clear();Diagnostics.lines.clear();link.configureNavigation(123);link.connect(device);
+        Handler.clear();Diagnostics.lines.clear();Diagnostics.session=0;android.os.SystemClock.now=10000;link.configureNavigation(123);link.connect(device);
         BluetoothGatt g=device.last;configure(g,maps);return g;
     }
     void configure(BluetoothGatt g,boolean maps){
@@ -171,7 +175,55 @@ public class BleLinkTests implements BleLink.Listener {
         t=new BleLinkTests();g=t.start(false);t.discover(g);t.link.disconnect();Handler.advance(750);
         t.check(g.discoveries==1,"Disconnect cancels the delayed rediscovery");
     }
-    public static void main(String[] args){subscriptionAndAck();errorsAndLateCallbacks();serviceChange();rediscovery();System.out.println("PASS: "+checks+" real BleLink callback checks (boundary doubles; no radio)");}
+    BluetoothGatt diagnosticReady(boolean support){
+        var g=start(true);
+        if(support){var service=new BluetoothGattService();service.chars.put(UUID.fromString("91d10002-6b5d-4f1a-b817-52e0baf8a430"),new BluetoothGattCharacteristic(8));g.services.put(BleLink.DIAGNOSTIC_SERVICE,service);}
+        discover(g);g.callback.onDescriptorWrite(g,g.descriptor,0);Handler.flush();
+        g.callback.onCharacteristicWrite(g,g.lastWrite,0);Handler.flush();
+        g.callback.onCharacteristicChanged(g,tx,"A,1,NAV4\n".getBytes());Handler.flush();
+        check(link.ready(),"Ready before optional diagnostics");Diagnostics.session=456;
+        return g;
+    }
+    static BleDiagnosticProtocol.Observation observation(){return new BleDiagnosticProtocol.Observation(14,5,0,2,10,20,30,40,100);}
+    static void writeAck(BluetoothGatt g,int status){g.callback.onCharacteristicWrite(g,g.lastWrite,status);Handler.flush();}
+    static void diagnosticsPriority(){
+        var t=new BleLinkTests();var g=t.diagnosticReady(true);
+        var diag=g.getService(BleLink.DIAGNOSTIC_SERVICE).getCharacteristic(UUID.fromString("91d10002-6b5d-4f1a-b817-52e0baf8a430"));
+        t.link.offerDiagnostic(observation());t.check(g.lastWrite==diag&&diag.value[2]==0,"Diagnostic first fragment starts when idle");
+        int before=g.writes;
+        t.check(t.link.sendNavigation(new NavigationFrame(2,3,100,2000,300,30,9000,9000),null,null),"Navigation admitted during diagnostic ATT write");
+        t.check(g.writes==before,"Only one ATT operation in flight");
+        writeAck(g,0);t.check(g.lastWrite!=diag,"Navigation preempts between diagnostic fragments");
+        for(int i=0;i<3;i++)writeAck(g,0);
+        t.check(g.lastWrite!=diag&&t.link.busy(),"Diagnostics waits for navigation application ACK");
+        g.callback.onCharacteristicChanged(g,t.tx,"A,2,OK\n".getBytes());Handler.flush();
+        t.check(g.lastWrite==diag&&diag.value[2]==16,"Diagnostics resumes its own offset after navigation ACK");
+        for(int i=0;i<5;i++)writeAck(g,0);
+        t.check(Diagnostics.delivered==1&&!t.link.busy()&&!g.closed,"One complete diagnostic delivered without changing navigation session");
+        t.link.disconnect();
+    }
+    static void diagnosticsLifecycle(){
+        var t=new BleLinkTests();var g=t.diagnosticReady(false);int initial=g.writes;
+        t.link.offerDiagnostic(observation());t.check(g.writes==initial&&Diagnostics.bridgeStatus.contains("不支持"),"Old firmware continues navigation without diagnostic writes");t.link.disconnect();
+        t=new BleLinkTests();g=t.diagnosticReady(true);t.link.offerDiagnostic(observation());initial=g.writes;
+        Diagnostics.session=0;t.link.stopDiagnostic();writeAck(g,0);
+        t.check(g.writes==initial&&!g.closed,"Stop cancels all unsent diagnostic fragments");
+        Diagnostics.session=789;android.os.SystemClock.now+=1000;t.link.offerDiagnostic(observation());
+        t.check(g.lastWrite.value[2]==0,"New session restarts at offset zero");
+        Diagnostics.session=790;android.os.SystemClock.now+=1000;t.link.offerDiagnostic(observation());initial=g.writes;
+        t.check(g.writes==initial,"Session replacement cannot overlap ATT operations");writeAck(g,0);
+        t.check(g.lastWrite.value[2]==0,"Old session callback starts new session instead of resuming old data");
+        writeAck(g,17);t.check(!g.closed&&!t.link.busy(),"Diagnostic rejection does not disconnect navigation");
+        android.os.SystemClock.now+=1000;t.link.offerDiagnostic(observation());
+        t.check(g.lastWrite.value[2]==0,"Retry on next snapshot abandons rejected frame");
+        Handler.advance(1000);t.check(g.closed,"Lost ATT callback is bounded and requires a clean reconnection");
+        t=new BleLinkTests();g=t.diagnosticReady(true);
+        t.link.sendNavigation(NavigationFrame.status(1),null,null);
+        t.link.offerDiagnostic(observation());android.os.SystemClock.now+=1000;t.link.offerDiagnostic(observation());
+        t.check(Diagnostics.skipped==1,"One latest pending snapshot, no unbounded backlog");
+        t.link.disconnect();initial=g.writes;writeAck(g,0);t.check(g.writes==initial,"Late callback after disconnect is ignored");
+    }
+    public static void main(String[] args){subscriptionAndAck();errorsAndLateCallbacks();serviceChange();rediscovery();diagnosticsPriority();diagnosticsLifecycle();System.out.println("PASS: "+checks+" real BleLink callback checks (boundary doubles; no radio)");}
 }
 '''
 
@@ -184,7 +236,7 @@ with tempfile.TemporaryDirectory(prefix='motonav-ble-tests-') as directory:
         path.write_text(source, encoding='utf-8')
     (output / 'BleLinkTests.java').write_text(harness, encoding='utf-8')
     names = ['BleLink', 'DiagnosticRecord', 'Simulation', 'Protocol', 'LocalNetwork', 'NetworkProtocol',
-             'NavigationProtocol', 'NavigationFrame', 'DeviceRoute', 'RouteProtocol']
+             'NavigationProtocol', 'NavigationFrame', 'DeviceRoute', 'RouteProtocol', 'BleDiagnosticProtocol']
     sources = [root / 'app/src/main/java/com/motonav/companion' / (name + '.java') for name in names]
     java = str(Path(os.environ['JAVA_HOME']) / 'bin' / ('java.exe' if os.name == 'nt' else 'java')) if os.environ.get('JAVA_HOME') else 'java'
     subprocess.run([java, '-m', 'jdk.compiler/com.sun.tools.javac.Main', '-encoding', 'UTF-8', '-source', '17', '-target', '17',

@@ -58,6 +58,14 @@ public final class NavigationService extends Service implements JourneyControlle
         if (navigating && !stopping && canReconnect() && !link.sessionOpen()) link.connect(selectedDevice);
     };
     private final Runnable stopDeadline = this::shutdownForeground;
+    private final Runnable diagnosticTick = new Runnable() {
+        @Override public void run() {
+            if (destroyed) return;
+            if (Diagnostics.bluetoothSession() != 0) link.offerDiagnostic(journey.diagnosticObservation(navigating));
+            else link.stopDiagnostic();
+            handler.postDelayed(this,1000);
+        }
+    };
     private final Runnable tick = new Runnable() {
         @Override public void run() {
             if (!navigating) return;
@@ -80,6 +88,7 @@ public final class NavigationService extends Service implements JourneyControlle
         feed = new AmapLocationFeed(this, this::receiveLocation);
         link = new BleLink(getApplicationContext(), this);
         link.configureNavigation(new SecureRandom().nextInt(Integer.MAX_VALUE - 1) + 1);
+        handler.post(diagnosticTick);
         NotificationChannel channel = new NotificationChannel(CHANNEL, "正在导航", NotificationManager.IMPORTANCE_LOW);
         getSystemService(NotificationManager.class).createNotificationChannel(channel);
     }

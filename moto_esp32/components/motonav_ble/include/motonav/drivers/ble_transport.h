@@ -17,10 +17,19 @@ struct BleCallbacks {
     void (*event)(void *, const BleEvent &) = nullptr;
     BleReceiveResult (*receive)(void *, const uint8_t *, size_t) = nullptr;
 };
+// Optional independent encrypted write channel (DIAG1). Does not select or
+// mutate NAV3/NAV4, and cannot enqueue navigation ACKs. At most 20 bytes/write.
+// Same BLE-host callback rules; reset discards partial data on link/security loss.
+struct BleDiagnosticCallbacks {
+    void *context = nullptr;
+    BleReceiveResult (*receive)(void *, const uint8_t *, size_t) = nullptr;
+    void (*reset)(void *) = nullptr;
+};
 // Single secure NUS link. Name/revision are copied. NVS must be initialized.
 // Callbacks run on the BLE host task, must be short, and must not call LVGL.
 // Receive bytes are borrowed for the callback only; they are NOT complete frames.
-esp_err_t ble_start(const char *name, const char *revision, const BleCallbacks &callbacks);
+esp_err_t ble_start(const char *name, const char *revision, const BleCallbacks &callbacks,
+                    const BleDiagnosticCallbacks &diagnostics = {});
 // Call only inside a BLE callback (typically receive); never from ISR/UI tasks.
 // ESP_OK means copied into the bounded outgoing queue, not delivered over air.
 // Temporary NimBLE backpressure is retried; persistent failure closes the link.

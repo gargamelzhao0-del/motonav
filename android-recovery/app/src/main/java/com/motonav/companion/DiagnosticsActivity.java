@@ -30,7 +30,15 @@ public final class DiagnosticsActivity extends Activity {
         ScrollView scroll=AppUi.scroll(this,page);
         LinearLayout summary=AppUi.card(this);state=AppUi.text(this,Diagnostics.status(),15,AppUi.ACCENT);summary.addView(state);AppUi.add(page,summary,18);
         text(page, "仅记录定位质量、权限和错误等诊断信息，不含经纬度、目的地、车牌或高德 Key。", 13);
-        text(page, "主动开始后，日志加密发送到本次连接的调试电脑。默认持续 1 小时，可随时停止；也可仅在手机记录。", 13);
+        text(page, "手机连接圆屏，圆屏用 USB 接电脑，即可转发关键状态。默认持续 1 小时，可随时停止。", 13);
+        android.widget.Switch extended = new android.widget.Switch(this); extended.setText("本次诊断持续 4 小时");extended.setTextColor(AppUi.TEXT);extended.setMinHeight(AppUi.dp(this,56));page.addView(extended);
+        result = text(page, "默认关闭。蓝牙诊断无需填写公网连接；完整记录仍保留在手机。", 13);
+        result.setAccessibilityLiveRegion(android.view.View.ACCESSIBILITY_LIVE_REGION_POLITE);
+        button(page, "开始蓝牙实时诊断", () -> {
+            Diagnostics.startBluetooth(extended.isChecked());
+            result.setText("已开启。请返回真实地图，连接圆屏并复现问题。圆屏需支持蓝牙诊断，且通过 USB 连接电脑。");
+        });
+        text(page, "以下连接框仅用于公网诊断，可留空。", 13);
         link = new EditText(this); AppUi.field(link,"本次诊断连接（含连接凭证）"); link.setSingleLine(true);
         link.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
         link.setSaveEnabled(false); link.setSaveFromParentEnabled(false);
@@ -43,9 +51,6 @@ public final class DiagnosticsActivity extends Activity {
                 if (text != null && text.length() <= 1024) link.setText(text);
             }
         });
-        android.widget.Switch extended = new android.widget.Switch(this); extended.setText("本次诊断持续 4 小时");extended.setTextColor(AppUi.TEXT);extended.setMinHeight(AppUi.dp(this,56));page.addView(extended);
-        result = text(page, "默认不记录、不上传。只在本次主动开启后生效。", 13);
-        result.setAccessibilityLiveRegion(android.view.View.ACCESSIBILITY_LIVE_REGION_POLITE);
         button(page, "开始实时诊断", () -> {
             try {
                 DiagnosticEndpoint endpoint = DiagnosticEndpoint.parse(link.getText().toString());
@@ -66,7 +71,7 @@ public final class DiagnosticsActivity extends Activity {
             catch (android.content.ActivityNotFoundException error) { result.setText("系统文件保存器不可用。"); }
         });
         button(page, "返回地图复现问题", this::finish);
-        TextView details=AppUi.text(this,"记录定位来源、精度、数据年龄、权限、省电状态、算路阶段和错误码。日志经 HTTPS 和 Cloudflare 临时通道发送，连接须在有效期内。返回地图后继续记录；未确认上传的记录保留在本机，重新连接时自动补传；进程退出后需手动重新开启。",13,AppUi.MUTED);
+        TextView details=AppUi.text(this,"蓝牙诊断每秒最多发送一份定位质量、指令年龄、实际导航发送状态和回执摘要。导航数据优先；断连或拥堵时保留最新状态，不补发旧摘要。圆屏接收后通过 USB 输出，手机显示的接收数量不代表电脑已保存。完整日志保留在手机，可导出。公网模式仍使用有效的 HTTPS 诊断连接；进程退出后需手动重新开启。",13,AppUi.MUTED);
         details.setVisibility(android.view.View.GONE);
         Button explanation=AppUi.button(this,"查看记录与上传说明",false,()->{});
         explanation.setOnClickListener(view->{boolean show=details.getVisibility()!=android.view.View.VISIBLE;details.setVisibility(show?android.view.View.VISIBLE:android.view.View.GONE);explanation.setText(show?"收起记录与上传说明":"查看记录与上传说明");});
@@ -77,7 +82,7 @@ public final class DiagnosticsActivity extends Activity {
         TextView text=AppUi.text(this,value,size,AppUi.MUTED);AppUi.add(page,text,12);return text;
     }
     private void button(LinearLayout page, String title, Runnable action) {
-        Button button=AppUi.button(this,title,title.equals("开始实时诊断"),action);AppUi.add(page,button,10);
+        Button button=AppUi.button(this,title,title.equals("开始蓝牙实时诊断"),action);AppUi.add(page,button,10);
     }
     @Override protected void onActivityResult(int request, int code, Intent data) {
         super.onActivityResult(request, code, data);
