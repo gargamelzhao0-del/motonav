@@ -15,6 +15,7 @@ static void (*worker)(void *);
 static void *worker_context;
 static uint64_t now_ms;
 static std::vector<std::string> output;
+static std::vector<uint8_t> last_fragment;
 struct Empty {};
 QueueHandle_t xQueueCreate(unsigned count,size_t size){assert(count==4);item_size=size;return fail_create?nullptr:&queue;}
 BaseType_t xQueueSend(QueueHandle_t,const void *value,TickType_t wait){assert(wait==0);if(queue.size()==4)return pdFALSE;const auto *p=static_cast<const uint8_t *>(value);queue.emplace_back(p,p+item_size);return pdTRUE;}
@@ -28,7 +29,7 @@ static void set32(std::vector<uint8_t> &frame,size_t offset,uint32_t value){for(
 static BleReceiveResult send(motonav::drivers::BleDiagnosticCallbacks cb,std::vector<uint8_t> frame,uint32_t seq) {
     set32(frame,8,seq);set32(frame,84,crc32(frame.data(),84));
     BleReceiveResult result=BleReceiveResult::Rejected;
-    for(size_t offset=0;offset<frame.size();offset+=16){size_t count=std::min(size_t(16),frame.size()-offset);uint8_t p[20]{0xd1,uint8_t(seq),uint8_t(offset),uint8_t(count)};std::memcpy(p+4,frame.data()+offset,count);result=cb.receive(cb.context,p,count+4);}
+    for(size_t offset=0;offset<frame.size();offset+=16){size_t count=std::min(size_t(16),frame.size()-offset);uint8_t p[20]{0xd1,uint8_t(seq),uint8_t(offset),uint8_t(count)};std::memcpy(p+4,frame.data()+offset,count);last_fragment.assign(p,p+count+4);result=cb.receive(cb.context,p,count+4);}
     return result;
 }
 int main(int argc,char **argv){
@@ -41,7 +42,7 @@ int main(int argc,char **argv){
     assert(output.empty()&&queue.size()==4); // No formatting/serial I/O on BLE callback.
     now_ms=5000;assert(send(cb,frame,5)==BleReceiveResult::NoMemory);assert(queue.size()==4);
     drain();assert(output.size()==4);assert(output.back().find("\"receiver_dropped\":1")!=std::string::npos);
-    assert(send(cb,frame,5)==BleReceiveResult::Accepted); // Rejected admission did not advance replay state.
+    assert(cb.receive(cb.context,last_fragment.data(),last_fragment.size())==BleReceiveResult::Accepted); // Exact final-fragment retry after queue pressure; no bytes were consumed.
     now_ms=6000;assert(send(cb,frame,5)==BleReceiveResult::Rejected);
     assert(send(cb,frame,6)==BleReceiveResult::Accepted);
     now_ms=6001;assert(send(cb,frame,7)==BleReceiveResult::NoMemory); // Firmware independently limits ingress.

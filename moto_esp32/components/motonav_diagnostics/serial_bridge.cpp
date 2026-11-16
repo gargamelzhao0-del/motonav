@@ -26,9 +26,12 @@ drivers::BleReceiveResult SerialBridge::receive(const uint8_t *data, size_t leng
     if (!queue_) return drivers::BleReceiveResult::Rejected;
     const uint64_t now = drivers::monotonic_ms();
     Item item{};
-    auto result = assembler_.feed(data, length, now, item.snapshot);
+    // Keep the same zero-consumption-on-error contract as the BLE interface:
+    // an ATT retry of the final fragment must work after temporary queue pressure.
+    Assembler candidate = assembler_;
+    auto result = candidate.feed(data, length, now, item.snapshot);
     if (result == Assembler::Result::Invalid) { ++rejected_; return drivers::BleReceiveResult::Rejected; }
-    if (result == Assembler::Result::Incomplete) return drivers::BleReceiveResult::Accepted;
+    if (result == Assembler::Result::Incomplete) { assembler_ = candidate; return drivers::BleReceiveResult::Accepted; }
     if (last_session_ == item.snapshot.session && item.snapshot.sequence <= last_sequence_) {
         ++rejected_; return drivers::BleReceiveResult::Rejected;
     }
@@ -36,6 +39,7 @@ drivers::BleReceiveResult SerialBridge::receive(const uint8_t *data, size_t leng
     if (have_accepted_ && now - last_accepted_ms_ < 500) { ++dropped_; return drivers::BleReceiveResult::NoMemory; }
     item.epoch = epoch_.load(); item.received_ms = now;
     if (xQueueSend(queue_, &item, 0) != pdTRUE) { ++dropped_; return drivers::BleReceiveResult::NoMemory; }
+    assembler_ = candidate;
     last_session_ = item.snapshot.session; last_sequence_ = item.snapshot.sequence;
     last_accepted_ms_ = now; have_accepted_ = true;
     return drivers::BleReceiveResult::Accepted;
