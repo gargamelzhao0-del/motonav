@@ -1,6 +1,8 @@
 # MotoNav 1.75C 导航接收固件
 
-固件版本 **0.3.6**，配套支持 NAV3 的 Android 0.7.0 及以后版本，将真实转向、距离、预计时间及车速显示在 Waveshare ESP32-S3-Touch-AMOLED-1.75C 上。本地开发以 ESP-IDF 5.5.4、官方 BSP 3.0.0、LVGL 9.5.0 为基线，依赖版本由 `dependencies.lock` 记录。界面当前使用英文，支持左右转、斜转、急转、直行及保持左/右方向的箭头，其他转向以明确文字表示。
+固件版本 **0.3.8**，配套 Android 0.7.17 显示真实局部地图、转向、距离、预计时间及车速，并兼容旧 NAV3/NAV4 App。设备为 Waveshare ESP32-S3-Touch-AMOLED-1.75C。本地开发以 ESP-IDF 5.5.4、官方 BSP 3.0.0、LVGL 9.5.0 为基线，依赖版本由 `dependencies.lock` 记录。界面当前使用英文。
+
+0.3.8 默认使用 RGB565 全彩。NAV4S2 支持最多 384 个底图图元和分批替换：先显示附近已下载的地图，补充细节时保留旧画面。手机按完整道路、建筑及视野分配细节；圆屏按地图代次读取数据，接收和校验缓冲通过平台接口放在 PSRAM。GPS 弱时保留局部地图，明确显示 `MAP READY / NO GPS`。道路数据来自 OSM，路线和定位来自手机导航 SDK；不会用测试运动代替真实定位。协议见 [局部地图接口](../protocol/nav4-local-map.md)，性能与实际验收范围见 [0.3.8 记录](../protocol/real-basemap-0.3.8-validation.md)。复杂全彩图的实测下限尚未达到 40 FPS。
 
 0.3.6 将路线总览与实时引导解耦。配合 Android 0.7.15，规划路线即使在首次有效 GPS/指令到来前也可全屏显示；GPS 弱和指引过期时保留路线并隐藏车辆位置、速度和转向距离。实时位置及指令恢复后自动切回跟随视图，结束/到达/断线时清除路线。通过现有 NAV4 服务协商扩展能力，不修改 GATT 表，旧 App/固件继续兼容。路线来自真实规划几何，尚无街道/建筑底图，协议见 [NAV4P](../protocol/NAV4.md#nav4p-独立路线预览android-0715--esp32-036)。
 
@@ -38,7 +40,7 @@
 
 在 ESP-IDF 5.5 环境中进入本目录，执行 `idf.py set-target esp32s3` 和 `idf.py build`。依赖由 IDF Component Manager 下载。GitHub Actions 同时构建 Android APK 和本固件，产物分别为 `motonav-recovery-parking-test` 和 `motonav-175c-navigation-test`。
 
-本机 Windows 可执行 `pwsh -File tools/build.ps1`，默认 RGB332 正常版；增加 `-ColorMode RGB565` 切回完整配色，`-LegacyQspi` 使用厂商 RGB565 IO。该脚本只编译，不访问串口或刷写，并显式关闭未请求的测试选项。独立主机测试：`python tests/run_host_tests.py`，不需要手机、串口或 Android SDK。
+本机 Windows 可执行 `pwsh -File tools/build.ps1`，默认 RGB565 全彩正常版；增加 `-ColorMode RGB332` 使用 256 色传输，`-LegacyQspi` 使用厂商 RGB565 IO。该脚本只编译，不访问串口或刷写，并显式关闭未请求的测试选项。独立主机测试：`python tests/run_host_tests.py`，不需要手机、串口或 Android SDK。
 
 沿用旧 `sdkconfig` 时，须在 `menuconfig` 开启 `CONFIG_BT_NIMBLE_ROLE_CENTRAL` 和 `CONFIG_BT_NIMBLE_GATT_CLIENT`；默认配置只对首次生成生效。ESP-IDF 5.5 将 GATT 客户端支持依赖于 Central 配置，圆屏仍只广播并接收手机连接，不主动连接其他设备。缺少该能力时编译会明确报错。
 
@@ -52,7 +54,7 @@
 
 ## 40 FPS 的验证方式
 
-LVGL 刷新和界面服务周期为 16 ms，QSPI 保持 40 MHz，使用两块 64 行内部 RAM 绘制缓冲。LVGL 任务及 SPI 中断固定在 CPU1，NimBLE 固定在 CPU0。LVGL 同步绘制 `RGB565_SWAPPED`，显示驱动在拥有的当前缓冲内压缩为 RGB332 后提交真实 DMA；选择 RGB565 时直接提交原像素。完成回调保留适配器帧计数并通过信号量唤醒显示任务。静态仪表背景预先缓存；列范围相同、行连续的条带使用 CO5300 Memory Write Continue，窗口变化、间断或提交失败时重设地址。CPU 使用 32 KB 指令缓存及 64 KB 数据缓存。数字和转向仅在内容变化时重绘，静态页低刷新率不表示性能不足。
+LVGL 刷新和界面服务周期为 16 ms，QSPI 保持 40 MHz，使用两块 64 行内部 RAM 绘制缓冲。LVGL 任务及 SPI 中断固定在 CPU1，NimBLE 固定在 CPU0。LVGL 同步绘制 `RGB565_SWAPPED`，默认直接提交 DMA；选择 RGB332 时由驱动在拥有的当前缓冲内压缩后提交。完成回调保留适配器帧计数并通过信号量唤醒显示任务。静态仪表背景预先缓存；列范围相同、行连续的条带使用 CO5300 Memory Write Continue，窗口变化、间断或提交失败时重设地址。CPU 使用 32 KB 指令缓存及 64 KB 数据缓存。数字和转向仅在内容变化时重绘，静态页低刷新率不表示性能不足。
 
 先用 `pwsh -File tools/build.ps1 -DeviceTests` 构建手动测试版，再在未显示有效导航时长按屏幕进入 `DISPLAY TEST / NOT NAVIGATION`；短按依次切换 `PARTIAL HUD`、`FULL FRAME`、`ROUTE MAP / SIMULATED`，长按返回。配对或有效导航到来会自动退出测试并释放地图缓冲。测试只改变本地显示，不生成 GPS、车速或导航报文。
 
