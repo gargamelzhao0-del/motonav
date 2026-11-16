@@ -17,8 +17,10 @@ final class BasemapLoader implements AutoCloseable {
     private final MapTileStore store;
     private final Context context;
     private final Listener listener;
-    private int generation,revision;
-    private boolean busy,closed;
+    private volatile int generation;
+    private int revision;
+    private boolean busy;
+    private volatile boolean closed;
     private long retryAt;
     private Basemap.Scene scene;
     BasemapLoader(Context context,Listener listener) {
@@ -44,7 +46,10 @@ final class BasemapLoader implements AutoCloseable {
                 };
                 var builder=new LocalMapBuilder(focus.origin(),conversion);
                 var gps=Basemap.gpsOrigin(focus.origin(),conversion);
-                for(var tile:Basemap.visibleTiles(gps))builder.add(tile,VectorTile.decode(store.get(tile)));
+                for(var tile:Basemap.visibleTiles(gps)) {
+                    if(closed||token!=generation)throw new InterruptedException();
+                    builder.add(tile,VectorTile.decode(store.get(tile)));
+                }
                 result=builder.finish(requested);
             } catch(Exception | LinkageError ignored) { /* UI reports availability; never log coordinates. */ }
             Basemap.Scene completed=result;

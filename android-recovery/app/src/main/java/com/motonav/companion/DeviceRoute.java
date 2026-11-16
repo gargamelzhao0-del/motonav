@@ -21,18 +21,19 @@ public final class DeviceRoute {
     private List<Point> overview = List.of();
     private int overviewRevision;
     private Frame lastFrame;
+    private Coordinate lastOrigin;
     public void replace(List<Coordinate> coordinates) {
-        route = List.copyOf(coordinates); window = List.of(); lastFrame=null;
+        route = List.copyOf(coordinates); window = List.of(); lastFrame=null;lastOrigin=null;
         overview = overview(route);
         overviewRevision = overview.isEmpty() || revision == Integer.MAX_VALUE ? 0 : ++revision;
     }
-    public void clear() { route = List.of(); window = List.of(); overview = List.of(); overviewRevision = 0; lastFrame=null; }
+    public void clear() { route = List.of(); window = List.of(); overview = List.of(); overviewRevision = 0; lastFrame=null;lastOrigin=null; }
     /** A fixed metre view, retained through GPS loss. Never fit the whole journey. */
     public Frame localFrame() {
         if(lastFrame==null && route.size()>=2)frame(route.get(0).latitude(),route.get(0).longitude(),-1);
         return lastFrame;
     }
-    public Coordinate origin() { return new Coordinate(originLat,originLon); }
+    public Coordinate origin() { return lastOrigin==null?new Coordinate(originLat,originLon):lastOrigin; }
     public Preview preview(int waitingReason) {
         if (waitingReason < 0 || waitingReason > 7) throw new IllegalArgumentException("waiting reason");
         return overviewRevision == 0 ? null : new Preview(overviewRevision, overview, waitingReason);
@@ -116,6 +117,7 @@ public final class DeviceRoute {
         Point p=project(position);
         int heading=Float.isFinite(bearing)&&bearing>=0&&bearing<360?Math.round(bearing*10)%3600:-1;
         lastFrame=new Frame(revision,window,p.x(),p.y(),heading);
+        lastOrigin=new Coordinate(originLat,originLon);
         return lastFrame;
     }
     private static double distance(Point a,Point b) { return Math.hypot((double)a.x()-b.x(),(double)a.y()-b.y()); }

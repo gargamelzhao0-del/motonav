@@ -32,6 +32,7 @@ public final class BasemapTests {
         DeviceRoute route=new DeviceRoute();route.replace(List.of(new DeviceRoute.Coordinate(30,120),new DeviceRoute.Coordinate(30.003,120),new DeviceRoute.Coordinate(30.1,120)));
         var local=route.localFrame();check(local!=null&&local.x()==0&&local.y()==0,"local start without live GPS");
         var moved=route.frame(30.001,120,30);check(route.localFrame().equals(moved),"GPS loss retains last camera");
+        var retainedOrigin=route.origin();check(route.frame(31,120,0)==null&&route.origin().equals(retainedOrigin),"failed recenter cannot move retained map origin");
         route.clear();check(route.localFrame()==null,"stop removes local camera");
         var frame=new DeviceRoute.Frame(1,List.of(p(0,-200),p(0,240),p(250,240),p(250,700)),0,0,0);
         List<Basemap.Primitive> items=new ArrayList<>();

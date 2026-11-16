@@ -53,8 +53,12 @@ void update_navigation_hud(NavigationHud &hud,const ScreenSnapshot &state,float 
     int meters=live?state.guidance.remaining_m:state.route.total_m,seconds=live?state.guidance.remaining_s:state.route.total_s;
     format_distance(value,meters);set_label_text(hud.remaining,value);
     if(seconds<0)set_label_text(hud.time,"-- min");
-    else {unsigned minutes=(seconds+59)/60;if(minutes<60)std::snprintf(value,sizeof(value),"%u min",minutes);
-        else std::snprintf(value,sizeof(value),"%uh %um",minutes/60,minutes%60);set_label_text(hud.time,value);}
+    else {
+        unsigned minutes=(seconds+59)/60;
+        if(minutes<60)std::snprintf(value,sizeof(value),"%u min",minutes);
+        else std::snprintf(value,sizeof(value),"%uh %um",minutes/60,minutes%60);
+        set_label_text(hud.time,value);
+    }
     set_label_text(hud.status,state.basemap_revision!=state.route.revision?"LOADING\nMAP":!state.basemap_count?"NO MAP\nDETAIL":live?"LIVE\nNAV":"PLANNED\nTRIP");
     for(unsigned i=0;i<4;i++) {
         float angle=i*1.570796327f-heading;

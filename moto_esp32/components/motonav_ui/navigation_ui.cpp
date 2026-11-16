@@ -95,7 +95,7 @@ void route_map(const ScreenSnapshot &state) {
     }
     float heading=r.heading<0?0:static_cast<float>(r.heading)*0.001745329252f;
     bool changed=base_changed;
-    const float scale=r.local_view?0.7f:1.0f;
+    const float scale=r.local_view?1.2f:1.0f;
     const float tilt=r.local_view&&live&&state.guidance.speed_kmh>=10?0.25f:0;
     uint32_t now=lv_tick_get();
     if(map_revision!=r.revision || changed_mode) {
