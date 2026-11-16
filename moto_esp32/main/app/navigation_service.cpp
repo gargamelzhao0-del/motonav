@@ -44,7 +44,6 @@ drivers::BleReceiveResult NavigationService::receive(const uint8_t *bytes, size_
     // Events and receives are serialized by the BLE host. Snapshot readers
     // can keep reading the committed state while this bounded batch is parsed.
     const uint64_t now = drivers::monotonic_ms();
-    drivers::BleNotification messages[drivers::BleNotificationBatchLimit];
     size_t count = 0;
     for (size_t i = 0; i < length; ++i) {
         char reply[32];
@@ -52,13 +51,13 @@ drivers::BleReceiveResult NavigationService::receive(const uint8_t *bytes, size_
         if (count == drivers::BleNotificationBatchLimit) return drivers::BleReceiveResult::NoMemory;
         const size_t size = std::strlen(reply);
         std::memcpy(replies_[count], reply, size);
-        messages[count] = {reinterpret_cast<const uint8_t *>(replies_[count]), size};
+        messages_[count] = {reinterpret_cast<const uint8_t *>(replies_[count]), size};
         ++count;
     }
     if (count) {
         // This operation copies the whole batch or queues nothing. The worker
         // cannot send until this BLE callback returns and state is committed.
-        const esp_err_t result = drivers::ble_notify_batch(messages, count);
+        const esp_err_t result = drivers::ble_notify_batch(messages_, count);
         if (result == ESP_ERR_NO_MEM) return drivers::BleReceiveResult::NoMemory;
         if (result != ESP_OK) return drivers::BleReceiveResult::Rejected;
     }

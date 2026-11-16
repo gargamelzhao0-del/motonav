@@ -1,6 +1,8 @@
 # MotoNav 1.75C 导航接收固件
 
-固件版本 **0.3.4**，配套支持 NAV3 的 Android 0.7.0 及以后版本，将真实转向、距离、预计时间及车速显示在 Waveshare ESP32-S3-Touch-AMOLED-1.75C 上。本地开发以 ESP-IDF 5.5.4、官方 BSP 3.0.0、LVGL 9.5.0 为基线，依赖版本由 `dependencies.lock` 记录。界面当前使用英文，支持左右转、斜转、急转、直行及保持左/右方向的箭头，其他转向以明确文字表示。
+固件版本 **0.3.5**，配套支持 NAV3 的 Android 0.7.0 及以后版本，将真实转向、距离、预计时间及车速显示在 Waveshare ESP32-S3-Touch-AMOLED-1.75C 上。本地开发以 ESP-IDF 5.5.4、官方 BSP 3.0.0、LVGL 9.5.0 为基线，依赖版本由 `dependencies.lock` 记录。界面当前使用英文，支持左右转、斜转、急转、直行及保持左/右方向的箭头，其他转向以明确文字表示。
+
+0.3.5 针对 0.3.4 联调中捕获的 `nimble_host` 栈溢出：将收发临时缓冲和 ACK 描述数组移至各模块拥有的存储，NimBLE 栈设为 8192 字节，并通过 `ble_runtime_status()` 只读接口报告最低栈余量、诊断接收句柄和写入/拒收计数。旧 `sdkconfig` 也需更新栈大小，否则编译明确报错。COM21 已验证诊断特征注册为句柄 31；完整手机诊断验收和导航问题进展见 [联调记录](../protocol/DIAG1-validation-2026-11-16.md)。
 
 0.3.4 新增独立的手机蓝牙诊断转发组件，配合 Android 0.7.14 把每秒关键状态摘要转为 USB 串口 JSON。导航写入优先，接收队列有界，格式化/输出在低优先级任务完成；不改动地图和导航协议。用 `tools/diagnostic_monitor.py --port COM21 --output dist/ble-diagnostic-session` 收集，完整约定见 [DIAG1](../protocol/DIAG1.md)。不需要此功能时使用 `tools/build.ps1 -NoBluetoothDiagnostics` 排除整个组件。真实链路验收与并发帧率应单独记录。
 

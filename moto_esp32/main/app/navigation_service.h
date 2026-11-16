@@ -21,5 +21,6 @@ private:
     // Only the serialized BLE receive callback uses this scratch space. Keep
     // the worst-case reply batch off the small NimBLE task stack.
     char replies_[drivers::BleNotificationBatchLimit][32]{};
+    drivers::BleNotification messages_[drivers::BleNotificationBatchLimit]{};
 };
 } // namespace motonav::app

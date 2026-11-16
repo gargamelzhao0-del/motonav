@@ -15,6 +15,9 @@ CONFIG_FREERTOS_HZ=1000
 CONFIG_SPI_MASTER_IN_IRAM=y
 CONFIG_BT_ENABLED=y
 CONFIG_BT_NIMBLE_ENABLED=y
+# A real NAV4 connection overflowed the former 4096-byte host stack inside
+# controller packet submission. Keep headroom and report its measured low-water mark.
+CONFIG_BT_NIMBLE_HOST_TASK_STACK_SIZE=8192
 # NimBLE ties GATT-client support to this role. Android sends Service Changed
 # indications even while it is our GAP central; these must receive confirmation.
 # MotoNav still only advertises/accepts connections; it never initiates one.

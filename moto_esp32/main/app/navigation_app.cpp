@@ -77,12 +77,15 @@ void run() {
         next_sample = sample_time + (MOTONAV_NAV_METRICS ? 1100 : 5000);
         auto state = navigation.snapshot();
         auto memory = drivers::memory_stats();
-        ESP_LOGI("motonav", "state=%d link=%d secure=%d protocol=%u route_points=%u route_revision=%lu rx=%lu dup=%lu rejected=%lu heap=%lu internal=%lu",
+        auto ble = drivers::ble_runtime_status();
+        ESP_LOGI("motonav", "state=%d link=%d secure=%d protocol=%u route_points=%u route_revision=%lu rx=%lu dup=%lu rejected=%lu heap=%lu internal=%lu diag_rx=%u diag_writes=%lu diag_rejected=%lu ble_stack_min=%lu",
             static_cast<int>(screen_mode(state)), state.linked, state.encrypted, state.protocol,
             static_cast<unsigned>(state.route.count), static_cast<unsigned long>(state.route.revision),
             static_cast<unsigned long>(state.packets.accepted), static_cast<unsigned long>(state.packets.duplicates),
             static_cast<unsigned long>(state.packets.rejected), static_cast<unsigned long>(memory.free_heap),
-            static_cast<unsigned long>(memory.free_internal));
+            static_cast<unsigned long>(memory.free_internal), ble.diagnostic_rx_handle,
+            static_cast<unsigned long>(ble.diagnostic_writes), static_cast<unsigned long>(ble.diagnostic_rejected),
+            static_cast<unsigned long>(ble.host_stack_min_bytes));
 #if MOTONAV_NAV_METRICS
         const bool live = screen_mode(state) == ScreenMode::Live && state.route.count >= 2;
         const uint64_t now = drivers::monotonic_ms();

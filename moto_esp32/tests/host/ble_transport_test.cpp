@@ -21,6 +21,8 @@ static bool schedule_failure, authenticated=true, advertising;
 static uint16_t mtu=23;
 static int resets;
 static unsigned service_changes;
+static unsigned stack_remaining=7000;
+unsigned uxTaskGetStackHighWaterMark(void *) { return stack_remaining; }
 uint32_t esp_random() { return 123456; }
 int os_mbuf_append(os_mbuf *p,const void *bytes,size_t size) { std::memcpy(p->bytes+p->length,bytes,size); p->length+=size; return 0; }
 int ble_hs_mbuf_to_flat(os_mbuf *p,void *bytes,uint16_t,uint16_t *) { std::memcpy(bytes,p->bytes,p->length); return 0; }
@@ -64,7 +66,7 @@ void ble_svc_gatt_changed(uint16_t first, uint16_t last) { assert(first==1 && la
 int ble_svc_gap_device_name_set(const char *) { return 0; }
 int ble_gatts_count_cfg(const ble_gatt_svc_def *) { return 0; }
 int ble_gatts_add_svcs(const ble_gatt_svc_def *value) {
-    if(value[1].type==0){diagnostic_services=value;return 0;}
+    if(value[1].type==0){diagnostic_services=value;*value[0].characteristics[0].val_handle=44;return 0;}
     services=value; *services[0].characteristics[1].val_handle=42;
     *services[2].characteristics[1].val_handle=43; return 0;
 }
@@ -99,6 +101,7 @@ int main() {
     assert(ble_start("MotoNav-test","test",cb,diag)==ESP_OK);
     assert(diagnostic_services && diagnostic_services[0].characteristics[0].flags & BLE_GATT_CHR_F_WRITE_AUTHEN);
     ble_hs_cfg.sync_cb();
+    assert(ble_runtime_status().diagnostic_rx_handle==44 && ble_runtime_status().host_stack_min_bytes==7000);
     assert(write_diagnostic("x")==BLE_ATT_ERR_UNLIKELY && diagnostic_receives==0);
     connect();
     assert(diagnostic_resets==1);
@@ -108,6 +111,7 @@ int main() {
     assert(write_diagnostic(std::string(21,'x'))==BLE_ATT_ERR_INVALID_ATTR_VALUE_LEN);
     diagnostic_result=BleReceiveResult::NoMemory;assert(write_diagnostic("x")==BLE_ATT_ERR_INSUFFICIENT_RES);
     diagnostic_result=BleReceiveResult::Rejected;assert(write_diagnostic("x")==BLE_ATT_ERR_UNLIKELY);
+    assert(ble_runtime_status().diagnostic_writes==3 && ble_runtime_status().diagnostic_rejected==2);
     diagnostic_result=BleReceiveResult::Accepted;
     assert(service_changes==1);
     // Restored CCCDs do not choose the protocol; authenticated RX does.

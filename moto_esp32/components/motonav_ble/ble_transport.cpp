@@ -4,7 +4,12 @@
 #include "esp_random.h"
 #include "esp_log.h"
 #include "sdkconfig.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include <atomic>
 #include <cstring>
+static_assert(CONFIG_BT_NIMBLE_HOST_TASK_STACK_SIZE >= 8192,
+              "Set CONFIG_BT_NIMBLE_HOST_TASK_STACK_SIZE=8192 in sdkconfig (and defaults)");
 #ifndef CONFIG_BT_NIMBLE_GATT_CLIENT
 #error "Enable CONFIG_BT_NIMBLE_ROLE_CENTRAL and CONFIG_BT_NIMBLE_GATT_CLIENT to confirm Android indications"
 #endif
@@ -25,7 +30,12 @@ BleCallbacks callbacks;
 BleDiagnosticCallbacks diagnostic_callbacks;
 bool secure = false;
 char revision[33];
-uint16_t connection_handle = BLE_HS_CONN_HANDLE_NONE, tx_handle, map_tx_handle;
+uint16_t connection_handle = BLE_HS_CONN_HANDLE_NONE, tx_handle, map_tx_handle, diagnostic_rx_handle;
+std::atomic<uint32_t> host_stack_min{0}, diagnostic_writes{0}, diagnostic_rejected{0};
+std::atomic<uint16_t> published_diagnostic_handle{0};
+// The single BLE host owns these independent buffers. NimBLE copies outgoing
+// data before return; incoming data remains borrowed only for receive().
+uint8_t receive_bytes[512], notification_bytes[BleNotificationMaxBytes];
 BleChannelState channels;
 uint8_t address_type;
 char device_name[20];
@@ -36,6 +46,11 @@ unsigned notification_channel = 0;
 unsigned notification_failures = 0;
 unsigned termination_failures = 0;
 bool closing = false;
+void sample_host_stack() {
+    const uint32_t remaining = uxTaskGetStackHighWaterMark(nullptr); // ESP-IDF reports bytes
+    const uint32_t previous = host_stack_min.load(std::memory_order_relaxed);
+    if (!previous || remaining < previous) host_stack_min.store(remaining, std::memory_order_relaxed);
+}
 
 const ble_uuid128_t service_uuid = BLE_UUID128_INIT(0x9e,0xca,0xdc,0x24,0x0e,0xe5,0xa9,0xe0,0x93,0xf3,0xa3,0xb5,0x01,0x00,0x40,0x6e);
 const ble_uuid128_t rx_uuid = BLE_UUID128_INIT(0x9e,0xca,0xdc,0x24,0x0e,0xe5,0xa9,0xe0,0x93,0xf3,0xa3,0xb5,0x02,0x00,0x40,0x6e);
@@ -90,12 +105,12 @@ void send_notifications(ble_npl_event *) {
     }
     // Yield back to the host after a bounded burst; never spin on mbuf/HCI pressure.
     for (unsigned sent = 0; sent < 8 && !notifications.empty(); ++sent) {
-        uint8_t bytes[BleNotificationMaxBytes];
-        const auto length = notifications.front(bytes, sizeof(bytes));
-        os_mbuf *packet = ble_hs_mbuf_from_flat(bytes, length);
+        const auto length = notifications.front(notification_bytes, sizeof(notification_bytes));
+        os_mbuf *packet = ble_hs_mbuf_from_flat(notification_bytes, length);
         // NimBLE consumes packet on both success and failure. Keep our copy
         // until it accepts the notification so retry never reuses a freed mbuf.
         const int result = packet ? ble_gatts_notify_custom(connection_handle, notification_channel == 4 ? map_tx_handle : tx_handle, packet) : BLE_HS_ENOMEM;
+        sample_host_stack();
         if (result) {
             const bool temporary = result == BLE_HS_ENOMEM || result == BLE_HS_EAGAIN ||
                                    result == BLE_HS_EBUSY || result == BLE_HS_ENOMEM_EVT;
@@ -120,9 +135,8 @@ int read_revision(uint16_t, uint16_t, ble_gatt_access_ctxt *ctx, void *) {
 int write_bytes(uint16_t connection, uint16_t, ble_gatt_access_ctxt *ctx, void *channel_arg) {
     if (ctx->op != BLE_GATT_ACCESS_OP_WRITE_CHR) return BLE_ATT_ERR_WRITE_NOT_PERMITTED;
     if (connection != connection_handle || !secure || closing) return BLE_ATT_ERR_UNLIKELY;
-    uint8_t bytes[512];
     uint16_t length = OS_MBUF_PKTLEN(ctx->om);
-    if (!length || length > sizeof(bytes) || ble_hs_mbuf_to_flat(ctx->om, bytes, sizeof(bytes), nullptr))
+    if (!length || length > sizeof(receive_bytes) || ble_hs_mbuf_to_flat(ctx->om, receive_bytes, sizeof(receive_bytes), nullptr))
         return BLE_ATT_ERR_INVALID_ATTR_VALUE_LEN;
     unsigned channel = reinterpret_cast<uintptr_t>(channel_arg);
     bool first_write = channels.active() == 0;
@@ -132,7 +146,7 @@ int write_bytes(uint16_t connection, uint16_t, ble_gatt_access_ctxt *ctx, void *
         ESP_LOGI(Tag, "BLE selected NAV%u from authenticated RX", channel);
         emit(BleEventType::Protocol, channel); emit(BleEventType::Subscription, 1);
     }
-    switch (callbacks.receive(callbacks.context, bytes, length)) {
+    switch (callbacks.receive(callbacks.context, receive_bytes, length)) {
         case BleReceiveResult::Accepted: return 0;
         case BleReceiveResult::NoMemory: return BLE_ATT_ERR_INSUFFICIENT_RES;
         default: return BLE_ATT_ERR_UNLIKELY;
@@ -152,7 +166,10 @@ int write_diagnostic(uint16_t connection, uint16_t, ble_gatt_access_ctxt *ctx, v
     const uint16_t length = OS_MBUF_PKTLEN(ctx->om);
     if (!length || length > sizeof(data) || ble_hs_mbuf_to_flat(ctx->om, data, sizeof(data), nullptr))
         return BLE_ATT_ERR_INVALID_ATTR_VALUE_LEN;
-    switch (diagnostic_callbacks.receive(diagnostic_callbacks.context, data, length)) {
+    ++diagnostic_writes;
+    const auto result = diagnostic_callbacks.receive(diagnostic_callbacks.context, data, length);
+    if (result != BleReceiveResult::Accepted) ++diagnostic_rejected;
+    switch (result) {
         case BleReceiveResult::Accepted: return 0;
         case BleReceiveResult::NoMemory: return BLE_ATT_ERR_INSUFFICIENT_RES;
         default: return BLE_ATT_ERR_UNLIKELY;
@@ -179,7 +196,7 @@ const ble_gatt_svc_def services[] = {
 };
 const ble_gatt_chr_def diagnostic_characteristics[] = {
     {.uuid = &diag_rx_uuid.u, .access_cb = write_diagnostic,
-     .flags = BLE_GATT_CHR_F_WRITE | BLE_GATT_CHR_F_WRITE_ENC | BLE_GATT_CHR_F_WRITE_AUTHEN}, {}
+     .flags = BLE_GATT_CHR_F_WRITE | BLE_GATT_CHR_F_WRITE_ENC | BLE_GATT_CHR_F_WRITE_AUTHEN, .val_handle = &diagnostic_rx_handle}, {}
 };
 const ble_gatt_svc_def diagnostic_services[] = {
     {.type = BLE_GATT_SVC_TYPE_PRIMARY, .uuid = &diag_service_uuid.u, .characteristics = diagnostic_characteristics}, {}
@@ -276,7 +293,11 @@ void advertise() {
 }
 void ble_synced() {
     ESP_ERROR_CHECK(ble_hs_id_infer_auto(0, &address_type));
-    ESP_LOGI(Tag, "BLE handles: NAV3_TX=%u NAV4_TX=%u", tx_handle, map_tx_handle);
+    if (diagnostic_callbacks.receive && !diagnostic_rx_handle) ESP_ERROR_CHECK(ESP_FAIL);
+    published_diagnostic_handle.store(diagnostic_rx_handle, std::memory_order_relaxed);
+    sample_host_stack();
+    ESP_LOGI(Tag, "BLE handles: NAV3_TX=%u NAV4_TX=%u DIAG1_RX=%u host_stack_bytes=%u",
+             tx_handle, map_tx_handle, diagnostic_rx_handle, CONFIG_BT_NIMBLE_HOST_TASK_STACK_SIZE);
     // NimBLE persists this indication for bonded peers that are not connected.
     // Tell phones about newly installed services before advertising after boot.
     ble_svc_gatt_changed(1,0xffff);
@@ -286,6 +307,10 @@ void ble_reset(int reason) { reset_connection(); ESP_LOGW(Tag, "Bluetooth host r
 void ble_task(void *) { nimble_port_run(); nimble_port_freertos_deinit(); }
 } // namespace
 
+BleRuntimeStatus ble_runtime_status() {
+    return {host_stack_min.load(std::memory_order_relaxed), diagnostic_writes.load(std::memory_order_relaxed),
+            diagnostic_rejected.load(std::memory_order_relaxed), published_diagnostic_handle.load(std::memory_order_relaxed)};
+}
 
 esp_err_t ble_start(const char *name, const char *version, const BleCallbacks &handlers, const BleDiagnosticCallbacks &diagnostics) {
     static bool attempted = false;

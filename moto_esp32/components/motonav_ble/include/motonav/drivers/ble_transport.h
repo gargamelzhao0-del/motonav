@@ -25,6 +25,13 @@ struct BleDiagnosticCallbacks {
     BleReceiveResult (*receive)(void *, const uint8_t *, size_t) = nullptr;
     void (*reset)(void *) = nullptr;
 };
+struct BleRuntimeStatus {
+    uint32_t host_stack_min_bytes = 0; // zero until the BLE host first samples itself
+    uint32_t diagnostic_writes = 0, diagnostic_rejected = 0;
+    uint16_t diagnostic_rx_handle = 0; // zero means the optional service is absent
+};
+// Atomic observation from ordinary tasks; no GATT calls or display lock.
+BleRuntimeStatus ble_runtime_status();
 // Single secure NUS link. Name/revision are copied. NVS must be initialized.
 // Callbacks run on the BLE host task, must be short, and must not call LVGL.
 // Receive bytes are borrowed for the callback only; they are NOT complete frames.
