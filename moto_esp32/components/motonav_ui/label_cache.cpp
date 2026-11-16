@@ -8,6 +8,8 @@
 #include <cstring>
 
 namespace motonav {
+void initialize_transparent_label_cache();
+LabelCacheStats transparent_label_cache_stats();
 namespace {
 constexpr uint8_t UnitId = 241;
 constexpr size_t Slots = 8, MaxWidth = 466, MaxHeight = 64, TextBytes = 256;
@@ -143,9 +145,11 @@ int32_t dispatch(lv_draw_unit_t *, lv_layer_t *layer) {
 }
 LabelCacheStats label_cache_stats() {
     auto result = stats; result.bytes = arena ? arena->data_size : 0;
+    const auto transparent=transparent_label_cache_stats();result.hits+=transparent.hits;result.misses+=transparent.misses;result.bytes+=transparent.bytes;
     return result;
 }
 void initialize_label_cache() {
+    initialize_transparent_label_cache();
 #ifndef MOTONAV_DISABLE_LABEL_CACHE
     if (initialized) return;
     auto *unit = static_cast<lv_draw_unit_t *>(lv_draw_create_unit(sizeof(lv_draw_unit_t)));

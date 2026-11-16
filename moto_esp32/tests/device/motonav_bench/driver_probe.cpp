@@ -13,6 +13,15 @@ struct FrameProfile {
 } frames;
 uint64_t task_us[32]{}, task_calls[32]{};
 int32_t (*software_dispatch)(lv_draw_unit_t *, lv_layer_t *);
+struct CustomProfile { lv_draw_unit_t *unit=nullptr;int32_t (*dispatch)(lv_draw_unit_t *,lv_layer_t *)=nullptr;unsigned id=0;uint64_t calls=0,us=0; } custom[3];
+int32_t profiled_custom(lv_draw_unit_t *unit,lv_layer_t *layer){
+    for(auto &entry:custom)if(entry.unit==unit){
+        auto *task=lv_draw_get_available_task(layer,nullptr,entry.id);const auto begin=drivers::monotonic_us();
+        auto result=entry.dispatch(unit,layer);
+        if(task){entry.us+=drivers::monotonic_us()-begin;++entry.calls;}return result;
+    }
+    return LV_DRAW_UNIT_IDLE;
+}
 int32_t profiled_dispatch(lv_draw_unit_t *unit, lv_layer_t *layer) {
     auto *task = lv_draw_get_available_task(layer, nullptr, 1);
     const unsigned type = task ? static_cast<unsigned>(task->type) : 0;
@@ -34,6 +43,10 @@ void frame_event(lv_event_t *event) {
     }
 }
 void profile(bool reset) {
+    if(reset)for(auto *unit=LV_GLOBAL_DEFAULT()->draw_info.unit_head;unit;unit=unit->next){
+        unsigned id=!std::strcmp(unit->name,"MotoNav map")?240:!std::strcmp(unit->name,"MotoNav labels")?241:!std::strcmp(unit->name,"MotoNav text masks")?242:0;
+        if(id){auto &entry=custom[id-240];if(!entry.unit){entry.unit=unit;entry.dispatch=unit->dispatch_cb;entry.id=id;unit->dispatch_cb=profiled_custom;}entry.calls=entry.us=0;}
+    }
     if (!reset) {
         // Exercise a real panel control command between active workloads.
         // The driver must drain DMA and break RAMWRC before changing brightness.
@@ -52,6 +65,7 @@ void profile(bool reset) {
     for (unsigned i=0;i<32;++i) if (task_calls[i])
         ESP_LOGI("draw_profile", "type=%u calls=%llu total_us=%llu frame_us=%llu", i, task_calls[i], task_us[i], task_us[i]/n);
     ESP_LOGI("color_profile", "convert_us=%llu", data.convert_us/n);
+    for(const auto &entry:custom)if(entry.calls)ESP_LOGI("custom_profile","unit=%u calls=%llu frame_us=%llu",entry.id,entry.calls,entry.us/n);
 }
 }
 BenchmarkServices driver_benchmark_services(lv_display_t *display) {

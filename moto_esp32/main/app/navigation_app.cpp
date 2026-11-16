@@ -45,6 +45,14 @@ void run() {
 #endif
     ESP_ERROR_CHECK(drivers::display_init(&display, display_config));
     ESP_ERROR_CHECK(drivers::touch_init(display));
+    // Reserve the BLE host stack before optional UI caches/test canvases can
+    // fragment internal RAM. Its callbacks publish state and never call LVGL.
+    drivers::BleDiagnosticCallbacks diagnostics;
+#if MOTONAV_BLE_DIAGNOSTICS
+    ESP_ERROR_CHECK(diagnostic_bridge.init());
+    diagnostics = diagnostic_bridge.callbacks();
+#endif
+    ESP_ERROR_CHECK(drivers::ble_start(name, drivers::firmware_version(), navigation.callbacks(), diagnostics));
     ESP_ERROR_CHECK(drivers::display_lock());
     SnapshotReader reader{[](void *context) {
         return static_cast<NavigationService *>(context)->snapshot();
@@ -58,12 +66,6 @@ void run() {
     create_navigation_ui(display, name, reader, extension);
     drivers::display_unlock();
     ESP_ERROR_CHECK(drivers::display_start());
-    drivers::BleDiagnosticCallbacks diagnostics;
-#if MOTONAV_BLE_DIAGNOSTICS
-    ESP_ERROR_CHECK(diagnostic_bridge.init());
-    diagnostics = diagnostic_bridge.callbacks();
-#endif
-    ESP_ERROR_CHECK(drivers::ble_start(name, drivers::firmware_version(), navigation.callbacks(), diagnostics));
     ESP_LOGI("motonav", "Firmware %s / NAV3+NAV4 / %s / device_tests=%d / ble_diagnostics=%d",
              drivers::firmware_version(), name, MOTONAV_DEVICE_TESTS, MOTONAV_BLE_DIAGNOSTICS);
 

@@ -45,8 +45,9 @@ public:
     }
     void clear(uint16_t color) {
         if (!valid_) return;
+        const auto paint=prepare_color(color);
         if(navigation_style_) {
-            for(int y=origin_y_;y<origin_y_+height_;++y)span(y,origin_x_,origin_x_+width_-1,color);
+            for(int y=origin_y_;y<origin_y_+height_;++y)span(y,origin_x_,origin_x_+width_-1,paint);
             return;
         }
         if (stride_ == static_cast<size_t>(width_)) {
@@ -75,6 +76,7 @@ public:
             if (!std::isfinite(slope)) return;
             edges[edge_count++] = {a, slope, ceil_int(std::min(a.y,b.y)-0.5f), ceil_int(std::max(a.y,b.y)-0.5f)-1};
         }
+        const auto paint=prepare_color(color);
         // Active edges only change at vertices. Resolve those intervals once,
         // instead of four floating-point edge tests for every map scanline.
         for (int y=first; y<=last;) {
@@ -93,7 +95,7 @@ public:
                     float x=edge.a.x+(scan-edge.a.y)*edge.slope;
                     left=std::min(left,x); right=std::max(right,x);
                 }
-                if (left <= right) span(y, ceil_int(left-0.5f), floor_int(right-0.5f), color);
+                if (left <= right) span(y, ceil_int(left-0.5f), floor_int(right-0.5f), paint);
             }
         }
     }
@@ -121,7 +123,36 @@ private:
     static bool bounded(ProjectedPoint p) {
         return std::isfinite(p.x) && std::isfinite(p.y) && std::abs(p.x)<=8192 && std::abs(p.y)<=8192;
     }
-    void span(int y, int first, int last, uint16_t color) {
+    struct SpanColor { uint16_t value; const uint32_t *shades; };
+    SpanColor prepare_color(uint16_t color) const {
+        if(!navigation_style_)return {color,nullptr};
+        constexpr uint32_t palette[]{0x283033,0x1e4560,0x2a4430,0x313b3f,0x3a4144,0xc4cacc,
+            0x929ca1,0x6c787e,0x10191e,0x66757c,0xb66dff,0x2a1440,0xe3cfff,0x12171c,0xf2f3e9,0x899398};
+        static constexpr auto table=[] {
+            std::array<std::array<uint32_t,514>,16> result{};
+            constexpr uint32_t rgb[]{0x283033,0x1e4560,0x2a4430,0x313b3f,0x3a4144,0xc4cacc,
+                0x929ca1,0x6c787e,0x10191e,0x66757c,0xb66dff,0x2a1440,0xe3cfff,0x12171c,0xf2f3e9,0x899398};
+            for(unsigned c=0;c<16;c++)for(unsigned light=0;light<=256;light++)for(unsigned row=0;row<2;row++){
+                const unsigned packed=((rgb[c]>>8)&0xf800)|((rgb[c]>>5)&0x7e0)|((rgb[c]>>3)&31);
+                uint32_t pair=0;
+                for(unsigned column=0;column<2;column++){
+                    const unsigned threshold=row?(column?96:224):(column?160:32);
+                    const unsigned r=(((packed>>11)&31)*light+threshold)/256,g=(((packed>>5)&63)*light+threshold)/256,b=((packed&31)*light+threshold)/256;
+                    const uint16_t value=(r<<11)|(g<<5)|b;
+                    const uint16_t swapped=static_cast<uint16_t>((uint32_t(value)<<8)|(value>>8));
+                    pair|=uint32_t(swapped)<<(16*column);
+                }
+                result[c][light*2+row]=pair;
+            }
+            return result;
+        }();
+        for(unsigned i=0;i<16;i++){
+            const auto rgb565=rgb(palette[i]);
+            if(color==static_cast<uint16_t>((rgb565>>8)|(rgb565<<8)))return {color,table[i].data()};
+        }
+        return {color,nullptr};
+    }
+    void span(int y, int first, int last, SpanColor color) {
         if (y < origin_y_ || y >= origin_y_ + height_) return;
         first=std::max(origin_x_,first); last=std::min(origin_x_+width_-1,last);
         if (first>last) return;
@@ -144,12 +175,13 @@ private:
             return;
         }
         first-=origin_x_; last-=origin_x_;
-        fill_rgb565(row+first, static_cast<size_t>(last-first+1), color);
+        fill_rgb565(row+first, static_cast<size_t>(last-first+1), color.value);
     }
-    void shaded_span(uint16_t *row,int first,int last,int y,uint16_t color,unsigned light) {
-        if(light==256){fill_rgb565(row+first-origin_x_,last-first+1,color);return;}
+    void shaded_span(uint16_t *row,int first,int last,int y,SpanColor color,unsigned light) {
+        if(light==256){fill_rgb565(row+first-origin_x_,last-first+1,color.value);return;}
         unsigned a=(y&1)?224:32,b=(y&1)?96:160;
-        uint16_t even=dim(color,light,a),odd=dim(color,light,b);
+        const uint32_t cached=color.shades?color.shades[light*2+(y&1)]:0;
+        uint16_t even=color.shades?static_cast<uint16_t>(cached):dim(color.value,light,a),odd=color.shades?static_cast<uint16_t>(cached>>16):dim(color.value,light,b);
         if(first&1)std::swap(even,odd);
         fill_rgb565_pair(row+first-origin_x_,last-first+1,even,odd);
     }
@@ -176,12 +208,13 @@ private:
         return rows;
     }
     void disk(ProjectedPoint p, float radius, uint16_t color) {
+        const auto paint=prepare_color(color);
         int first=std::max(origin_y_,ceil_int(p.y-radius-0.5f));
         int last=std::min(origin_y_+height_-1,floor_int(p.y+radius-0.5f));
         for (int y=first;y<=last;++y) {
             float dy=y+0.5f-p.y;
             float half=std::sqrt(std::max(0.0f,radius*radius-dy*dy));
-            span(y,ceil_int(p.x-half-0.5f),floor_int(p.x+half-0.5f),color);
+            span(y,ceil_int(p.x-half-0.5f),floor_int(p.x+half-0.5f),paint);
         }
     }
     uint16_t *pixels_;

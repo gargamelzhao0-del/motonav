@@ -3,6 +3,8 @@
 #include "motonav/core/navigation_session.h"
 #if MOTONAV_DEVICE_TESTS
 #include "motonav/testing/display_benchmark.h"
+#include "../device/motonav_bench/map_fixture.h"
+#include "../device/motonav_bench/real_map_fixture.h"
 #endif
 #include <array>
 #include <filesystem>
@@ -352,6 +354,16 @@ int main(int argc, char **argv) {
     if (lv_screen_active() != navigation_screen || lv_obj_get_child_count(lv_screen_active()) != normal_children) return 1;
     std::cout << "PASS: animated map, pairing/live preemption, manual exit and canvas cleanup; no hardware/FPS claim\n";
     exercise_label_cache(display, directory);
+    for(uint64_t t=0;t<120000;t+=173){
+        auto camera=motonav::render_map_benchmark(nullptr,t);float closest=1e9f;
+        for(size_t i=1;i<sizeof(RealMapRoute)/sizeof(RealMapRoute[0]);i++){
+            auto a=RealMapRoute[i-1],b=RealMapRoute[i];float dx=b.x-a.x,dy=b.y-a.y;
+            float length2=dx*dx+dy*dy;if(length2<=0)continue;
+            float u=std::clamp(((camera.x-a.x)*dx+(camera.y-a.y)*dy)/length2,0.0f,1.0f);
+            closest=std::min(closest,std::hypot(camera.x-a.x-u*dx,camera.y-a.y-u*dy));
+        }
+        if(closest>.01f){std::cerr<<"Test vehicle drifted off its decoded route\n";return 1;}
+    }
 #endif
     lv_deinit();
     if (motonav::label_cache_stats().bytes) std::abort();

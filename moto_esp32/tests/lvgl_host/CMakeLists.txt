@@ -12,7 +12,7 @@ set(BENCH_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../device/motonav_bench")
 function(add_preview target tests)
     add_executable(${target} preview.cpp
         ${COMPONENTS_DIR}/motonav_ui/navigation_ui.cpp ${COMPONENTS_DIR}/motonav_ui/navigation_hud.cpp ${COMPONENTS_DIR}/motonav_ui/dashboard.cpp
-        ${COMPONENTS_DIR}/motonav_ui/label_cache.cpp ${COMPONENTS_DIR}/motonav_graphics/route_map.cpp)
+        ${COMPONENTS_DIR}/motonav_ui/label_cache.cpp ${COMPONENTS_DIR}/motonav_ui/transparent_label_cache.cpp ${COMPONENTS_DIR}/motonav_graphics/route_map.cpp)
     target_sources(${target} PRIVATE
         ${COMPONENTS_DIR}/motonav_ui/fonts/motonav_speed_66.c
         ${COMPONENTS_DIR}/motonav_ui/fonts/motonav_distance_36.c

@@ -86,10 +86,11 @@ void update_navigation_hud(NavigationHud &hud,const ScreenSnapshot &state,float 
     if(live) {
         format_distance(value,state.guidance.turn_m);char *separator=std::strchr(value,' ');
         if(separator){*separator=0;set_label_text(hud.unit,separator+1);}else set_label_text(hud.unit,"");
-        set_label_text(hud.distance,value);
-        lv_point_t measured{};lv_text_get_size(&measured,value,&motonav_distance_36,0,0,LV_COORD_MAX,LV_TEXT_FLAG_NONE);
-        const int width=measured.x;
-        lv_obj_set_x(hud.unit,std::min(305,200+width));
+        if(std::strcmp(lv_label_get_text(hud.distance),value)){
+            set_label_text(hud.distance,value);
+            lv_point_t measured{};lv_text_get_size(&measured,value,&motonav_distance_36,0,0,LV_COORD_MAX,LV_TEXT_FLAG_NONE);
+            lv_obj_set_x(hud.unit,std::min<int>(305,200+measured.x));
+        }
         if(details&&state.details.next_road[0])std::snprintf(value,sizeof(value),"%s · %s",chinese_maneuver(icon),state.details.next_road);
         else std::snprintf(value,sizeof(value),"%s",chinese_maneuver(icon));
         set_label_text(hud.maneuver,value);
@@ -99,10 +100,13 @@ void update_navigation_hud(NavigationHud &hud,const ScreenSnapshot &state,float 
         set_label_text(hud.distance,"等待定位");set_label_text(hud.unit,"");set_label_text(hud.speed,"--");
         set_label_text(hud.maneuver,state.route.waiting_reason==7?"正在重算路线":state.route.waiting_reason==1?"GPS 信号弱":"无实时位置");
     }
-    set_label_text(hud.current_road,details?state.details.current_road:"");
-    if(details&&state.details.current_road[0]){
-        lv_point_t measured{};lv_text_get_size(&measured,state.details.current_road,&motonav_ui_18,0,0,LV_COORD_MAX,LV_TEXT_FLAG_NONE);
-        const int width=std::min<int>(135,measured.x);lv_obj_set_width(hud.current_road,width);lv_obj_set_x(hud.current_road,401-width);
+    const char *road=details?state.details.current_road:"";
+    if(std::strcmp(lv_label_get_text(hud.current_road),road)){
+        set_label_text(hud.current_road,road);
+        if(*road){
+            lv_point_t measured{};lv_text_get_size(&measured,road,&motonav_ui_18,0,0,LV_COORD_MAX,LV_TEXT_FLAG_NONE);
+            const int width=std::min<int>(135,measured.x);lv_obj_set_width(hud.current_road,width);lv_obj_set_x(hud.current_road,401-width);
+        }
     }
     lv_obj_set_flag(hud.current_road,LV_OBJ_FLAG_HIDDEN,!details||!state.details.current_road[0]);
     lv_obj_set_flag(hud.road_accent,LV_OBJ_FLAG_HIDDEN,!details||!state.details.current_road[0]);
