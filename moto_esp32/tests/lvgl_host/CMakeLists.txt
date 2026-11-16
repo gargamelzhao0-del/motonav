@@ -17,6 +17,7 @@ function(add_preview target tests)
         ${COMPONENTS_DIR}/motonav_core/include ${COMPONENTS_DIR}/motonav_ui/include ${COMPONENTS_DIR}/motonav_graphics/include)
     target_compile_definitions(${target} PRIVATE MOTONAV_DEVICE_TESTS=${tests})
     target_compile_definitions(${target} PRIVATE ROUTE_FIXTURE_PATH="${CMAKE_CURRENT_SOURCE_DIR}/../fixtures/nav4.frames")
+    target_compile_definitions(${target} PRIVATE PLAN_FIXTURE_PATH="${CMAKE_CURRENT_SOURCE_DIR}/../fixtures/nav4-plan.frames")
     if(tests)
         target_sources(${target} PRIVATE ${BENCH_DIR}/display_benchmark.cpp ${BENCH_DIR}/map_fixture.cpp)
         target_include_directories(${target} PRIVATE

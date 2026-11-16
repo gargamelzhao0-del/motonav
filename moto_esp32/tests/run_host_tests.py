@@ -16,6 +16,7 @@ with tempfile.TemporaryDirectory(prefix='motonav-firmware-tests-') as directory:
     output = Path(directory)
     fixture = root / 'tests/fixtures/nav3.frames'
     route_fixture = root / 'tests/fixtures/nav4.frames'
+    plan_fixture = root / 'tests/fixtures/nav4-plan.frames'
     diagnostic_fixture = root / 'tests/fixtures/diag1.frames'
     if args.android_source:
         java = Path(os.environ['JAVA_HOME']) / 'bin' / ('java.exe' if os.name == 'nt' else 'java')
@@ -24,6 +25,7 @@ with tempfile.TemporaryDirectory(prefix='motonav-firmware-tests-') as directory:
         sources = [source / 'app/src/main/java/com/motonav/companion' / (name + '.java') for name in classes]
         sources.append(source / 'tests/NavigationProtocolTests.java')
         sources.append(source / 'tests/RouteProtocolTests.java')
+        sources.append(source / 'tests/RoutePlanTests.java')
         sources.append(source / 'tests/BleDiagnosticProtocolTests.java')
         subprocess.run([str(java), '-m', 'jdk.compiler/com.sun.tools.javac.Main', '-encoding', 'UTF-8',
                         '-d', str(output), *map(str, sources)], check=True)
@@ -33,6 +35,9 @@ with tempfile.TemporaryDirectory(prefix='motonav-firmware-tests-') as directory:
         route_fixture = output / 'nav4.frames'
         subprocess.run([str(java), '-cp', str(output), 'RouteProtocolTests', str(route_fixture)], check=True)
         assert route_fixture.read_bytes() == (root / 'tests/fixtures/nav4.frames').read_bytes(), 'Android NAV4 fixture changed'
+        plan_fixture = output / 'nav4-plan.frames'
+        subprocess.run([str(java), '-cp', str(output), 'RoutePlanTests', str(plan_fixture)], check=True)
+        assert plan_fixture.read_bytes() == (root / 'tests/fixtures/nav4-plan.frames').read_bytes(), 'Android route plan fixture changed'
         diagnostic_fixture = output / 'diag1.frames'
         subprocess.run([str(java), '-cp', str(output), 'BleDiagnosticProtocolTests', str(diagnostic_fixture)], check=True)
         assert diagnostic_fixture.read_bytes() == (root / 'tests/fixtures/diag1.frames').read_bytes(), 'Android DIAG1 fixture changed'
@@ -71,4 +76,4 @@ with tempfile.TemporaryDirectory(prefix='motonav-firmware-tests-') as directory:
                          'brightness_timeout', 'metrics_timeout', 'start_fault', 'fps_lock_fault', 'fps_lock_race']:
                 subprocess.run([str(executable), mode], check=True)
         else:
-            subprocess.run([str(executable), *([str(fixture)] if name == 'navigation_protocol_test' else [str(route_fixture)] if name in {'route_protocol_test', 'navigation_service_test'} else [str(diagnostic_fixture)] if name in {'diagnostic_protocol_test', 'diagnostic_bridge_test'} else [])], check=True)
+            subprocess.run([str(executable), *([str(fixture)] if name == 'navigation_protocol_test' else [str(route_fixture),str(plan_fixture)] if name == 'route_protocol_test' else [str(route_fixture)] if name == 'navigation_service_test' else [str(diagnostic_fixture)] if name in {'diagnostic_protocol_test', 'diagnostic_bridge_test'} else [])], check=True)

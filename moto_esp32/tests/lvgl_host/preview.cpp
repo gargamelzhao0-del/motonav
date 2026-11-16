@@ -222,9 +222,41 @@ int main(int argc, char **argv) {
         save(display,directory/"phone-route-moving.ppm");
         snapshot=session.snapshot(clock_ms+15001);
         save(display,directory/"phone-route-expired.ppm");require_label("GUIDANCE EXPIRED");
-        if(lv_obj_get_child_count(lv_screen_active())!=normal_children)return 1;
+        if(lv_obj_get_child_count(lv_screen_active())!=normal_children+1 || !snapshot.route.overview)return 1;
         snapshot=previous;
         save(display,directory/"phone-route-fallback.ppm");
+        if(pixels!=navigation_pixels)return 1;
+    }
+    {
+        auto previous=snapshot;
+        motonav::NavigationSession session;
+        session.connected();session.protocol(4);session.security(true);session.subscription(true);
+        std::ifstream fixture(PLAN_FIXTURE_PATH);std::string row;char reply[32]{};
+        for(int frame=0;frame<11;frame++) {
+            if(!std::getline(fixture,row))return 1;
+            for(size_t i=0;i<row.size();i+=2)session.feed(static_cast<char>(std::stoul(row.substr(i,2),nullptr,16)),clock_ms,reply);
+            if(reply[0]!='A')return 1;
+            snapshot=session.snapshot(clock_ms);
+            if(frame==1 || frame==2 || frame==6) {
+                save(display,directory/(frame==6?"plan-gps-lost.ppm":frame==2?"plan-waiting.ppm":"plan-before-guidance.ppm"));
+                require_label("ROUTE OVERVIEW");require_label("GPS SIGNAL WEAK");
+                if(!snapshot.route.overview || lv_obj_get_child_count(lv_screen_active())!=normal_children+1)return 1;
+                // The center-bottom vehicle marker must be absent in overview.
+                for(int y=310;y<338;y++)for(int x=222;x<245;x++) {
+                    uint16_t p=pixels[y*466+x];
+                    if(((p>>11)&31)>25 && ((p>>5)&63)>50 && (p&31)>20) {
+                        std::cerr<<"Overview contains a false vehicle marker\n";return 1;
+                    }
+                }
+            } else if(frame==3) {
+                save(display,directory/"plan-live.ppm");require_label("36 km/h");require_label("120 m");
+                if(snapshot.route.overview)return 1;
+            } else if(frame==7 || frame==10) {
+                save(display,directory/(frame==7?"plan-stopped.ppm":"plan-arrived.ppm"));
+                if(snapshot.route.count || lv_obj_get_child_count(lv_screen_active())!=normal_children)return 1;
+            }
+        }
+        snapshot=previous;save(display,directory/"plan-fallback.ppm");
         if(pixels!=navigation_pixels)return 1;
     }
     snapshot.guidance = {motonav::Live, 47, 50000000, 50000000, 31536000, -1};

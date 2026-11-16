@@ -25,6 +25,7 @@ struct MapScene {
     lv_image_dsc_t image{};
     Segment roads[64]{}, route[511]{};
     size_t road_count = 0, route_count = 0;
+    bool show_position=true;
     lv_draw_buf_t strip{};
     uint16_t *pixels = nullptr; // Decoder fallback only; direct draw needs no scratch copy.
     uint64_t (*clock_us)() = nullptr;
@@ -76,7 +77,7 @@ void paint(MapRaster &raster, MapScene &scene, int top, int bottom) {
     for (int pass=0; pass<2; ++pass)
         for (size_t i=0; i<scene.route_count; ++i)
             line(raster, scene.route[i], pass ? 7 : 12, pass ? 0xb66dff : 0x2a1440, top, bottom);
-    player(raster, scene.image.header.w/2, scene.image.header.h*7/10);
+    if(scene.show_position)player(raster, scene.image.header.w/2, scene.image.header.h*7/10);
     if (scene.clock_us) {
         scene.stats.elapsed_us += scene.clock_us() - begin;
         ++scene.stats.calls;
@@ -223,6 +224,7 @@ bool render_route_map(lv_obj_t *view, const MapCamera &camera, const MapGeometry
     MapProjection projection(scene->image.header.w, scene->image.header.h, camera);
     if (!projection.valid()) return false;
     scene->road_count = scene->route_count = 0;
+    scene->show_position=geometry.show_position;
     ProjectedPoint a, b;
     for (size_t i=0; i<geometry.road_count; ++i) {
         if (projection.segment(geometry.roads[i].a, geometry.roads[i].b, a, b))

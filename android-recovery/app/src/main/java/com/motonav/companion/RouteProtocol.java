@@ -23,6 +23,17 @@ public final class RouteProtocol {
         return new Command(sequence,data.array(),hello);
     }
     public Command hello() { return finish(begin(17,1),true); }
+    public Command helloWithPreview() { return finish(begin(17,3),true); }
+    public Command plan(DeviceRoute.Preview preview) {
+        if(preview==null || preview.revision()<=0 || preview.waitingReason()<0 || preview.waitingReason()>7
+                || preview.points().size()<2 || preview.points().size()>64)throw new IllegalArgumentException("route preview");
+        for(DeviceRoute.Point p:preview.points())if(Math.abs((long)p.x())>1024 || Math.abs((long)p.y())>1024)
+            throw new IllegalArgumentException("overview bounds");
+        ByteBuffer b=begin(23+4*preview.points().size(),4).put((byte)preview.waitingReason())
+                .put((byte)preview.points().size()).putInt(preview.revision());
+        for(DeviceRoute.Point p:preview.points())b.putShort((short)p.x()).putShort((short)p.y());
+        return finish(b,false);
+    }
     public Command snapshot(NavigationFrame source,DeviceRoute.Frame route,long nowMs) {
         long delivery=nowMs+3000; NavigationFrame frame=source.at(delivery);
         boolean live=frame.mode()==NavigationFrame.LIVE;

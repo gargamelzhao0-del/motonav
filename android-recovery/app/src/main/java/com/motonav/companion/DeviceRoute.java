@@ -10,14 +10,59 @@ public final class DeviceRoute {
     public record Frame(int revision, List<Point> points, int x, int y, int heading) {
         public Frame { points = List.copyOf(points); }
     }
+    /** Planned geometry in a uniformly scaled overview space; contains no vehicle position. */
+    public record Preview(int revision, List<Point> points, int waitingReason) {
+        public Preview { points = List.copyOf(points); }
+    }
     private List<Coordinate> route = List.of();
     private List<Point> window = List.of();
     private double originLat, originLon, longitudeScale;
     private int revision;
+    private List<Point> overview = List.of();
+    private int overviewRevision;
     public void replace(List<Coordinate> coordinates) {
         route = List.copyOf(coordinates); window = List.of();
+        overview = overview(route);
+        overviewRevision = overview.isEmpty() || revision == Integer.MAX_VALUE ? 0 : ++revision;
     }
-    public void clear() { route = List.of(); window = List.of(); }
+    public void clear() { route = List.of(); window = List.of(); overview = List.of(); overviewRevision = 0; }
+    public Preview preview(int waitingReason) {
+        if (waitingReason < 0 || waitingReason > 7) throw new IllegalArgumentException("waiting reason");
+        return overviewRevision == 0 ? null : new Preview(overviewRevision, overview, waitingReason);
+    }
+    private static List<Point> overview(List<Coordinate> route) {
+        if (route.size() < 2) return List.of();
+        double minLat=Double.POSITIVE_INFINITY,maxLat=-minLat,minLon=minLat,maxLon=-minLat;
+        for (Coordinate p : route) {
+            if (!valid(p)) return List.of();
+            minLat=Math.min(minLat,p.latitude());maxLat=Math.max(maxLat,p.latitude());
+            minLon=Math.min(minLon,p.longitude());maxLon=Math.max(maxLon,p.longitude());
+        }
+        double middleLat=(minLat+maxLat)/2,middleLon=(minLon+maxLon)/2;
+        double longitudeScale=Math.cos(Math.toRadians(middleLat));
+        double extent=Math.max(maxLat-minLat,(maxLon-minLon)*longitudeScale);
+        if (!(extent > 0)) return List.of();
+        // Cache once when planning finishes. Bound simplification work and keep
+        // both endpoints even on long routes; this is an overview, not a live fix.
+        int samples=Math.min(4096,route.size());
+        List<Point> points=new ArrayList<>(samples);
+        for(int i=0;i<samples;i++) {
+            Coordinate p=route.get((int)((long)i*(route.size()-1)/(samples-1)));
+            Point q=new Point((int)Math.round((p.longitude()-middleLon)*longitudeScale*2000/extent),
+                    (int)Math.round((p.latitude()-middleLat)*2000/extent));
+            if(points.isEmpty() || !points.get(points.size()-1).equals(q))points.add(q);
+        }
+        if(points.size()<2)return List.of();
+        List<Point> reduced=simplify(points,2);
+        if(reduced.size()>64) {
+            double low=2,high=3000;
+            for(int pass=0;pass<16;pass++) {
+                double tolerance=(low+high)/2;List<Point> candidate=simplify(points,tolerance);
+                if(candidate.size()>64)low=tolerance;else{high=tolerance;reduced=candidate;}
+            }
+        }
+        return List.copyOf(reduced);
+    }
     private static boolean valid(Coordinate p) {
         return p != null && Double.isFinite(p.latitude()) && Math.abs(p.latitude()) <= 85
                 && Double.isFinite(p.longitude()) && Math.abs(p.longitude()) <= 180;

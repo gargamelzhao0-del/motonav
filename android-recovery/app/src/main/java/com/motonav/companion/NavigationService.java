@@ -228,7 +228,13 @@ public final class NavigationService extends Service implements JourneyControlle
 
     private void publish() {
         NavigationFrame frame = journey.frame();
-        if (link.ready() && !link.busy()) link.sendNavigation(frame, journey.deviceMap(), stopping ? this::shutdownForeground : null);
+        if (link.ready() && !link.busy()) {
+            // Clear a previously sent live instruction before spending radio time
+            // on a changed plan. The callback rereads current state after its ACK.
+            boolean clearLive=frame.mode()!=NavigationFrame.LIVE && link.lastSentLive();
+            boolean planSent=!stopping && !clearLive && link.sendRoutePlanIfNeeded(journey.devicePreview(),this::publish);
+            if(!planSent)link.sendNavigation(frame,journey.deviceMap(),stopping?this::shutdownForeground:null);
+        }
         if (!navigating || stopping) return;
         String text = frame.mode() == NavigationFrame.LIVE ? JourneyState.maneuver(frame.icon()) + " · " + frame.turnMeters() + " 米" : "等待可信定位和导航指令";
         if (!text.equals(notificationText)) {

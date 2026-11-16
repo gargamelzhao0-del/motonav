@@ -273,6 +273,15 @@ public class JourneyControllerTests {
             check(f.host.message.contains("尚未返回引导指令"),"missing first instruction differs from location expiry");
             engine.listener.onGpsSignalWeak(true);
             check(f.host.message.contains("GPS 信号弱"),"SDK weak GPS has its own reason");
+            var preview=f.controller.devicePreview();
+            check(preview!=null && preview.points().size()>=2 && preview.waitingReason()==1,"weak GPS retains actual planned route");
+            check(f.controller.deviceMap()==null,"weak GPS does not expose live vehicle pose");
+            Handler.advance(16000);
+            check(f.controller.devicePreview().revision()==preview.revision(),"expired location cannot remove the planned route");
+            engine.listener.onGpsSignalWeak(false);f.host.fixAt(30);
+            engine.listener.onLocationChange(new AMapNaviLocation());engine.listener.onNaviInfoUpdate(new NaviInfo());
+            check(f.controller.frame().mode()==NavigationFrame.LIVE && f.controller.devicePreview().revision()==preview.revision(),"fresh guidance recovers without replacing the plan");
+            f.controller.end();check(f.controller.devicePreview()==null,"ending navigation removes planned geometry");
         }
         try (Fixture f = new Fixture()) {
             AMapNavi engine = f.navigate();

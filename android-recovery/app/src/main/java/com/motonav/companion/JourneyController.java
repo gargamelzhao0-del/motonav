@@ -137,6 +137,11 @@ final class JourneyController {
         Location fix=guidanceFix();
         return fix==null?null:deviceRoute.frame(fix.getLatitude(),fix.getLongitude(),fix.hasBearing()?fix.getBearing():Float.NaN);
     }
+    DeviceRoute.Preview devicePreview() {
+        if(state.phase()==JourneyState.Phase.IDLE || state.phase()==JourneyState.Phase.LOCATING)return null;
+        int reason=state.rerouting()?7:gpsWeak?1:frame().mode()==NavigationFrame.LIVE?0:diagnosticObservation(true).reason();
+        return deviceRoute.preview(reason);
+    }
     boolean canRequestStart() { return destination != null && state.phase() == JourneyState.Phase.IDLE; }
     NavigationUiModel presentation() {
         return NavigationUiModel.create(state.phase(),frame(),destination==null?"":destination.getTitle(),nextRoad,message);

@@ -223,7 +223,38 @@ public class BleLinkTests implements BleLink.Listener {
         t.check(Diagnostics.skipped==1,"One latest pending snapshot, no unbounded backlog");
         t.link.disconnect();initial=g.writes;writeAck(g,0);t.check(g.writes==initial,"Late callback after disconnect is ignored");
     }
-    public static void main(String[] args){subscriptionAndAck();errorsAndLateCallbacks();serviceChange();rediscovery();diagnosticsPriority();diagnosticsLifecycle();System.out.println("PASS: "+checks+" real BleLink callback checks (boundary doubles; no radio)");}
+    static void previewCompatibility() throws Exception {
+        var t=new BleLinkTests();var g=t.start(true);t.discover(g);
+        g.callback.onDescriptorWrite(g,g.descriptor,0);Handler.flush();
+        t.check(g.lastWrite.value[4]==3,"Negotiate route preview explicitly");
+        g.callback.onCharacteristicChanged(g,t.tx,"E,NAV4\n".getBytes());Handler.flush();
+        t.check(g.writes==1&&!g.closed,"Legacy rejection waits for outstanding ATT completion");
+        writeAck(g,0);t.check(g.writes==2&&g.lastWrite.value[4]==1,"Legacy fallback uses normal HELLO on same service");
+        writeAck(g,0);g.callback.onCharacteristicChanged(g,t.tx,"A,1,NAV4\n".getBytes());Handler.flush();
+        t.check(t.link.ready()&&!t.link.routePreview(),"Older firmware remains usable");t.link.disconnect();
+        t=new BleLinkTests();g=t.start(true);t.discover(g);
+        g.callback.onDescriptorWrite(g,g.descriptor,0);Handler.flush();
+        g.callback.onCharacteristicChanged(g,t.tx,"A,1,NAV4P\n".getBytes());Handler.flush();
+        t.check(!t.link.ready(),"Preview ACK cannot overlap HELLO ATT write");writeAck(g,0);
+        t.check(t.link.ready()&&t.link.routePreview(),"Preview support is negotiated without changing GATT table");
+        var points=List.of(new DeviceRoute.Point(-100,-1000),new DeviceRoute.Point(100,1000));
+        var plan=new DeviceRoute.Preview(1,points,1);int[] completed={0};
+        t.check(t.link.sendRoutePlanIfNeeded(plan,()->completed[0]++),"Plan sends before first live guidance");
+        t.check(!t.link.sendRoutePlanIfNeeded(plan,null),"No second plan while in flight");
+        writeAck(g,0);writeAck(g,0);g.callback.onCharacteristicChanged(g,t.tx,"A,2,OK\n".getBytes());Handler.flush();
+        t.check(completed[0]==1&&!t.link.busy()&&!t.link.lastSentLive(),"Plan completion does not create a live navigation frame");
+        t.check(!t.link.sendRoutePlanIfNeeded(plan,null),"Identical plan and reason do not consume radio time every heartbeat");
+        t.link.sendNavigation(NavigationFrame.status(1),null,null);
+        for(int i=0;i<3;i++)writeAck(g,0);
+        g.callback.onCharacteristicChanged(g,t.tx,"A,3,OK\n".getBytes());Handler.flush();
+        var ack=BleLink.class.getDeclaredField("lastAckSequence");ack.setAccessible(true);
+        t.check(ack.getInt(t.link)==3,"Navigation ACK is tracked for diagnostics");
+        t.check(t.link.sendRoutePlanIfNeeded(new DeviceRoute.Preview(1,points,7),null),"Changed waiting reason is delivered without new geometry revision");
+        writeAck(g,0);writeAck(g,0);g.callback.onCharacteristicChanged(g,t.tx,"A,4,OK\n".getBytes());Handler.flush();
+        t.check(ack.getInt(t.link)==3,"Plan ACK cannot masquerade as a navigation ACK");
+        t.link.disconnect();t.check(!t.link.routePreview(),"Disconnect clears negotiated preview capability");
+    }
+    public static void main(String[] args) throws Exception {subscriptionAndAck();errorsAndLateCallbacks();serviceChange();rediscovery();diagnosticsPriority();diagnosticsLifecycle();previewCompatibility();System.out.println("PASS: "+checks+" real BleLink callback checks (boundary doubles; no radio)");}
 }
 '''
 

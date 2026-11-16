@@ -13,6 +13,7 @@ const char *name;
 uint32_t last_title_color = 0;
 lv_obj_t *map_view=nullptr;
 bool map_layout=false;
+bool map_live=false;
 uint32_t map_revision=0,transition_at=0;
 MapCamera camera{},from_camera{},target_camera{};
 bool map_failed=false;
@@ -39,10 +40,12 @@ void layout(bool enabled) {
     }
 }
 void route_map(const ScreenSnapshot &state) {
-    bool visible=screen_mode(state)==ScreenMode::Live && state.route.count>=2;
+    const auto mode=screen_mode(state);
+    bool visible=state.linked && state.encrypted && state.handshaken && !state.pairing &&
+        mode!=ScreenMode::Stopped && mode!=ScreenMode::Arrived && state.route.count>=2;
     if(!visible) {
         if(map_view) { lv_obj_delete(map_view); map_view=nullptr; }
-        map_revision=0; map_failed=false; layout(false); return;
+        map_revision=0; map_failed=false; map_live=false; layout(false); return;
     }
     if(!map_view && !map_failed) {
         map_view=create_route_map(lv_obj_get_parent(view.top),466,466);
@@ -52,10 +55,37 @@ void route_map(const ScreenSnapshot &state) {
     if(!map_view) { layout(false); return; }
     layout(true);
     const auto &r=state.route;
+    const bool live=mode==ScreenMode::Live && !r.overview;
+    const bool changed_mode=live!=map_live;
+    map_live=live;
+    if(!live) {
+        if(map_revision==r.revision && !changed_mode)return;
+        map_revision=r.revision;
+        // Fit both normalized plans and legacy metre windows without implying a
+        // current position. Uniform scaling preserves the route's proportions.
+        int left=r.points[0].x,right=left,bottom=r.points[0].y,top=bottom;
+        for(unsigned i=1;i<r.count;i++) {
+            left=std::min(left,int(r.points[i].x));right=std::max(right,int(r.points[i].x));
+            bottom=std::min(bottom,int(r.points[i].y));top=std::max(top,int(r.points[i].y));
+        }
+        const float extent=std::max(1,std::max(right-left,top-bottom));
+        const float factor=2000/extent;
+        const float width=std::max(1.0f,(right-left)*factor),height=std::max(1.0f,(top-bottom)*factor);
+        const float scale=std::min(4.0f,std::min(310/width,230/height));
+        MapPoint points[64];
+        for(unsigned i=0;i<r.count;i++)points[i]={
+            static_cast<int16_t>(std::lround((r.points[i].x-(left+right)*0.5f)*factor)),
+            static_cast<int16_t>(std::lround((r.points[i].y-(bottom+top)*0.5f)*factor))};
+        camera={0,(248-466*0.7f)/scale,0,scale};
+        if(!render_route_map(map_view,camera,{points,r.count,nullptr,0,false})) {
+            lv_obj_delete(map_view);map_view=nullptr;map_failed=true;layout(false);
+        }
+        return;
+    }
     float heading=r.heading<0?0:static_cast<float>(r.heading)*0.001745329252f;
     bool changed=false;
     uint32_t now=lv_tick_get();
-    if(map_revision!=r.revision) {
+    if(map_revision!=r.revision || changed_mode) {
         map_revision=r.revision; camera={static_cast<float>(r.x),static_cast<float>(r.y),heading,1};
         from_camera=target_camera=camera; transition_at=now; changed=true;
     } else if(target_camera.x!=r.x || target_camera.y!=r.y || std::abs(target_camera.heading-heading)>0.0001f) {
@@ -86,8 +116,12 @@ void refresh(lv_timer_t *) {
     ScreenMode mode = screen_mode(state);
     route_map(state);
     set_label_text(view.top, state.linked ? (state.encrypted ? "PHONE CONNECTED" : "PHONE CONNECTING") : name);
+    const bool overview=map_layout && mode!=ScreenMode::Live;
+    lv_obj_set_flag(view.number,LV_OBJ_FLAG_HIDDEN,overview);
+    lv_obj_set_flag(view.speed,LV_OBJ_FLAG_HIDDEN,overview);
+    if(overview)set_label_text(view.top,"ROUTE OVERVIEW");
     set_label_text(view.footer, mode == ScreenMode::Live ? "MOTONAV" : (extension.idle_hint ? extension.idle_hint : "MOTONAV"));
-    uint32_t title_color = mode == ScreenMode::Stale || mode == ScreenMode::Waiting ? Amber : Lime;
+    uint32_t title_color = overview || mode == ScreenMode::Stale || mode == ScreenMode::Waiting ? Amber : Lime;
     if (title_color != last_title_color) {
         lv_obj_set_style_text_color(view.title, lv_color_hex(title_color), 0);
         last_title_color = title_color;
@@ -97,6 +131,19 @@ void refresh(lv_timer_t *) {
         set_label_text(view.title, "PAIR WITH PHONE"); dashboard_arrow(view, 0);
         std::snprintf(value, sizeof(value), "%06lu", static_cast<unsigned long>(state.passkey)); set_label_text(view.number, value);
         set_label_text(view.speed, "Enter PIN on phone"); set_label_text(view.remaining, name); set_label_text(view.footer, "");
+    } else if(overview) {
+        dashboard_arrow(view,0);
+        const char *status=mode==ScreenMode::Stale?"GUIDANCE EXPIRED":"WAITING FOR GUIDANCE";
+        if(mode!=ScreenMode::Stale) {
+            switch(state.route.waiting_reason) {
+                case 1: status="GPS SIGNAL WEAK";break;
+                case 2: case 3: case 6: status="WAITING FOR GPS";break;
+                case 7: status="RECALCULATING";break;
+                default: break;
+            }
+        }
+        set_label_text(view.title,status);
+        set_label_text(view.remaining,"Planned route / no live position");
     } else if (mode == ScreenMode::Live) {
         const Guidance &g = state.guidance;
         set_label_text(view.title, maneuver(g.icon)); dashboard_arrow(view, g.icon);

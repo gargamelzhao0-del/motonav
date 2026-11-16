@@ -55,7 +55,7 @@ public final class BleLink {
     private boolean scanning;
     private int serviceChanges;
     private boolean retriedDiscovery, awaitingDiscoveryRetry;
-    private record Pending(int sequence,int helloVersion) { }
+    private record Pending(int sequence,int helloVersion,boolean previewProbe,boolean plan) { }
     private Pending pending;
     private Runnable completion;
     private List<byte[]> chunks;
@@ -69,7 +69,20 @@ public final class BleLink {
     private NavigationProtocol navigation;
     private RouteProtocol routeProtocol;
     private boolean routeMaps;
+    private boolean routePreview, previewFallback;
+    private int sentPlanRevision, sentPlanReason=-1;
     public boolean routeMaps(){return ready && routeMaps;}
+    public boolean routePreview(){return ready && routePreview;}
+    public boolean lastSentLive(){return lastNavigation!=null && lastNavigation.wireMode()==NavigationFrame.LIVE;}
+    public boolean sendRoutePlanIfNeeded(DeviceRoute.Preview preview,Runnable done){
+        if(!ready||busy()||!routePreview||preview==null ||
+                (preview.revision()==sentPlanRevision && preview.waitingReason()==sentPlanReason))return false;
+        send(routeProtocol.plan(preview),()->{
+            sentPlanRevision=preview.revision();sentPlanReason=preview.waitingReason();
+            if(done!=null)done.run();
+        });
+        return true;
+    }
     private BluetoothDevice bondingDevice;
     private BroadcastReceiver bondReceiver;
     private List<Protocol.Command> transfer;
@@ -209,7 +222,7 @@ public final class BleLink {
         diagnosticStatus("等待圆屏连接");
         if (navigation != null) navigation.reset();
         if (routeProtocol != null) routeProtocol.reset();
-        routeMaps=false;
+        routeMaps=false;routePreview=false;previewFallback=false;sentPlanRevision=0;sentPlanReason=-1;
         pendingSubscription=null;notifications=null;phase="idle";
         awaitingDiscoveryRetry=false;
         BluetoothGatt old=gatt;gatt=null;
@@ -235,18 +248,18 @@ public final class BleLink {
     }
     private void beginProtocol(){
         phase="hello";diagnostic("start",0);
-        if (navigation != null && routeMaps) { send(routeProtocol.hello(), () -> { ready=true; listener.ready(); }); return; }
+        if (navigation != null && routeMaps) { send(routeProtocol.helloWithPreview(), () -> { ready=true; listener.ready(); }); return; }
         if (navigation != null) { send(navigation.hello(), () -> { ready = true; listener.ready(); }); return; }
         if(network==null){send(protocol.hello(),()->send(protocol.route(),()->{ready=true;listener.ready();}));return;}
         send(networkProtocol.hello(),()->{transfer=networkProtocol.transfer(network);transferIndex=0;sendNextNetworkFrame();});
     }
     private void send(Protocol.Command command,Runnable done){
-        pending=new Pending(command.sequence(),navigation!=null&&command.wire().startsWith("H,3,")?3:0);
+        pending=new Pending(command.sequence(),navigation!=null&&command.wire().startsWith("H,3,")?3:0,false,false);
         completion=done;chunks=Protocol.chunks(command.wire());chunkIndex=0;ackReceived=false;
         handler.removeCallbacks(timeout);handler.postDelayed(timeout,3000);writeNext();
     }
     private void send(RouteProtocol.Command command,Runnable done){
-        pending=new Pending(command.sequence(),command.hello()?4:0); completion=done;
+        pending=new Pending(command.sequence(),command.hello()?4:0,command.bytes()[4]==3,command.bytes()[4]==4); completion=done;
         chunks=new ArrayList<>(); byte[] bytes=command.bytes();
         for(int i=0;i<bytes.length;i+=20)chunks.add(Arrays.copyOfRange(bytes,i,Math.min(bytes.length,i+20)));
         chunkIndex=0;ackReceived=false;handler.removeCallbacks(timeout);handler.postDelayed(timeout,3000);writeNext();
@@ -279,10 +292,16 @@ public final class BleLink {
     }
     private void finishIfAcknowledged(){
         if(pending==null||writing||!ackReceived)return;
+        if(pending.previewProbe() && previewFallback){
+            Runnable done=completion;pending=null;completion=null;previewFallback=false;handler.removeCallbacks(timeout);
+            routeProtocol.reset();send(routeProtocol.hello(),done);return;
+        }
         if(pending.helloVersion()!=0){diagnostic("acknowledged",0);phase="stream";}
-        int sequence=pending.sequence();Runnable done=completion;pending=null;completion=null;handler.removeCallbacks(timeout);
-        lastAckSequence=sequence;
-        if(lastNavigation!=null && lastNavigation.sequence()==sequence)lastAckLatency=SystemClock.elapsedRealtime()-lastNavigation.atMs();
+        int sequence=pending.sequence();boolean plan=pending.plan();Runnable done=completion;pending=null;completion=null;handler.removeCallbacks(timeout);
+        if(!plan){
+            lastAckSequence=sequence;
+            if(lastNavigation!=null && lastNavigation.sequence()==sequence)lastAckLatency=SystemClock.elapsedRealtime()-lastNavigation.atMs();
+        }
         listener.acknowledged(sequence);if(done!=null)done.run();
         handler.post(this::writeNext);
     }
@@ -293,7 +312,11 @@ public final class BleLink {
                 if(pending==null)continue;
                 String expected = "A," + pending.sequence() + ",NAV" + pending.helloVersion();
                 boolean navHello = pending.helloVersion()!=0;
-                if(navHello ? line.equals(expected) : Protocol.acknowledged(line,pending.sequence())){ackReceived=true;finishIfAcknowledged();}
+                if(pending.previewProbe() && line.equals("E,NAV4")){
+                    previewFallback=true;ackReceived=true;finishIfAcknowledged();
+                }else if(pending.previewProbe() && line.equals("A,"+pending.sequence()+",NAV4P")){
+                    routePreview=true;ackReceived=true;finishIfAcknowledged();
+                }else if(navHello ? line.equals(expected) : Protocol.acknowledged(line,pending.sequence())){ackReceived=true;finishIfAcknowledged();}
                 else {fail("设备拒绝数据或协议不匹配："+line);return;}
             } else if(b>=32&&b<=126&&incoming.length()<32) incoming.append((char)b);
             else {fail("设备返回无效数据。");return;}

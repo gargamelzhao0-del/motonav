@@ -8,6 +8,7 @@ struct MapGeometry {
     size_t route_count;
     const MapSegment *roads;
     size_t road_count;
+    bool show_position=true;
 };
 // All functions below require the LVGL thread or the caller's display lock.
 // Image owns a bounded scene; fallback decoding lazily allocates a strip buffer.
