@@ -97,8 +97,8 @@ void update_navigation_hud(NavigationHud &hud,const ScreenSnapshot &state,float 
         if(state.guidance.speed_kmh<0)set_label_text(hud.speed,"--");
         else {std::snprintf(value,sizeof(value),"%d",state.guidance.speed_kmh);set_label_text(hud.speed,value);}
     } else {
-        set_label_text(hud.distance,"等待定位");set_label_text(hud.unit,"");set_label_text(hud.speed,"--");
-        set_label_text(hud.maneuver,state.route.waiting_reason==7?"正在重算路线":state.route.waiting_reason==1?"GPS 信号弱":"无实时位置");
+        set_label_text(hud.distance,state.route.position_quality?"等待指引":"等待定位");set_label_text(hud.unit,"");set_label_text(hud.speed,"--");
+        set_label_text(hud.maneuver,state.route.waiting_reason==7?"正在重算路线":state.route.waiting_reason==1?"GPS 信号弱":state.route.position_quality?"等待导航指令":"无实时位置");
     }
     const char *road=details?state.details.current_road:"";
     if(std::strcmp(lv_label_get_text(hud.current_road),road)){
@@ -124,7 +124,12 @@ void update_navigation_hud(NavigationHud &hud,const ScreenSnapshot &state,float 
         else std::snprintf(value,sizeof(value),"%uh %um",minutes/60,minutes%60);
         set_label_text(hud.time,value);
     }
-    set_label_text(hud.status,state.basemap_revision!=state.route.revision?"正在加载底图":!state.basemap_count?"此处暂无地图细节":!state.basemap_complete?"正在补充地图细节":live?"":"底图已就绪 · 等待 GPS");
+    const char *status=state.basemap_revision!=state.route.revision?"正在加载底图":!state.basemap_count?"此处暂无地图细节":!state.basemap_complete?"正在补充地图细节":live?"":"底图已就绪 · 等待位置";
+    if(!live&&state.route.position_quality){
+        std::snprintf(value,sizeof(value),"%s · 精度约 %u m",state.route.position_quality==1?"大致位置":"已定位",state.route.position_accuracy_m);
+        status=value;
+    }
+    set_label_text(hud.status,status);
     for(unsigned i=0;i<4;i++) {
         float angle=i*1.570796327f-heading;
         float radius=222;

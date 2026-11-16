@@ -27,6 +27,7 @@ public final class RouteProtocol {
     public Command helloWithBasemap() { return finish(begin(17,5),true); }
     public Command helloWithMapUpdates() { return finish(begin(17,8),true); }
     public Command helloWithDetails() { return finish(begin(17,11),true); }
+    public Command helloWithPosition() { return finish(begin(17,13),true); }
     public Command details(int revision,int navigationSequence,NavigationDetails details) {
         if(revision<=0||navigationSequence<=0||details==null)throw new IllegalArgumentException("details reference");
         byte[] current=details.currentRoad().getBytes(java.nio.charset.StandardCharsets.UTF_8);
@@ -36,14 +37,26 @@ public final class RouteProtocol {
                 .put((byte)current.length).put((byte)next.length).put(current).put(next),false);
     }
     public Command focus(Basemap.Focus focus) {
+        return focus(focus,false,0);
+    }
+    public Command focusWithPosition(Basemap.Focus focus,long nowMs) {
+        return focus(focus,true,nowMs);
+    }
+    private Command focus(Basemap.Focus focus,boolean positions,long nowMs) {
         var route=focus.route();int count=route.points().size();
         if(count<2||count>64||route.revision()<=0||focus.reason()<0||focus.reason()>7
                 ||Math.abs((long)route.x())>32000||Math.abs((long)route.y())>32000||route.heading()<-1||route.heading()>3599
                 ||focus.totalMeters()<-1||focus.totalMeters()>50000000||focus.totalSeconds()<-1||focus.totalSeconds()>31536000)
             throw new IllegalArgumentException("local focus");
-        ByteBuffer b=begin(37+4*count,6).put((byte)focus.reason()).put((byte)count).putInt(route.revision())
+        ByteBuffer b=begin((positions?42:37)+4*count,positions?12:6).put((byte)focus.reason()).put((byte)count).putInt(route.revision())
                 .putShort((short)route.x()).putShort((short)route.y()).putShort((short)route.heading())
                 .putInt(focus.totalMeters()).putInt(focus.totalSeconds());
+        if(positions){
+            var position=focus.position();long delivery=nowMs+3000;
+            if(position==null||!position.fresh(nowMs)||!position.fresh(delivery))position=Basemap.Position.unknown();
+            b.put((byte)position.quality()).putShort((short)position.accuracyMeters())
+                    .putShort((short)(position.quality()==0?0:delivery-position.measuredMs()));
+        }
         for(var p:route.points()) {
             if(Math.abs((long)p.x())>32000||Math.abs((long)p.y())>32000)throw new IllegalArgumentException("local point");
             b.putShort((short)p.x()).putShort((short)p.y());

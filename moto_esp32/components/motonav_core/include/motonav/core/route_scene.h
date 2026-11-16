@@ -12,5 +12,9 @@ struct RouteScene {
     uint8_t waiting_reason=0;
     bool local_view=false;
     int32_t total_m=-1,total_s=-1;
+    // Independent measured position: 0 unavailable, 1 approximate, 2 precise.
+    // It never supplies turn instructions or speed.
+    uint8_t position_quality=0;
+    uint16_t position_accuracy_m=0;
 };
 }

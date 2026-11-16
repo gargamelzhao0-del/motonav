@@ -31,15 +31,18 @@ struct MapScene {
     float player_y=326;
     struct Feature {
         uint8_t kind=0;
+        float top=0,bottom=0;
         union Geometry {
             ProjectedPoint points[3];Segment line;
             Geometry():points{}{}
         } geometry;
     } features[384]{};
+    uint16_t paint_order[384]{};
     size_t feature_count=0;
     bool compass=false;
     size_t road_count = 0, route_count = 0;
     bool show_position=true;
+    uint8_t position_style=0;
     lv_draw_buf_t strip{};
     uint16_t *pixels = nullptr; // Decoder fallback only; direct draw needs no scratch copy.
     uint64_t (*clock_us)() = nullptr;
@@ -79,6 +82,14 @@ void player(MapRaster &raster, float x, float y) {
     raster.polygon(left,3,panel_color(0xf2f3e9));
     raster.polygon(right,3,panel_color(0xf2f3e9));
 }
+void position_dot(MapRaster &raster,float x,float y,uint8_t style) {
+    const auto color=panel_color(style==1?0xffc265:0x77caff);
+    constexpr float step=6.283185307f/16;
+    for(unsigned i=0;i<16;i++)raster.line({x+18*std::sin(i*step),y+18*std::cos(i*step)},
+        {x+18*std::sin((i+1)*step),y+18*std::cos((i+1)*step)},1,color);
+    raster.line({x,y},{x,y},16,panel_color(0x12171c));
+    raster.line({x,y},{x,y},10,color);
+}
 void line(MapRaster &raster, const Segment &segment, int width, uint32_t color, int top, int bottom) {
     if (!segment.intersects_y(top, bottom, width)) return;
     raster.line(segment, width, panel_color(color));
@@ -87,15 +98,18 @@ void paint(MapRaster &raster, MapScene &scene, int top, int bottom) {
     const uint64_t begin = scene.clock_us ? scene.clock_us() : 0;
     raster.navigation_style(scene.compass);
     raster.clear(panel_color(0x283033));
-    for(unsigned kind: {4u,5u,3u})for(size_t i=0;i<scene.feature_count;i++) {
-        const auto &f=scene.features[i];if(f.kind!=kind)continue;
-        raster.polygon(f.geometry.points,3,panel_color(kind==4?0x1e4560:kind==5?0x2a4430:0x313b3f));
-    }
-    for(unsigned kind=0;kind<3;kind++)for(size_t i=0;i<scene.feature_count;i++) {
-        const auto &f=scene.features[i];if(f.kind!=kind)continue;
-        const auto &segment=f.geometry.line;
-        if(kind==2)line(raster,segment,10,0x3a4144,top,bottom);
-        line(raster,segment,kind==2?6:kind==1?5:3,kind==2?0xc4cacc:kind==1?0x929ca1:0x6c787e,top,bottom);
+    // Resolve painter order and bounds once per camera update. Each strip visits
+    // the compact list once, instead of scanning all PSRAM geometry six times.
+    for(size_t i=0;i<scene.feature_count;i++) {
+        const auto &f=scene.features[scene.paint_order[i]];
+        if(f.bottom<top||f.top>bottom+0.5f)continue;
+        const unsigned kind=f.kind;
+        if(kind>=3)raster.polygon(f.geometry.points,3,panel_color(kind==4?0x1e4560:kind==5?0x2a4430:0x313b3f));
+        else {
+            const auto &segment=f.geometry.line;
+            if(kind==2)line(raster,segment,10,0x3a4144,top,bottom);
+            line(raster,segment,kind==2?6:kind==1?5:3,kind==2?0xc4cacc:kind==1?0x929ca1:0x6c787e,top,bottom);
+        }
     }
     for (size_t i=0; i<scene.road_count; ++i) {
         line(raster, scene.roads[i], 8, 0x10191e, top, bottom);
@@ -105,7 +119,10 @@ void paint(MapRaster &raster, MapScene &scene, int top, int bottom) {
         for (size_t i=0; i<scene.route_count; ++i)
             line(raster, scene.route[i], pass ? 7 : 12, pass ? 0xb66dff : 0x2a1440, top, bottom);
     for(size_t i=0;i<scene.highlight_count;i++)line(raster,scene.highlights[i],3,0xe3cfff,top,bottom);
-    if(scene.show_position)player(raster, scene.image.header.w/2, scene.player_y);
+    if(scene.show_position){
+        if(scene.position_style)position_dot(raster,scene.image.header.w/2,scene.player_y,scene.position_style);
+        else player(raster, scene.image.header.w/2, scene.player_y);
+    }
     if(scene.compass) {
         static const auto ticks=[] {
             std::array<Segment,72> result{};
@@ -256,7 +273,7 @@ lv_obj_t *create_route_map(lv_obj_t *parent, int width, int height) {
 }
 
 bool render_route_map(lv_obj_t *view, const MapCamera &camera, const MapGeometry &geometry) {
-    if (!view || geometry.route_count > 64 || geometry.road_count > 64 ||geometry.feature_count>384||
+    if (!view || geometry.route_count > 64 || geometry.road_count > 64 ||geometry.feature_count>384||geometry.position_style>2||
         (geometry.feature_count&&!geometry.features)||
         (geometry.route_count && !geometry.route) || (geometry.road_count && !geometry.roads)) return false;
     for(size_t i=0;i<geometry.feature_count;i++) {
@@ -269,6 +286,7 @@ bool render_route_map(lv_obj_t *view, const MapCamera &camera, const MapGeometry
     if (!projection.valid()) return false;
     scene->road_count = scene->route_count = 0;
     scene->show_position=geometry.show_position;
+    scene->position_style=geometry.position_style;
     scene->player_y=scene->image.header.h*camera.anchor_y;
     scene->highlight_count=0;
     scene->feature_count=0;scene->compass=geometry.compass;
@@ -278,14 +296,19 @@ bool render_route_map(lv_obj_t *view, const MapCamera &camera, const MapGeometry
         if(f.kind<3) {
             if(!projection.segment(f.a,f.b,a,b))continue;
             new(&next.geometry.line) Segment(a,b);
+            next.top=std::min(a.y,b.y)-10;next.bottom=std::max(a.y,b.y)+10;
         } else {
             next.geometry.points[0]=projection.project(f.a);next.geometry.points[1]=projection.project(f.b);next.geometry.points[2]=projection.project(f.c);
             float left=next.geometry.points[0].x,right=left,top=next.geometry.points[0].y,bottom=top;
             for(const auto &p:next.geometry.points){left=std::min(left,p.x);right=std::max(right,p.x);top=std::min(top,p.y);bottom=std::max(bottom,p.y);}
             if(right<0||left>scene->image.header.w||bottom<0||top>scene->image.header.h)continue;
+            next.top=top;next.bottom=bottom;
         }
         scene->features[scene->feature_count++]=next;
     }
+    size_t ordered=0;
+    for(unsigned kind:{4u,5u,3u,0u,1u,2u})for(size_t i=0;i<scene->feature_count;i++)
+        if(scene->features[i].kind==kind)scene->paint_order[ordered++]=static_cast<uint16_t>(i);
     for (size_t i=0; i<geometry.road_count; ++i) {
         if (projection.segment(geometry.roads[i].a, geometry.roads[i].b, a, b))
             scene->roads[scene->road_count++] = Segment(a, b);

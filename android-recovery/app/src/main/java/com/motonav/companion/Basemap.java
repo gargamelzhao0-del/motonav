@@ -18,7 +18,21 @@ public final class Basemap {
         public Scene(int revision,List<Primitive> items){this(revision,1,true,items);}
         public Scene { if(revision<=0||update<=0||items.size()>MAX_ITEMS)throw new IllegalArgumentException("map scene");items=List.copyOf(items); }
     }
-    public record Focus(DeviceRoute.Frame route,DeviceRoute.Coordinate origin,int reason,int totalMeters,int totalSeconds) { }
+    /** A measured map position is independent of turn-by-turn guidance readiness. */
+    public record Position(int quality,int accuracyMeters,long measuredMs) {
+        public Position {
+            if(quality<0||quality>2||quality==0&&(accuracyMeters!=0||measuredMs!=0)
+                    ||quality>0&&(accuracyMeters<1||accuracyMeters>10000||measuredMs<=0)
+                    ||quality==2&&accuracyMeters>100)throw new IllegalArgumentException("map position");
+        }
+        public static Position unknown(){return new Position(0,0,0);}
+        public boolean fresh(long now){return quality>0&&now>=measuredMs&&now-measuredMs<15000;}
+    }
+    public record Focus(DeviceRoute.Frame route,DeviceRoute.Coordinate origin,int reason,int totalMeters,int totalSeconds,Position position) {
+        public Focus(DeviceRoute.Frame route,DeviceRoute.Coordinate origin,int reason,int totalMeters,int totalSeconds){
+            this(route,origin,reason,totalMeters,totalSeconds,Position.unknown());
+        }
+    }
     public record Tile(int zoom,int x,int y) {
         public Tile { if(zoom<0||zoom>14||x<0||y<0||x>=(1<<zoom)||y>=(1<<zoom))throw new IllegalArgumentException("tile"); }
         public String key(){return zoom+"/"+x+"/"+y;}

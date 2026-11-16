@@ -327,6 +327,17 @@ public class JourneyControllerTests {
         }
     }
     public static void main(String[] args) throws Exception {
+        try(Fixture f=new Fixture()){
+            var engine=f.navigate();engine.listener.onNaviInfoUpdate(new NaviInfo());
+            engine.listener.onGpsSignalWeak(true);f.host.fixAt(30.0002);f.host.location.setAccuracy(550);
+            var focus=f.controller.deviceFocus();
+            check(focus!=null&&focus.position().quality()==1&&focus.position().accuracyMeters()==550,"weak GPS retains measured approximate map position");
+            check(f.controller.frame().mode()==NavigationFrame.WAITING&&f.controller.deviceMap()==null,"display position cannot become turn guidance or navigation speed");
+            Handler.advance(16000);focus=f.controller.deviceFocus();
+            check(focus!=null&&focus.position().quality()==0,"old map measurement loses marker instead of becoming a current position");
+            f.host.fixAt(30.0003);engine.listener.onGpsSignalWeak(false);
+            focus=f.controller.deviceFocus();check(focus.position().quality()==2,"fresh precise position can appear before new instructions");
+        }
         drivingAndRerouting(); locationAndStartup(); failureAndDeadlines(); recoveredOriginAndVoice(); separateGuidanceStreams();presentationAndSearch();
         System.out.println("JourneyController: " + checks + " checks passed (SDK/UI doubles; not device validation)");
     }

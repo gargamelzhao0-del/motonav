@@ -43,7 +43,7 @@ void frame_event(lv_event_t *event) {
     }
 }
 void profile(bool reset) {
-    if(reset)for(auto *unit=LV_GLOBAL_DEFAULT()->draw_info.unit_head;unit;unit=unit->next){
+    if(reset&&MOTONAV_PROFILE_DRAW_TASKS)for(auto *unit=LV_GLOBAL_DEFAULT()->draw_info.unit_head;unit;unit=unit->next){
         unsigned id=!std::strcmp(unit->name,"MotoNav map")?240:!std::strcmp(unit->name,"MotoNav labels")?241:!std::strcmp(unit->name,"MotoNav text masks")?242:0;
         if(id){auto &entry=custom[id-240];if(!entry.unit){entry.unit=unit;entry.dispatch=unit->dispatch_cb;entry.id=id;unit->dispatch_cb=profiled_custom;}entry.calls=entry.us=0;}
     }
@@ -58,6 +58,7 @@ void profile(bool reset) {
     ESP_ERROR_CHECK(drivers::display_read_metrics(&data, reset));
     if (reset) { frames = {}; for (unsigned i=0;i<32;++i) task_us[i]=task_calls[i]=0; return; }
     auto n = frames.frames ? frames.frames : 1;
+    ESP_LOGI("profile_config", "draw_tasks=%d",MOTONAV_PROFILE_DRAW_TASKS);
     ESP_LOGI("driver_profile", "frames=%llu render_us=%llu flush_us=%llu lv_wait_us=%llu bytes=%llu transfers=%llu windows=%llu command_us=%llu submit_us=%llu dma_us=%llu wait_us=%llu",
         frames.frames, frames.render_us/n, frames.flush_us/n, frames.wait_us/n,
         data.bytes/n, data.transfers, data.window_commands, data.command_us/n,
@@ -70,7 +71,7 @@ void profile(bool reset) {
 }
 BenchmarkServices driver_benchmark_services(lv_display_t *display) {
     static_assert(LV_USE_OS == LV_OS_NONE, "Task timing requires synchronous LVGL rendering");
-    for (auto *unit=LV_GLOBAL_DEFAULT()->draw_info.unit_head; unit; unit=unit->next) {
+    if(MOTONAV_PROFILE_DRAW_TASKS)for (auto *unit=LV_GLOBAL_DEFAULT()->draw_info.unit_head; unit; unit=unit->next) {
         if (!std::strcmp(unit->name, "SW")) { software_dispatch=unit->dispatch_cb; unit->dispatch_cb=profiled_dispatch; break; }
     }
     ESP_ERROR_CHECK(drivers::display_enable_fps(display, true));

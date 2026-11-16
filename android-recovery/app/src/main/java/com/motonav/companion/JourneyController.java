@@ -43,6 +43,7 @@ final class JourneyController {
     interface Host {
         boolean active(); boolean navigationAllowed(); boolean voiceEnabled(); String key(); Location fix(); long fixNanos();
         boolean beginNavigation(Runnable start); void finished(); void refreshLocation();
+        default Location displayFix(){return fix();}
     }
     interface Ui {
         void report(String message); void overview(); void icon(android.graphics.Bitmap bitmap);
@@ -150,11 +151,18 @@ final class JourneyController {
     }
     Basemap.Focus deviceFocus() {
         if(state.phase()==JourneyState.Phase.IDLE || state.phase()==JourneyState.Phase.LOCATING)return null;
-        deviceMap();
+        Location fix=guidanceFix();boolean precise=fix!=null;
+        if(fix==null&&host.navigationAllowed())fix=host.displayFix();
+        Basemap.Position position=Basemap.Position.unknown();
+        if(fix!=null&&MapStartupPolicy.validFix(fix.getLatitude(),fix.getLongitude(),fix.getAccuracy(),fix.isFromMockProvider())
+                &&fix.getAccuracy()<=10000&&MapStartupPolicy.fresh(SystemClock.elapsedRealtimeNanos(),fix.getElapsedRealtimeNanos())){
+            var actual=deviceRoute.frame(fix.getLatitude(),fix.getLongitude(),precise&&fix.hasBearing()?fix.getBearing():Float.NaN);
+            if(actual!=null)position=new Basemap.Position(precise?2:1,(int)Math.ceil(fix.getAccuracy()),fix.getElapsedRealtimeNanos()/1_000_000L);
+        }
         var local=deviceRoute.localFrame();
         if(local==null)return null;
         int reason=state.rerouting()?7:gpsWeak?1:frame().mode()==NavigationFrame.LIVE?0:diagnosticObservation(true).reason();
-        return new Basemap.Focus(local,deviceRoute.origin(),reason,plannedMeters,plannedSeconds);
+        return new Basemap.Focus(local,deviceRoute.origin(),reason,plannedMeters,plannedSeconds,position);
     }
     DeviceRoute.Preview devicePreview() {
         if(state.phase()==JourneyState.Phase.IDLE || state.phase()==JourneyState.Phase.LOCATING)return null;

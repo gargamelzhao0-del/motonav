@@ -165,6 +165,13 @@ public final class NavigationService extends Service implements JourneyControlle
         MapFixTracker.Fix<Location> fix = fixes.navigation(SystemClock.elapsedRealtimeNanos(), precisePermission(), locationEnabled());
         return fix == null ? null : new Location(fix.point());
     }
+    @Override public Location displayFix() {
+        if(!navigationAllowed())return null;
+        if(!navigating)return fix();
+        var observed=fixes.latest(SystemClock.elapsedRealtimeNanos());
+        if(observed==null)return null;
+        Location result=new Location(observed.point());result.setElapsedRealtimeNanos(observed.timeNanos());return result;
+    }
     @Override public long fixNanos() {
         if (!navigating) return view == null ? 0 : view.fixNanos();
         MapFixTracker.Fix<Location> fix = fixes.navigation(SystemClock.elapsedRealtimeNanos(), precisePermission(), locationEnabled());

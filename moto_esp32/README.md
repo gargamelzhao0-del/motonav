@@ -1,6 +1,8 @@
 # MotoNav 1.75C 导航接收固件
 
-固件版本 **0.3.9**，配套 Android 0.7.18 显示真实局部地图、转向、距离、预计时间及车速，并兼容旧 NAV3/NAV4 App。设备为 Waveshare ESP32-S3-Touch-AMOLED-1.75C。本地开发以 ESP-IDF 5.5.4、官方 BSP 3.0.0、LVGL 9.5.0 为基线，依赖版本由 `dependencies.lock` 记录。局部导航界面支持常用简体中文。
+固件版本 **0.3.10**，配套 Android 0.7.19 显示真实局部地图、定位点、转向、距离、预计时间及车速，并兼容旧 NAV3/NAV4 App。设备为 Waveshare ESP32-S3-Touch-AMOLED-1.75C。本地开发以 ESP-IDF 5.5.4、官方 BSP 3.0.0、LVGL 9.5.0 为基线，依赖版本由 `dependencies.lock` 记录。局部导航界面支持常用简体中文。
+
+0.3.10 通过 NAV4S4 将实际定位点与转向指引解耦：等待指引时，大致位置显示黄色点及精度，精确位置显示蓝色点。来源过期后移除定位点；不会把规划起点或测试运动当作当前位置。地图图元按绘制顺序预排，并跳过当前条带之外的图元。实际性能与验证范围见 [0.3.10 记录](../protocol/map-position-0.3.10-validation.md)。
 
 0.3.9 按 `sim/index.html` 重做透视、字体、转向卡片、地图渐变和路线亮点；NAV4S3 增加真实道路名称与到达时刻。限速没有可信来源时显示 `--`。使用 OFL 授权字体；正式构建不下载字体，不包含测试数据。主任务栈需 `CONFIG_ESP_MAIN_TASK_STACK_SIZE=6144`，旧 `sdkconfig` 也需同步。详细验证范围见 [0.3.9 记录](../protocol/simulator-style-0.3.9-validation.md)。
 

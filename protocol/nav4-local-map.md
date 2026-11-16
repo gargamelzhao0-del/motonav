@@ -124,3 +124,34 @@ assets. The navigation view uses the simulator's 700-pixel perspective distance,
 speed-dependent scale/tilt, lower vehicle anchor, condensed speed numerals and
 bounded route highlights. Scanline shading uses ordered RGB565 dithering and
 compile-time ring geometry, without a full-frame canvas or per-frame allocation.
+
+## NAV4S4: measured position independent of guidance (0.7.19 / 0.3.10)
+
+HELLO type 13 (17 bytes) receives `A,1,NAV4S4`. It includes S3 capabilities;
+rejection falls back to types 11, 8, 5, 3 and 1. The GATT table is unchanged.
+
+FOCUS2 type 12 retains FOCUS type 6 fields at offsets 13 through 32. It adds
+quality u8 at 33 (0 unavailable, 1 approximate, 2 precise), accuracy u16 in
+metres at 34, and original measurement age u16 in milliseconds at 36. Route
+points start at 38; CRC is last. Length is `42 + 4 * count` (maximum 298).
+Unknown quality requires zero accuracy and age. Other qualities require
+accuracy 1–10000 and age below 15000; precise quality also requires accuracy
+at most 100. The point is the existing x/y in this same atomic coordinate frame.
+
+The phone selects a fresh measured fix separately from instruction readiness.
+Its map observation may be approximate even when GPS guidance is unavailable.
+The default route focus at the planned origin has quality zero. No location is
+invented or snapped to a route to mask measurement uncertainty.
+
+The sender reserves the same three-second delivery budget as NAV, replacing
+an observation that would expire in transit with unavailable quality. It sends
+bounded position updates between priority NAV/STOP frames; identical points
+cannot continuously consume the map-transfer queue. The receiver validates
+the entire frame before publishing it and expires position against the original
+measurement age. Duplicate ACKs, focus frames and map chunks do not refresh
+navigation liveness or permit turn guidance/speed. Marker display additionally
+requires a live authenticated link; STOP, arrival and disconnect clear it.
+
+WAIT with an actual position shows a yellow approximate or blue precise dot
+and an accuracy label. Valid live guidance retains the white directional
+vehicle marker. Old FOCUS frames have no measured-position semantics.

@@ -19,6 +19,7 @@ uint32_t last_title_color = 0;
 lv_obj_t *map_view=nullptr;
 bool map_layout=false;
 bool map_live=false;
+int map_marker=-1;
 uint32_t map_revision=0,transition_at=0;
 MapCamera camera{},from_camera{},target_camera{};
 bool map_failed=false;
@@ -50,7 +51,7 @@ void route_map(const ScreenSnapshot &state) {
         mode!=ScreenMode::Stopped && mode!=ScreenMode::Arrived && state.route.count>=2;
     if(!visible) {
         if(map_view) { lv_obj_delete(map_view); map_view=nullptr; }
-        map_revision=0;basemap={}; map_failed=false; map_live=false; layout(false); return;
+        map_revision=0;basemap={}; map_failed=false; map_live=false;map_marker=-1; layout(false); return;
     }
     if(!map_view && !map_failed) {
         map_view=create_route_map(lv_obj_get_parent(view.top),466,466);
@@ -61,6 +62,8 @@ void route_map(const ScreenSnapshot &state) {
     layout(true);
     const auto &r=state.route;
     const bool live=mode==ScreenMode::Live && !r.overview;
+    const int marker=live?3:r.position_quality;
+    const bool marker_changed=map_marker!=marker;map_marker=marker;
     const bool changed_mode=live!=map_live;
     map_live=live;
     bool base_changed=false;
@@ -94,7 +97,7 @@ void route_map(const ScreenSnapshot &state) {
         return;
     }
     float heading=r.heading<0?0:static_cast<float>(r.heading)*0.001745329252f;
-    bool changed=base_changed;
+    bool changed=base_changed||marker_changed;
     const float speed=live?std::max(0,state.guidance.speed_kmh):0;
     // Waiting preview uses a fixed framing preset, never a simulated speed/fix.
     const float zoom=live?0.85f+std::clamp((speed-12)/68,0.0f,1.0f)*1.6f:1.13f;
@@ -121,7 +124,7 @@ void route_map(const ScreenSnapshot &state) {
     if(changed) {
         MapPoint points[64];
         for(unsigned i=0;i<r.count;i++)points[i]={r.points[i].x,r.points[i].y};
-        if(!render_route_map(map_view,camera,{points,r.count,nullptr,0,live,features,basemap.count,r.local_view})) {
+        if(!render_route_map(map_view,camera,{points,r.count,nullptr,0,marker!=0,features,basemap.count,r.local_view,static_cast<uint8_t>(live?0:r.position_quality)})) {
             lv_obj_delete(map_view); map_view=nullptr; map_failed=true; layout(false);
         }
     }

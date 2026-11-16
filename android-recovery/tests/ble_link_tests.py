@@ -227,20 +227,23 @@ public class BleLinkTests implements BleLink.Listener {
     static void previewCompatibility() throws Exception {
         var t=new BleLinkTests();var g=t.start(true);t.discover(g);
         g.callback.onDescriptorWrite(g,g.descriptor,0);Handler.flush();
-        t.check(g.lastWrite.value[4]==11,"Negotiate HUD capability explicitly");
+        t.check(g.lastWrite.value[4]==13,"Negotiate independent position capability explicitly");
         g.callback.onCharacteristicChanged(g,t.tx,"E,NAV4\n".getBytes());Handler.flush();
         t.check(g.writes==1&&!g.closed,"Legacy rejection waits for outstanding ATT completion");
-        writeAck(g,0);t.check(g.writes==2&&g.lastWrite.value[4]==8,"Fallback probes progressive map");
+        writeAck(g,0);t.check(g.writes==2&&g.lastWrite.value[4]==11,"Fallback probes HUD metadata");
+        g.callback.onCharacteristicChanged(g,t.tx,"E,NAV4\n".getBytes());Handler.flush();writeAck(g,0);
+        t.check(g.lastWrite.value[4]==8,"Fallback probes progressive map");
         g.callback.onCharacteristicChanged(g,t.tx,"E,NAV4\n".getBytes());Handler.flush();writeAck(g,0);
         t.check(g.lastWrite.value[4]==5,"Fallback probes static map");
         g.callback.onCharacteristicChanged(g,t.tx,"E,NAV4\n".getBytes());Handler.flush();writeAck(g,0);
         t.check(g.lastWrite.value[4]==3,"Fallback probes route preview");
         g.callback.onCharacteristicChanged(g,t.tx,"E,NAV4\n".getBytes());Handler.flush();writeAck(g,0);
-        t.check(g.writes==5&&g.lastWrite.value[4]==1,"Old firmware fallback uses normal HELLO");
+        t.check(g.writes==6&&g.lastWrite.value[4]==1,"Old firmware fallback uses normal HELLO");
         writeAck(g,0);g.callback.onCharacteristicChanged(g,t.tx,"A,1,NAV4\n".getBytes());Handler.flush();
         t.check(t.link.ready()&&!t.link.routePreview(),"Older firmware remains usable");t.link.disconnect();
         t=new BleLinkTests();g=t.start(true);t.discover(g);
         g.callback.onDescriptorWrite(g,g.descriptor,0);Handler.flush();
+        g.callback.onCharacteristicChanged(g,t.tx,"E,NAV4\n".getBytes());Handler.flush();writeAck(g,0);
         g.callback.onCharacteristicChanged(g,t.tx,"E,NAV4\n".getBytes());Handler.flush();writeAck(g,0);
         g.callback.onCharacteristicChanged(g,t.tx,"E,NAV4\n".getBytes());Handler.flush();writeAck(g,0);
         g.callback.onCharacteristicChanged(g,t.tx,"E,NAV4\n".getBytes());Handler.flush();writeAck(g,0);
@@ -268,6 +271,7 @@ public class BleLinkTests implements BleLink.Listener {
         var t=new BleLinkTests();Handler.clear();Diagnostics.session=0;t.link.configureNavigation(123);t.link.connect(t.device);
         var g=t.device.last;g.mtuAccepted=true;t.configure(g,true);t.discover(g);
         g.callback.onDescriptorWrite(g,g.descriptor,0);Handler.flush();writeAck(g,0);
+        g.callback.onCharacteristicChanged(g,t.tx,"E,NAV4\n".getBytes());Handler.flush();writeAck(g,0);
         g.callback.onCharacteristicChanged(g,t.tx,"E,NAV4\n".getBytes());Handler.flush();writeAck(g,0);
         g.callback.onCharacteristicChanged(g,t.tx,"A,1,NAV4S2\n".getBytes());Handler.flush();
         t.check(t.link.basemaps()&&t.link.mapUpdates()&&!t.link.routePreview(),"Local map negotiated independently of legacy overview");
@@ -308,6 +312,7 @@ public class BleLinkTests implements BleLink.Listener {
         var t=new BleLinkTests();Handler.clear();Diagnostics.session=0;t.link.configureNavigation(123);t.link.connect(t.device);
         var g=t.device.last;g.mtuAccepted=true;t.configure(g,true);t.discover(g);
         g.callback.onDescriptorWrite(g,g.descriptor,0);Handler.flush();writeAck(g,0);
+        g.callback.onCharacteristicChanged(g,t.tx,"E,NAV4\n".getBytes());Handler.flush();writeAck(g,0);
         g.callback.onCharacteristicChanged(g,t.tx,"A,1,NAV4S3\n".getBytes());Handler.flush();
         var points=List.of(new DeviceRoute.Point(0,0),new DeviceRoute.Point(0,400));
         var route=new DeviceRoute.Frame(1,points,0,0,0);
@@ -329,7 +334,25 @@ public class BleLinkTests implements BleLink.Listener {
         android.os.SystemClock.now+=2001;t.check(!t.link.sendDetailsIfNeeded(null),"Slow delivery discards stale HUD");
         t.link.disconnect();
     }
-    public static void main(String[] args) throws Exception {details();subscriptionAndAck();errorsAndLateCallbacks();serviceChange();rediscovery();diagnosticsPriority();diagnosticsLifecycle();previewCompatibility();localMap();System.out.println("PASS: "+checks+" real BleLink callback checks (boundary doubles; no radio)");}
+    static void positions() throws Exception {
+        var t=new BleLinkTests();Handler.clear();Diagnostics.session=0;t.link.configureNavigation(123);t.link.connect(t.device);
+        var g=t.device.last;g.mtuAccepted=true;t.configure(g,true);t.discover(g);
+        g.callback.onDescriptorWrite(g,g.descriptor,0);Handler.flush();writeAck(g,0);
+        g.callback.onCharacteristicChanged(g,t.tx,"A,1,NAV4S4\n".getBytes());Handler.flush();
+        var route=new DeviceRoute.Frame(1,List.of(new DeviceRoute.Point(0,0),new DeviceRoute.Point(0,400)),12,34,-1);
+        var focus=new Basemap.Focus(route,new DeviceRoute.Coordinate(30,120),1,5000,600,new Basemap.Position(1,550,android.os.SystemClock.elapsedRealtime()));
+        t.check(t.link.sendFocusIfNeeded(focus,null)&&g.lastWrite.value[4]==12&&g.lastWrite.value.length==50,"Negotiated measured position reaches radio while waiting");
+        writeAck(g,0);g.callback.onCharacteristicChanged(g,t.tx,"A,2,OK\n".getBytes());Handler.flush();
+        t.check(!t.link.sendFocusIfNeeded(focus,null),"Same position cannot starve map chunks in recursive ACK callback");
+        android.os.SystemClock.now+=1000;
+        t.check(t.link.sendFocusIfNeeded(focus,null),"Position heartbeat retains independent measurement age");
+        writeAck(g,0);g.callback.onCharacteristicChanged(g,t.tx,"A,3,OK\n".getBytes());Handler.flush();
+        t.check(!t.link.lastSentLive(),"Position ACK does not invent live turn guidance");
+        android.os.SystemClock.now+=250;
+        t.check(t.link.sendFocusIfNeeded(new Basemap.Focus(route,focus.origin(),1,5000,600),null)&&g.lastWrite.value[33]==0,"Lost observation clears marker without changing route revision");
+        writeAck(g,0);g.callback.onCharacteristicChanged(g,t.tx,"A,4,OK\n".getBytes());Handler.flush();t.link.disconnect();
+    }
+    public static void main(String[] args) throws Exception {positions();details();subscriptionAndAck();errorsAndLateCallbacks();serviceChange();rediscovery();diagnosticsPriority();diagnosticsLifecycle();previewCompatibility();localMap();System.out.println("PASS: "+checks+" real BleLink callback checks (boundary doubles; no radio)");}
 }
 '''
 

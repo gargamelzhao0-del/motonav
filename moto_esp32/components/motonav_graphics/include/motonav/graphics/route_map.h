@@ -13,6 +13,7 @@ struct MapGeometry {
     const MapFeature *features=nullptr;
     size_t feature_count=0;
     bool compass=false;
+    uint8_t position_style=0; // 0 heading arrow, 1 approximate dot, 2 precise dot.
 };
 // All functions below require the LVGL thread or the caller's display lock.
 // Image owns a bounded scene; fallback decoding lazily allocates a strip buffer.

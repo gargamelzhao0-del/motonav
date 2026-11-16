@@ -277,7 +277,20 @@ int main(int argc, char **argv) {
             if(snapshot.basemap_count>192&&snapshot.guidance.mode==motonav::Waiting&&!saw_live){save(display,directory/"real-map-waiting.ppm");require_label("等待定位");saw_wait=true;}
             if(snapshot.guidance.mode==motonav::Live){save(display,directory/"real-map-live.ppm");require_label("36");require_label("120");require_label("m");saw_live=true;}
             if(snapshot.details.revision){require_label("测试道路");require_label("11:26");}
-            if(saw_live&&snapshot.guidance.mode==motonav::Waiting){save(display,directory/"real-map-gps-lost.ppm");require_label("等待定位");if(basemap.count<300)return 1;saw_lost=true;}
+            if(saw_live&&snapshot.guidance.mode==motonav::Waiting){save(display,directory/"real-map-gps-lost.ppm");require_label("等待定位");if(basemap.count<300)return 1;
+        save(display,directory/"position-unavailable.ppm");auto without_position=pixels;
+        snapshot.route.position_quality=1;snapshot.route.position_accuracy_m=550;
+        save(display,directory/"position-approximate.ppm");
+        require_label("等待指引");require_label("大致位置 · 精度约 550 m");require_label("--");
+        unsigned marker_changes=0;
+        for(int y=288;y<=324;y++)for(int x=215;x<=251;x++)marker_changes+=pixels[y*466+x]!=without_position[y*466+x];
+        if(marker_changes<30){std::cerr<<"Measured WAIT position has no visible marker\n";return 1;}
+        snapshot.route.position_quality=2;snapshot.route.position_accuracy_m=8;
+        save(display,directory/"position-precise.ppm");require_label("已定位 · 精度约 8 m");
+        snapshot.route.position_quality=0;snapshot.route.position_accuracy_m=0;
+        save(display,directory/"position-expired.ppm");require_label("等待定位");
+        if(pixels!=without_position){std::cerr<<"Unavailable position leaves a stale marker\n";return 1;}
+saw_lost=true;}
             if(snapshot.guidance.mode!=motonav::Live&&contains_label(lv_screen_active(),"测试道路"))return 1;
         }
         if(!saw_wait||!saw_live||!saw_lost)return 1;

@@ -65,3 +65,8 @@ java -m jdk.compiler/com.sun.tools.javac.Main -encoding UTF-8 -source 17 -target
 java -cp "$build" NavigationDetailsTests "$build/nav4-details.frames"
 g++ -std=c++17 -Wall -Wextra -Werror -I../moto_esp32/components/motonav_core/include ../moto_esp32/tests/host/navigation_details_test.cpp -o "$build/navigation-details-test"
 "$build/navigation-details-test" "$build/nav4-details.frames"
+
+java -m jdk.compiler/com.sun.tools.javac.Main -encoding UTF-8 -source 17 -target 17 -cp "$build" -d "$build" tests/MapPositionTests.java
+java -cp "$build" MapPositionTests "$build/nav4-position.frames"
+g++ -std=c++17 -Wall -Wextra -Werror -I../moto_esp32/components/motonav_core/include ../moto_esp32/tests/host/map_position_test.cpp -o "$build/map-position-test"
+"$build/map-position-test" "$build/nav4-position.frames"
