@@ -26,15 +26,25 @@ public:
     ProjectedPoint project(MapPoint p) const {
         float x = p.x - camera_.x, y = p.y - camera_.y;
         float forward=x*sine_+y*cosine_;
-        float depth=std::max(0.35f,1+forward*camera_.perspective/500);
-        return {width_ * 0.5f + (x * cosine_ - y * sine_) * camera_.scale/depth,
-                height_ * 0.7f - forward * camera_.scale/depth};
+        float depth=std::max(0.35f,1+forward*(camera_.perspective*0.002f));
+        const float scale=camera_.scale/depth;
+        return {width_ * 0.5f + (x * cosine_ - y * sine_) * scale,
+                height_ * 0.7f - forward * scale};
     }
     // Liang-Barsky clips BEFORE drawing. Far-off geometry never creates
     // oversized LVGL draw tasks; padding preserves thick strokes at an edge.
     bool segment(MapPoint start, MapPoint end, ProjectedPoint &a, ProjectedPoint &b) const {
         if (!valid_) return false;
         a = project(start); b = project(end);
+        // Most local streets lie wholly inside or outside the view. Avoid the
+        // software divisions in Liang-Barsky unless a segment crosses an edge.
+        auto region=[this](ProjectedPoint p) {
+            return (p.x < -8 ? 1u : p.x > width_+7 ? 2u : 0u) |
+                   (p.y < -8 ? 4u : p.y > height_+7 ? 8u : 0u);
+        };
+        unsigned ac=region(a),bc=region(b);
+        if(ac&bc)return false;
+        if(!(ac|bc))return true;
         float dx = b.x - a.x, dy = b.y - a.y, lo = 0, hi = 1;
         const float p[]{-dx, dx, -dy, dy};
         const float q[]{a.x + 8, width_ + 7 - a.x, a.y + 8, height_ + 7 - a.y};

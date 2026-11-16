@@ -10,13 +10,38 @@ public final class LocalMapBuilder {
     private final DeviceRoute.Coordinate origin;
     private final Basemap.Coordinates conversion;
     private final double longitudeScale;
-    private final PriorityQueue<Basemap.Primitive> lines=new PriorityQueue<>(Comparator.comparingDouble(LocalMapBuilder::distance).reversed()),
-            areas=new PriorityQueue<>(Comparator.comparingDouble(LocalMapBuilder::distance).reversed());
-    private static void keep(PriorityQueue<Basemap.Primitive> queue,Basemap.Primitive item) {
-        queue.add(item);if(queue.size()>96)queue.poll();
-    }
+    private record Group(List<Basemap.Primitive> items,double score,int cell) { }
+    private final PriorityQueue<Group> lines=new PriorityQueue<>(Comparator.comparingDouble(Group::score).reversed()),
+            areas=new PriorityQueue<>(Comparator.comparingDouble(Group::score).reversed());
+    private double focusX,focusY;
     public LocalMapBuilder(DeviceRoute.Coordinate origin,Basemap.Coordinates conversion) {
         this.origin=origin;this.conversion=conversion;longitudeScale=111319.49079327358*Math.cos(Math.toRadians(origin.latitude()));
+    }
+    public LocalMapBuilder(Basemap.Focus focus,Basemap.Coordinates conversion) {
+        this(focus.origin(),conversion);
+        double heading=Math.toRadians(Math.max(0,focus.route().heading())/10.0);
+        focusX=focus.route().x()+Math.sin(heading)*80;focusY=focus.route().y()+Math.cos(heading)*80;
+    }
+    private void keep(List<Basemap.Primitive> items,boolean road) {
+        if(items.isEmpty()||items.size()>96)return;
+        int left=2048,right=-2048,bottom=2048,top=-2048;
+        double score=Double.POSITIVE_INFINITY;
+        for(var item:items) {
+            for(var p:road?List.of(item.a(),item.b()):List.of(item.a(),item.b(),item.c())) {
+                left=Math.min(left,p.x());right=Math.max(right,p.x());bottom=Math.min(bottom,p.y());top=Math.max(top,p.y());
+            }
+            if(road)score=Math.min(score,distance(item,focusX,focusY));
+        }
+        if(!road) {
+            double dx=Math.max(Math.max(left-focusX,focusX-right),0),dy=Math.max(Math.max(bottom-focusY,focusY-top),0);
+            score=dx*dx+dy*dy;
+        }
+        if(score>420*420)return;
+        int kind=items.get(0).kind();if(road)score*=kind==2?.3:kind==1?.6:1;
+        int cellX=Math.max(-2,Math.min(2,(int)Math.floor(((left+right)*.5-focusX)/120)));
+        int cellY=Math.max(-2,Math.min(2,(int)Math.floor(((bottom+top)*.5-focusY)/120)));
+        var queue=road?lines:areas;queue.add(new Group(List.copyOf(items),score,(cellY+2)*5+cellX+2));
+        if(queue.size()>256)queue.poll();
     }
     public void add(Basemap.Tile tile,List<VectorTile.Feature> features) {
         for(var feature:features) {
@@ -32,44 +57,68 @@ public final class LocalMapBuilder {
                     List<DeviceRoute.Point> road=new ArrayList<>();for(var p:path)road.add(point(tile,feature.extent(),p));
                     road=DeviceRoute.simplify(road,2);
                     DeviceRoute.Point previous=road.get(0);
+                    List<Basemap.Primitive> group=new ArrayList<>();
                     for(int i=1;i<road.size();i++) {
                         var next=road.get(i);
                         var clipped=clip(previous,next);
-                        if(clipped!=null)keep(lines,new Basemap.Primitive(kind,clipped[0],clipped[1],new DeviceRoute.Point(0,0)));
+                        if(clipped!=null)group.add(new Basemap.Primitive(kind,clipped[0],clipped[1],new DeviceRoute.Point(0,0)));
                         previous=next;
                     }
-                } else if(path.size()<=128) {
+                    keep(group,true);
+                } else if(path.size()<=4096) {
                     List<DeviceRoute.Point> points=new ArrayList<>();
                     for(var p:path) {
                         var q=point(tile,feature.extent(),p);
                         if(points.isEmpty()||!points.get(points.size()-1).equals(q))points.add(q);
                     }
                     if(points.size()>1&&points.get(0).equals(points.get(points.size()-1)))points.remove(points.size()-1);
+                    if(points.size()>24) {
+                        points.add(points.get(0));
+                        List<DeviceRoute.Point> reduced=DeviceRoute.simplify(points,2);
+                        if(reduced.size()>65)reduced=DeviceRoute.simplify(points,4);
+                        if(reduced.size()>65)reduced=DeviceRoute.simplify(points,8);
+                        if(reduced.size()>65)continue;
+                        points=new ArrayList<>(reduced);points.remove(points.size()-1);
+                    }
                     // Only bounded polygons can enter the radio scene. Large
                     // water polygons are triangulated then clipped, not cropped to a rectangle.
-                    for(var triangle:triangulate(points))addClipped(kind,triangle);
+                    List<Basemap.Primitive> group=new ArrayList<>();
+                    for(var triangle:triangulate(points))addClipped(kind,triangle,group);
+                    keep(group,false);
                 }
             }
         }
     }
     public Basemap.Scene finish(int revision) {
-        // Roads and surfaces have separate budgets so dense buildings cannot
-        // evict the road network. Prefer geometry nearest the current local origin.
-        Comparator<Basemap.Primitive> order=Comparator.comparingDouble(LocalMapBuilder::distance);
+        return finish(revision,Basemap.MAX_ITEMS);
+    }
+    public Basemap.Scene finish(int revision,int limit) {
+        if(limit<2||limit>Basemap.MAX_ITEMS)throw new IllegalArgumentException("map budget");
+        // Retain whole objects, with coverage across cells before spending the
+        // remaining detail budget. Never cut a building or street in half to fit.
         List<Basemap.Primitive> selected=new ArrayList<>();
-        selected.addAll(lines);selected.addAll(areas);selected.sort(order);
+        select(lines,selected,limit/2);select(areas,selected,limit);
         return new Basemap.Scene(revision,selected);
     }
-    private static double distance(Basemap.Primitive p) {
+    private static void select(PriorityQueue<Group> source,List<Basemap.Primitive> output,int limit) {
+        List<Group> candidates=new ArrayList<>(source);candidates.sort(Comparator.comparingDouble(Group::score));
+        boolean[] cells=new boolean[25];java.util.Set<Group> chosen=new java.util.HashSet<>();
+        for(int pass=0;pass<2;pass++)for(var group:candidates) {
+            if(chosen.contains(group)||pass==0&&cells[group.cell()]||output.size()+group.items().size()>limit)continue;
+            output.addAll(group.items());chosen.add(group);cells[group.cell()]=true;
+        }
+    }
+    private static double distance(Basemap.Primitive p,double focusX,double focusY) {
         // Prefer nearby geometry within independent road and surface budgets.
         double x=(p.a().x()+p.b().x()+(p.kind()>=3?p.c().x():0))/(p.kind()>=3?3.0:2.0);
         double y=(p.a().y()+p.b().y()+(p.kind()>=3?p.c().y():0))/(p.kind()>=3?3.0:2.0);
         if(p.kind()<3) {
             double dx=p.b().x()-p.a().x(),dy=p.b().y()-p.a().y(),length=dx*dx+dy*dy;
-            double t=length==0?0:Math.max(0,Math.min(1,-(p.a().x()*dx+p.a().y()*dy)/length));
+            double t=length==0?0:Math.max(0,Math.min(1,-((p.a().x()-focusX)*dx+(p.a().y()-focusY)*dy)/length));
             x=p.a().x()+t*dx;y=p.a().y()+t*dy;
         }
-        return (x*x+y*y)*(p.kind()==2?.3:p.kind()==1?.6:1);
+        x-=focusX;y-=focusY;
+        return x*x+y*y;
     }
     private static int kind(VectorTile.Feature f) {
         return switch(f.layer()) {
@@ -122,7 +171,7 @@ public final class LocalMapBuilder {
         }
         if(p.size()==3&&cross(p.get(0),p.get(1),p.get(2))!=0)triangles.add(List.copyOf(p));return triangles;
     }
-    private void addClipped(int kind,List<DeviceRoute.Point> triangle) {
+    private void addClipped(int kind,List<DeviceRoute.Point> triangle,List<Basemap.Primitive> group) {
         List<DeviceRoute.Point> p=triangle;
         for(int side=0;side<4;side++) {
             List<DeviceRoute.Point> next=new ArrayList<>();
@@ -130,7 +179,7 @@ public final class LocalMapBuilder {
             var a=p.get(p.size()-1);boolean aIn=inside(a,side);
             for(var b:p){boolean bIn=inside(b,side);if(aIn!=bIn)next.add(intersection(a,b,side));if(bIn)next.add(b);a=b;aIn=bIn;}p=next;
         }
-        for(int i=1;i+1<p.size();i++)if(cross(p.get(0),p.get(i),p.get(i+1))!=0)keep(areas,new Basemap.Primitive(kind,p.get(0),p.get(i),p.get(i+1)));
+        for(int i=1;i+1<p.size();i++)if(cross(p.get(0),p.get(i),p.get(i+1))!=0)group.add(new Basemap.Primitive(kind,p.get(0),p.get(i),p.get(i+1)));
     }
     private static boolean inside(DeviceRoute.Point p,int side){return switch(side){case 0->p.x()>=-900;case 1->p.x()<=900;case 2->p.y()>=-900;default->p.y()<=900;};}
     private static DeviceRoute.Point intersection(DeviceRoute.Point a,DeviceRoute.Point b,int side) {

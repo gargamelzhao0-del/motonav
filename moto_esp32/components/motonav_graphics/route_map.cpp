@@ -32,7 +32,7 @@ struct MapScene {
             ProjectedPoint points[3];Segment line;
             Geometry():points{}{}
         } geometry;
-    } features[192]{};
+    } features[384]{};
     size_t feature_count=0;
     bool compass=false;
     size_t road_count = 0, route_count = 0;
@@ -80,10 +80,10 @@ void line(MapRaster &raster, const Segment &segment, int width, uint32_t color, 
 }
 void paint(MapRaster &raster, MapScene &scene, int top, int bottom) {
     const uint64_t begin = scene.clock_us ? scene.clock_us() : 0;
-    raster.clear(panel_color(0x242455));
+    raster.clear(panel_color(0x283033));
     for(unsigned kind: {4u,5u,3u})for(size_t i=0;i<scene.feature_count;i++) {
         const auto &f=scene.features[i];if(f.kind!=kind)continue;
-        raster.polygon(f.geometry.points,3,panel_color(kind==4?0x2455aa:kind==5?0x245500:0x555555));
+        raster.polygon(f.geometry.points,3,panel_color(kind==4?0x1e4560:kind==5?0x2a4430:0x313b3f));
     }
     for(unsigned kind=0;kind<3;kind++)for(size_t i=0;i<scene.feature_count;i++) {
         const auto &f=scene.features[i];if(f.kind!=kind)continue;
@@ -249,7 +249,7 @@ lv_obj_t *create_route_map(lv_obj_t *parent, int width, int height) {
 }
 
 bool render_route_map(lv_obj_t *view, const MapCamera &camera, const MapGeometry &geometry) {
-    if (!view || geometry.route_count > 64 || geometry.road_count > 64 ||geometry.feature_count>192||
+    if (!view || geometry.route_count > 64 || geometry.road_count > 64 ||geometry.feature_count>384||
         (geometry.feature_count&&!geometry.features)||
         (geometry.route_count && !geometry.route) || (geometry.road_count && !geometry.roads)) return false;
     for(size_t i=0;i<geometry.feature_count;i++) {
@@ -271,6 +271,9 @@ bool render_route_map(lv_obj_t *view, const MapCamera &camera, const MapGeometry
             new(&next.geometry.line) Segment(a,b);
         } else {
             next.geometry.points[0]=projection.project(f.a);next.geometry.points[1]=projection.project(f.b);next.geometry.points[2]=projection.project(f.c);
+            float left=next.geometry.points[0].x,right=left,top=next.geometry.points[0].y,bottom=top;
+            for(const auto &p:next.geometry.points){left=std::min(left,p.x);right=std::max(right,p.x);top=std::min(top,p.y);bottom=std::max(bottom,p.y);}
+            if(right<0||left>scene->image.header.w||bottom<0||top>scene->image.header.h)continue;
         }
         scene->features[scene->feature_count++]=next;
     }

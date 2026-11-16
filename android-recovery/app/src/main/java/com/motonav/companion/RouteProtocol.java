@@ -25,6 +25,7 @@ public final class RouteProtocol {
     public Command hello() { return finish(begin(17,1),true); }
     public Command helloWithPreview() { return finish(begin(17,3),true); }
     public Command helloWithBasemap() { return finish(begin(17,5),true); }
+    public Command helloWithMapUpdates() { return finish(begin(17,8),true); }
     public Command focus(Basemap.Focus focus) {
         var route=focus.route();int count=route.points().size();
         if(count<2||count>64||route.revision()<=0||focus.reason()<0||focus.reason()>7
@@ -41,10 +42,17 @@ public final class RouteProtocol {
         return finish(b,false);
     }
     public Command basemap(Basemap.Scene scene,int offset) {
+        return basemap(scene,offset,false);
+    }
+    public Command basemap(Basemap.Scene scene,int offset,boolean updates) {
         int total=scene.items().size();
+        if(!updates&&total>192)throw new IllegalArgumentException("legacy map budget");
         if(offset<0||offset>total||(offset==total&&total!=0))throw new IllegalArgumentException("map offset");
         int count=Math.min(19,total-offset);
-        ByteBuffer b=begin(26+14*count,7).putInt(scene.revision()).putShort((short)total).putShort((short)offset).put((byte)count);
+        ByteBuffer b=begin((updates?31:26)+14*count,updates?9:7).putInt(scene.revision());
+        if(updates)b.putInt(scene.update());
+        b.putShort((short)total).putShort((short)offset).put((byte)count);
+        if(updates)b.put((byte)(scene.complete()?1:0));
         for(int i=offset;i<offset+count;i++) {
             var p=scene.items().get(i);b.put((byte)p.kind()).put((byte)0);
             for(var q:java.util.List.of(p.a(),p.b(),p.c()))b.putShort((short)q.x()).putShort((short)q.y());

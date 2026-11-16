@@ -8,7 +8,7 @@ lv_obj_t *text(lv_obj_t *parent,int x,int y,int width,const lv_font_t *font,uint
     auto *label=lv_label_create(parent);lv_obj_set_pos(label,x,y);lv_obj_set_width(label,width);
     lv_obj_set_style_text_font(label,font,0);lv_obj_set_style_text_color(label,lv_color_hex(color),0);
     lv_obj_set_style_text_align(label,LV_TEXT_ALIGN_CENTER,0);lv_label_set_long_mode(label,LV_LABEL_LONG_DOT);
-    lv_obj_set_style_bg_color(label,lv_color_hex(0x002455),0);lv_obj_set_style_bg_opa(label,LV_OPA_COVER,0);
+    lv_obj_set_style_bg_color(label,lv_color_hex(0x182125),0);lv_obj_set_style_bg_opa(label,LV_OPA_COVER,0);
     lv_obj_set_style_radius(label,5,0);return label;
 }
 }
@@ -16,7 +16,7 @@ void create_navigation_hud(lv_obj_t *parent,NavigationHud &hud) {
     hud.root=lv_obj_create(parent);lv_obj_remove_style_all(hud.root);lv_obj_set_size(hud.root,466,466);
     lv_obj_remove_flag(hud.root,static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_SCROLLABLE|LV_OBJ_FLAG_CLICKABLE));
     auto *card=lv_obj_create(hud.root);lv_obj_remove_style_all(card);lv_obj_set_pos(card,112,44);lv_obj_set_size(card,242,70);
-    lv_obj_set_style_bg_color(card,lv_color_hex(0x002455),0);lv_obj_set_style_bg_opa(card,LV_OPA_COVER,0);lv_obj_set_style_radius(card,10,0);
+    lv_obj_set_style_bg_color(card,lv_color_hex(0x182125),0);lv_obj_set_style_bg_opa(card,LV_OPA_COVER,0);lv_obj_set_style_radius(card,10,0);
     hud.distance=text(hud.root,179,49,166,&lv_font_montserrat_28,0xf0f1ed);
     hud.maneuver=text(hud.root,179,84,166,&lv_font_montserrat_16,0xe1bc66);
     hud.arrow=lv_line_create(hud.root);lv_obj_set_pos(hud.arrow,119,50);
@@ -59,7 +59,7 @@ void update_navigation_hud(NavigationHud &hud,const ScreenSnapshot &state,float 
         else std::snprintf(value,sizeof(value),"%uh %um",minutes/60,minutes%60);
         set_label_text(hud.time,value);
     }
-    set_label_text(hud.status,state.basemap_revision!=state.route.revision?"LOADING\nMAP":!state.basemap_count?"NO MAP\nDETAIL":live?"LIVE\nNAV":"PLANNED\nTRIP");
+    set_label_text(hud.status,state.basemap_revision!=state.route.revision?"LOADING\nMAP":!state.basemap_count?"NO MAP\nDETAIL":!state.basemap_complete?"MORE\nDETAIL":live?"LIVE\nNAV":"MAP READY\nNO GPS");
     for(unsigned i=0;i<4;i++) {
         float angle=i*1.570796327f-heading;
         float radius=std::cos(angle)<-.95f?224:205;

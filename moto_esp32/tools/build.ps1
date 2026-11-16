@@ -9,7 +9,7 @@ param(
     [switch]$MapBench,
     [switch]$LegacyQspi,
     [switch]$HoldMap,
-    [ValidateSet('RGB332','RGB565')][string]$ColorMode = 'RGB332',
+    [ValidateSet('RGB332','RGB565')][string]$ColorMode = 'RGB565',
     [ValidateRange(10,3600)][int]$BenchSeconds = 43,
     [ValidateSet(16,24,32,40,48,56,64)][int]$DisplayRows = 64,
     [string]$BuildDirectory = 'build'

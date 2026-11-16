@@ -227,16 +227,19 @@ public class BleLinkTests implements BleLink.Listener {
     static void previewCompatibility() throws Exception {
         var t=new BleLinkTests();var g=t.start(true);t.discover(g);
         g.callback.onDescriptorWrite(g,g.descriptor,0);Handler.flush();
-        t.check(g.lastWrite.value[4]==5,"Negotiate local map explicitly");
+        t.check(g.lastWrite.value[4]==8,"Negotiate progressive map explicitly");
         g.callback.onCharacteristicChanged(g,t.tx,"E,NAV4\n".getBytes());Handler.flush();
         t.check(g.writes==1&&!g.closed,"Legacy rejection waits for outstanding ATT completion");
-        writeAck(g,0);t.check(g.writes==2&&g.lastWrite.value[4]==3,"Fallback probes route preview");
+        writeAck(g,0);t.check(g.writes==2&&g.lastWrite.value[4]==5,"Fallback probes static map");
         g.callback.onCharacteristicChanged(g,t.tx,"E,NAV4\n".getBytes());Handler.flush();writeAck(g,0);
-        t.check(g.writes==3&&g.lastWrite.value[4]==1,"Old firmware fallback uses normal HELLO");
+        t.check(g.lastWrite.value[4]==3,"Fallback probes route preview");
+        g.callback.onCharacteristicChanged(g,t.tx,"E,NAV4\n".getBytes());Handler.flush();writeAck(g,0);
+        t.check(g.writes==4&&g.lastWrite.value[4]==1,"Old firmware fallback uses normal HELLO");
         writeAck(g,0);g.callback.onCharacteristicChanged(g,t.tx,"A,1,NAV4\n".getBytes());Handler.flush();
         t.check(t.link.ready()&&!t.link.routePreview(),"Older firmware remains usable");t.link.disconnect();
         t=new BleLinkTests();g=t.start(true);t.discover(g);
         g.callback.onDescriptorWrite(g,g.descriptor,0);Handler.flush();
+        g.callback.onCharacteristicChanged(g,t.tx,"E,NAV4\n".getBytes());Handler.flush();writeAck(g,0);
         g.callback.onCharacteristicChanged(g,t.tx,"E,NAV4\n".getBytes());Handler.flush();writeAck(g,0);
         g.callback.onCharacteristicChanged(g,t.tx,"A,1,NAV4P\n".getBytes());Handler.flush();
         t.check(!t.link.ready(),"Preview ACK cannot overlap HELLO ATT write");writeAck(g,0);
@@ -262,8 +265,8 @@ public class BleLinkTests implements BleLink.Listener {
         var t=new BleLinkTests();Handler.clear();Diagnostics.session=0;t.link.configureNavigation(123);t.link.connect(t.device);
         var g=t.device.last;g.mtuAccepted=true;t.configure(g,true);t.discover(g);
         g.callback.onDescriptorWrite(g,g.descriptor,0);Handler.flush();writeAck(g,0);
-        g.callback.onCharacteristicChanged(g,t.tx,"A,1,NAV4S\n".getBytes());Handler.flush();
-        t.check(t.link.basemaps()&&!t.link.routePreview(),"Local map negotiated independently of legacy overview");
+        g.callback.onCharacteristicChanged(g,t.tx,"A,1,NAV4S2\n".getBytes());Handler.flush();
+        t.check(t.link.basemaps()&&t.link.mapUpdates()&&!t.link.routePreview(),"Local map negotiated independently of legacy overview");
         var p=new DeviceRoute.Point(0,0);var q=new DeviceRoute.Point(0,500);
         var frame=new DeviceRoute.Frame(1,List.of(p,q),0,0,0);
         t.check(t.link.sendFocusIfNeeded(new Basemap.Focus(frame,new DeviceRoute.Coordinate(30,120),1,5000,600),null),"Local focus before trusted GPS");
@@ -272,7 +275,7 @@ public class BleLinkTests implements BleLink.Listener {
         var items=new ArrayList<Basemap.Primitive>();for(int i=0;i<23;i++)items.add(new Basemap.Primitive(0,p,q,p));
         t.link.offerBasemap(new Basemap.Scene(1,items));
         t.check(t.link.sendMapChunkIfNeeded(1,null)&&g.lastWrite.value.length==244,"Map chunk uses MTU budget");
-        writeAck(g,0);t.check(g.lastWrite.value.length==48,"Remaining bytes stay in the same application frame");
+        writeAck(g,0);t.check(g.lastWrite.value.length==53,"Remaining bytes stay in the same application frame");
         writeAck(g,0);g.callback.onCharacteristicChanged(g,t.tx,"A,3,OK\n".getBytes());Handler.flush();
         t.check(!t.link.busy(),"Chunk ACK yields to navigation scheduler");
         t.check(t.link.sendNavigation(NavigationFrame.status(1),null,null),"WAIT can preempt the next map chunk");
@@ -282,6 +285,19 @@ public class BleLinkTests implements BleLink.Listener {
         var ack=BleLink.class.getDeclaredField("lastAckSequence");ack.setAccessible(true);
         t.check(ack.getInt(t.link)==4,"Map ACK never counts as navigation delivery");
         t.link.offerBasemap(new Basemap.Scene(1,items));t.check(!t.link.sendMapChunkIfNeeded(1,null),"No repeated map upload");
+        t.link.offerBasemap(new Basemap.Scene(1,2,false,items));
+        t.check(t.link.sendMapChunkIfNeeded(1,null),"Partial update starts");
+        t.link.offerBasemap(new Basemap.Scene(1,4,true,items));
+        t.link.offerBasemap(new Basemap.Scene(1,3,false,items));
+        writeAck(g,0);writeAck(g,0);g.callback.onCharacteristicChanged(g,t.tx,"A,6,OK\n".getBytes());Handler.flush();
+        t.check(t.link.sendMapChunkIfNeeded(1,null)&&g.lastWrite.value[17]==2&&g.lastWrite.value[23]==19,"Finish first useful scene before replacing it");
+        writeAck(g,0);g.callback.onCharacteristicChanged(g,t.tx,"A,7,OK\n".getBytes());Handler.flush();
+        t.check(t.link.sendMapChunkIfNeeded(1,null)&&g.lastWrite.value[17]==4&&g.lastWrite.value[23]==0,"Only newest queued scene begins at offset zero");
+        writeAck(g,0);writeAck(g,0);g.callback.onCharacteristicChanged(g,t.tx,"A,8,OK\n".getBytes());Handler.flush();
+        t.check(t.link.sendMapChunkIfNeeded(1,null),"Complete newest scene");
+        writeAck(g,0);g.callback.onCharacteristicChanged(g,t.tx,"A,9,OK\n".getBytes());Handler.flush();
+        t.link.offerBasemap(new Basemap.Scene(1,3,false,items));
+        t.check(!t.link.sendMapChunkIfNeeded(1,null),"Late scene cannot roll back delivered generation");
         t.link.disconnect();t.check(!t.link.basemaps(),"Disconnect clears scene negotiation");
     }
     public static void main(String[] args) throws Exception {subscriptionAndAck();errorsAndLateCallbacks();serviceChange();rediscovery();diagnosticsPriority();diagnosticsLifecycle();previewCompatibility();localMap();System.out.println("PASS: "+checks+" real BleLink callback checks (boundary doubles; no radio)");}

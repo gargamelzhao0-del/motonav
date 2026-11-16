@@ -237,7 +237,7 @@ public final class NavigationService extends Service implements JourneyControlle
         NavigationFrame frame = journey.frame();
         Basemap.Focus focus=stopping?null:journey.deviceFocus();
         if(link.basemaps()&&focus!=null){
-            basemapLoader.request(focus);
+            basemapLoader.request(focus,link.mapUpdates());
             if(basemapScene!=null&&basemapScene.revision()==focus.route().revision())link.offerBasemap(basemapScene);
         }
         if (link.ready() && !link.busy()) {

@@ -7,8 +7,10 @@ namespace motonav {
 // buildings, water and parks are triangles, tessellated by the phone.
 struct MapPrimitive { uint8_t kind=0; RoutePoint a{},b{},c{}; };
 struct BasemapScene {
-    static constexpr size_t Capacity=192;
+    static constexpr size_t Capacity=384;
     uint32_t revision=0;
+    uint32_t generation=0;
+    bool complete=true;
     uint16_t count=0;
     MapPrimitive items[Capacity]{};
 };

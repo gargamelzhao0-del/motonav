@@ -40,6 +40,7 @@ public:
             result.route=route_receiver_.scene(now_ms);
             const auto &map=route_receiver_.basemap();
             result.basemap_revision=map.revision;result.basemap_count=map.count;
+            result.basemap_generation=map.generation;result.basemap_complete=map.complete;
         }
         return result;
     }

@@ -19,15 +19,16 @@ public:
         PreparedLine(ProjectedPoint a, ProjectedPoint b) : a_(a), b_(b) {
             if (!bounded(a) || !bounded(b)) return;
             const float dx = b.x - a.x, dy = b.y - a.y;
-            length_ = std::sqrt(dx*dx + dy*dy);
+            const float length=std::sqrt(dx*dx + dy*dy);
+            inverse_length_=length>0.01f?1.0f/length:0;
         }
         bool intersects_y(int top, int bottom, int padding) const {
-            return length_ >= 0 && std::max(a_.y, b_.y) + padding >= top &&
+            return inverse_length_ >= 0 && std::max(a_.y, b_.y) + padding >= top &&
                    std::min(a_.y, b_.y) - padding <= bottom;
         }
     private:
         ProjectedPoint a_{}, b_{};
-        float length_ = -1;
+        float inverse_length_ = -1;
     };
     MapRaster(uint16_t *pixels, size_t count, int width, int height, size_t stride, int origin_x=0, int origin_y=0)
         : pixels_(pixels), width_(width), height_(height), origin_x_(origin_x), origin_y_(origin_y), stride_(stride),
@@ -57,6 +58,7 @@ public:
         }
         int first = std::max(origin_y_, ceil_int(min_y - 0.5f));
         int last = std::min(origin_y_ + height_ - 1, floor_int(max_y - 0.5f));
+        if(first>last)return;
         struct Edge { ProjectedPoint a; float slope; int first, last; } edges[4]{};
         size_t edge_count = 0;
         for (size_t i=0; i<count; ++i) {
@@ -93,11 +95,12 @@ public:
         line(PreparedLine(a, b), width, color);
     }
     void line(const PreparedLine &segment, int width, uint16_t color) {
-        if (!valid_ || segment.length_ < 0 || width < 1 || width > 16) return;
+        if (!valid_ || segment.inverse_length_ < 0 || width < 1 || width > 16) return;
         const auto a = segment.a_, b = segment.b_;
-        float dx=b.x-a.x, dy=b.y-a.y, length=segment.length_, radius=width*0.5f;
-        if (length > 0.01f) {
-            float nx=-dy*radius/length, ny=dx*radius/length;
+        float dx=b.x-a.x, dy=b.y-a.y, radius=width*0.5f;
+        if (segment.inverse_length_ > 0) {
+            const float factor=radius*segment.inverse_length_;
+            float nx=-dy*factor, ny=dx*factor;
             ProjectedPoint corners[]{{a.x+nx,a.y+ny},{b.x+nx,b.y+ny},{b.x-nx,b.y-ny},{a.x-nx,a.y-ny}};
             polygon(corners,4,color);
         }

@@ -18,7 +18,8 @@ final class BasemapLoader implements AutoCloseable {
     private final Context context;
     private final Listener listener;
     private volatile int generation;
-    private int revision;
+    private int revision,update;
+    private int cameraX,cameraY,cameraHeading;
     private boolean busy;
     private volatile boolean closed;
     private long retryAt;
@@ -28,10 +29,16 @@ final class BasemapLoader implements AutoCloseable {
         store=new MapTileStore(new java.io.File(context.getFilesDir(),"visible-map-tiles").toPath(),MapTileStore.TEMPLATE,
                 "MotoNav/"+BuildConfig.VERSION_NAME+" (https://github.com/gargamelzhao0-del/motonav)");
     }
-    void request(Basemap.Focus focus) {
+    void request(Basemap.Focus focus,boolean progressive) {
         if(closed||focus==null)return;
         int requested=focus.route().revision();
-        if(requested!=revision){revision=requested;scene=null;retryAt=0;generation++;}
+        int heading=Math.max(0,focus.route().heading());
+        boolean moved=progressive&&(Math.hypot(focus.route().x()-cameraX,focus.route().y()-cameraY)>90
+                ||Math.abs(Math.IEEEremainder((heading-cameraHeading)/10.0,360))>45);
+        if(requested!=revision||moved){
+            revision=requested;cameraX=focus.route().x();cameraY=focus.route().y();cameraHeading=heading;
+            scene=null;retryAt=0;generation++;
+        }
         if(scene!=null)return;
         if(busy||SystemClock.elapsedRealtime()<retryAt)return;
         busy=true;int token=generation;
@@ -44,13 +51,21 @@ final class BasemapLoader implements AutoCloseable {
                     if(value==null)throw new IllegalArgumentException("coordinate conversion failed");
                     return new DeviceRoute.Coordinate(value.latitude,value.longitude);
                 };
-                var builder=new LocalMapBuilder(focus.origin(),conversion);
+                var builder=new LocalMapBuilder(focus,conversion);
                 var gps=Basemap.gpsOrigin(focus.origin(),conversion);
-                for(var tile:Basemap.visibleTiles(gps)) {
+                var tiles=Basemap.visibleTiles(gps);int loaded=0;
+                for(var tile:tiles) {
                     if(closed||token!=generation)throw new InterruptedException();
                     builder.add(tile,VectorTile.decode(store.get(tile)));
+                    loaded++;
+                    if(progressive&&loaded<tiles.size()) {
+                        var partial=builder.finish(requested,192);
+                        var next=new Basemap.Scene(requested,++update,false,partial.items());
+                        if(!next.items().isEmpty())main.post(()->{if(!closed&&token==generation)listener.loaded(next);});
+                    }
                 }
-                result=builder.finish(requested);
+                var complete=builder.finish(requested,progressive?Basemap.MAX_ITEMS:192);
+                result=new Basemap.Scene(requested,++update,true,complete.items());
             } catch(Exception | LinkageError ignored) { /* UI reports availability; never log coordinates. */ }
             Basemap.Scene completed=result;
             main.post(()->{

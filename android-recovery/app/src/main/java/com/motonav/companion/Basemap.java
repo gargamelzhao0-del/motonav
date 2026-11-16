@@ -5,7 +5,7 @@ import java.util.List;
 /** Provider-neutral, bounded local geometry. Coordinates share the route's metre origin. */
 public final class Basemap {
     private Basemap() { }
-    public static final int MAX_ITEMS=192;
+    public static final int MAX_ITEMS=384;
     public record Primitive(int kind,DeviceRoute.Point a,DeviceRoute.Point b,DeviceRoute.Point c) {
         public Primitive {
             if(kind<0||kind>5)throw new IllegalArgumentException("map kind");
@@ -14,8 +14,9 @@ public final class Basemap {
             if(kind<3 && (c.x()!=0||c.y()!=0))throw new IllegalArgumentException("line tail");
         }
     }
-    public record Scene(int revision,List<Primitive> items) {
-        public Scene { if(revision<=0||items.size()>MAX_ITEMS)throw new IllegalArgumentException("map scene");items=List.copyOf(items); }
+    public record Scene(int revision,int update,boolean complete,List<Primitive> items) {
+        public Scene(int revision,List<Primitive> items){this(revision,1,true,items);}
+        public Scene { if(revision<=0||update<=0||items.size()>MAX_ITEMS)throw new IllegalArgumentException("map scene");items=List.copyOf(items); }
     }
     public record Focus(DeviceRoute.Frame route,DeviceRoute.Coordinate origin,int reason,int totalMeters,int totalSeconds) { }
     public record Tile(int zoom,int x,int y) {
@@ -55,6 +56,9 @@ public final class Basemap {
         java.util.ArrayList<Tile> result=new java.util.ArrayList<>();
         for(int y=Math.max(0,top);y<=Math.min(n-1,bottom);y++)for(int x=left;x<=right;x++)result.add(new Tile(zoom,Math.floorMod(x,n),y));
         if(result.size()>9)throw new IllegalArgumentException("visible map bounds");
+        // The containing tile is visible first; outer tiles can refine it later.
+        double centerX=(origin.longitude()+180)/360*n,centerY=tileY(origin.latitude(),n)+.5;
+        result.sort(java.util.Comparator.comparingDouble(t->Math.pow(t.x()+.5-centerX,2)+Math.pow(t.y()+.5-centerY,2)));
         return List.copyOf(result);
     }
     private static int tileY(double latitude,int n) {

@@ -65,7 +65,7 @@ void route_map(const ScreenSnapshot &state) {
     map_live=live;
     bool base_changed=false;
     if(basemap.revision&&basemap.revision!=r.revision){basemap={};base_changed=true;}
-    if(state.basemap_revision==r.revision&&basemap.revision!=r.revision&&snapshot.read_map&&snapshot.read_map(snapshot.context,r.revision,basemap)) {
+    if(state.basemap_revision==r.revision&&(basemap.revision!=r.revision||basemap.generation!=state.basemap_generation)&&snapshot.read_map&&snapshot.read_map(snapshot.context,r.revision,basemap)) {
         for(unsigned i=0;i<basemap.count;i++) {const auto &p=basemap.items[i];features[i]={p.kind,{p.a.x,p.a.y},{p.b.x,p.b.y},{p.c.x,p.c.y}};}
         base_changed=true;
     }

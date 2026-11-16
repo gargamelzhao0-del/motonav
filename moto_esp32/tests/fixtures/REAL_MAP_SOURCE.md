@@ -12,3 +12,9 @@ https://www.openstreetmap.org/copyright and https://opendatacommons.org/licenses
 The derived map geometry in this fixture is provided under the same database license.
 `BasemapTests` can regenerate the extract from a locally cached copy of this tile;
 ordinary CI is offline and uses the checked-in extract. No bulk map download.
+
+The 0.3.8 extract is centered at extent coordinates (800, 3000), uses whole-object
+selection and contains 383 primitives: 109 minor-road segments, 83 major-road
+segments, 161 building triangles and 30 park triangles. Run
+`python tests/generate_real_map_fixture.py` after regenerating the Java frames to
+update the removable device benchmark geometry. All motion remains synthetic.

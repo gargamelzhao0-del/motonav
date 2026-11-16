@@ -19,7 +19,7 @@ struct MapGeometry {
 // One LVGL runtime per boot; deleting the image releases its scene and scratch.
 lv_obj_t *create_route_map(lv_obj_t *parent, int width, int height);
 // Copies/project geometry now; LVGL rasterizes strips synchronously during refresh.
-// At most 64 route points, 64 legacy road segments and 192 real map primitives.
+// At most 64 route points, 64 legacy road segments and 384 real map primitives.
 // Invalid arguments return false
 // without changing the previous scene. Input pointers are borrowed until return.
 bool render_route_map(lv_obj_t *canvas, const MapCamera &camera, const MapGeometry &geometry);

@@ -70,15 +70,22 @@ public final class BleLink {
     private RouteProtocol routeProtocol;
     private boolean routeMaps;
     private boolean routePreview, previewFallback;
-    private boolean basemaps;
+    private boolean basemaps,mapUpdates;
     private int payloadBytes=20;
     private Basemap.Scene pendingMap;
-    private int mapOffset,sentMapRevision;
+    private Basemap.Scene nextMap;
+    private int mapOffset,sentMapRevision,sentMapUpdate;
     public boolean basemaps(){return ready&&basemaps;}
+    public boolean mapUpdates(){return ready&&mapUpdates;}
     public void offerBasemap(Basemap.Scene scene){
-        if(scene!=null&&scene.revision()!=sentMapRevision&&(pendingMap==null||pendingMap.revision()!=scene.revision())){
-            pendingMap=scene;mapOffset=0;
+        if(scene==null||scene.revision()==sentMapRevision&&(!mapUpdates||scene.update()<=sentMapUpdate))return;
+        if(pendingMap!=null&&pendingMap.revision()==scene.revision()){
+            // Finish the useful first tile while retaining only the newest
+            // replacement. A delayed callback must never roll a scene back.
+            if(!mapUpdates||scene.update()<=pendingMap.update()||nextMap!=null&&scene.update()<=nextMap.update())return;
+            nextMap=scene;return;
         }
+        nextMap=null;pendingMap=scene;mapOffset=0;
     }
     public boolean sendFocusIfNeeded(Basemap.Focus focus,Runnable done){
         if(!basemaps()||busy()||focus==null||(focus.route().revision()==sentPlanRevision&&focus.reason()==sentPlanReason))return false;
@@ -87,8 +94,8 @@ public final class BleLink {
     public boolean sendMapChunkIfNeeded(int revision,Runnable done){
         if(!basemaps()||busy()||pendingMap==null||pendingMap.revision()!=revision||sentPlanRevision!=revision)return false;
         Basemap.Scene scene=pendingMap;int offset=mapOffset,count=Math.min(19,scene.items().size()-offset);
-        send(routeProtocol.basemap(scene,offset),()->{
-            if(pendingMap==scene){mapOffset+=count;if(mapOffset==scene.items().size()){sentMapRevision=revision;pendingMap=null;}}
+        send(routeProtocol.basemap(scene,offset,mapUpdates),()->{
+            if(pendingMap==scene){mapOffset+=count;if(mapOffset==scene.items().size()){sentMapRevision=revision;sentMapUpdate=scene.update();pendingMap=nextMap;nextMap=null;mapOffset=0;}}
             if(done!=null)done.run();
         });return true;
     }
@@ -245,7 +252,7 @@ public final class BleLink {
         if (navigation != null) navigation.reset();
         if (routeProtocol != null) routeProtocol.reset();
         routeMaps=false;routePreview=false;previewFallback=false;sentPlanRevision=0;sentPlanReason=-1;
-        basemaps=false;payloadBytes=20;pendingMap=null;mapOffset=sentMapRevision=0;
+        basemaps=mapUpdates=false;payloadBytes=20;pendingMap=nextMap=null;mapOffset=sentMapRevision=sentMapUpdate=0;
         pendingSubscription=null;notifications=null;phase="idle";
         awaitingDiscoveryRetry=false;
         BluetoothGatt old=gatt;gatt=null;
@@ -271,7 +278,7 @@ public final class BleLink {
     }
     private void beginProtocol(){
         phase="hello";diagnostic("start",0);
-        if (navigation != null && routeMaps) { send(routeProtocol.helloWithBasemap(), () -> { ready=true; listener.ready(); }); return; }
+        if (navigation != null && routeMaps) { send(routeProtocol.helloWithMapUpdates(), () -> { ready=true; listener.ready(); }); return; }
         if (navigation != null) { send(navigation.hello(), () -> { ready = true; listener.ready(); }); return; }
         if(network==null){send(protocol.hello(),()->send(protocol.route(),()->{ready=true;listener.ready();}));return;}
         send(networkProtocol.hello(),()->{transfer=networkProtocol.transfer(network);transferIndex=0;sendNextNetworkFrame();});
@@ -283,7 +290,7 @@ public final class BleLink {
     }
     private void send(RouteProtocol.Command command,Runnable done){
         int type=command.bytes()[4];
-        pending=new Pending(command.sequence(),command.hello()?4:0,type==3||type==5?type:0,type==4||type==6||type==7); completion=done;
+        pending=new Pending(command.sequence(),command.hello()?4:0,type==3||type==5||type==8?type:0,type==4||type==6||type==7||type==9); completion=done;
         chunks=new ArrayList<>(); byte[] bytes=command.bytes();
         for(int i=0;i<bytes.length;i+=payloadBytes)chunks.add(Arrays.copyOfRange(bytes,i,Math.min(bytes.length,i+payloadBytes)));
         chunkIndex=0;ackReceived=false;handler.removeCallbacks(timeout);handler.postDelayed(timeout,3000);writeNext();
@@ -319,7 +326,7 @@ public final class BleLink {
         if(pending.probe()!=0 && previewFallback){
             int probe=pending.probe();
             Runnable done=completion;pending=null;completion=null;previewFallback=false;handler.removeCallbacks(timeout);
-            routeProtocol.reset();send(probe==5?routeProtocol.helloWithPreview():routeProtocol.hello(),done);return;
+            routeProtocol.reset();send(probe==8?routeProtocol.helloWithBasemap():probe==5?routeProtocol.helloWithPreview():routeProtocol.hello(),done);return;
         }
         if(pending.helloVersion()!=0){diagnostic("acknowledged",0);phase="stream";}
         int sequence=pending.sequence();boolean plan=pending.plan();Runnable done=completion;pending=null;completion=null;handler.removeCallbacks(timeout);
@@ -339,6 +346,8 @@ public final class BleLink {
                 boolean navHello = pending.helloVersion()!=0;
                 if(pending.probe()!=0 && line.equals("E,NAV4")){
                     previewFallback=true;ackReceived=true;finishIfAcknowledged();
+                }else if(pending.probe()==8 && line.equals("A,"+pending.sequence()+",NAV4S2")){
+                    basemaps=mapUpdates=true;ackReceived=true;finishIfAcknowledged();
                 }else if(pending.probe()==5 && line.equals("A,"+pending.sequence()+",NAV4S")){
                     basemaps=true;ackReceived=true;finishIfAcknowledged();
                 }else if(pending.probe()==3 && line.equals("A,"+pending.sequence()+",NAV4P")){

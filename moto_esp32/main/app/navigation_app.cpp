@@ -80,7 +80,7 @@ void run() {
         auto state = navigation.snapshot();
         auto memory = drivers::memory_stats();
         auto ble = drivers::ble_runtime_status();
-        ESP_LOGI("motonav", "state=%d link=%d secure=%d protocol=%u route_points=%u route_revision=%lu rx=%lu dup=%lu rejected=%lu heap=%lu internal=%lu diag_rx=%u diag_writes=%lu diag_rejected=%lu ble_stack_min=%lu map_items=%u map_revision=%lu local=%d",
+        ESP_LOGI("motonav", "state=%d link=%d secure=%d protocol=%u route_points=%u route_revision=%lu rx=%lu dup=%lu rejected=%lu heap=%lu internal=%lu diag_rx=%u diag_writes=%lu diag_rejected=%lu ble_stack_min=%lu map_items=%u map_revision=%lu local=%d map_generation=%lu map_complete=%d",
             static_cast<int>(screen_mode(state)), state.linked, state.encrypted, state.protocol,
             static_cast<unsigned>(state.route.count), static_cast<unsigned long>(state.route.revision),
             static_cast<unsigned long>(state.packets.accepted), static_cast<unsigned long>(state.packets.duplicates),
@@ -88,7 +88,8 @@ void run() {
             static_cast<unsigned long>(memory.free_internal), ble.diagnostic_rx_handle,
             static_cast<unsigned long>(ble.diagnostic_writes), static_cast<unsigned long>(ble.diagnostic_rejected),
             static_cast<unsigned long>(ble.host_stack_min_bytes),static_cast<unsigned>(state.basemap_count),
-            static_cast<unsigned long>(state.basemap_revision),state.route.local_view);
+            static_cast<unsigned long>(state.basemap_revision),state.route.local_view,
+            static_cast<unsigned long>(state.basemap_generation),state.basemap_complete);
 #if MOTONAV_NAV_METRICS
         const bool live = screen_mode(state) == ScreenMode::Live && state.route.count >= 2;
         const uint64_t now = drivers::monotonic_ms();

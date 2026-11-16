@@ -59,10 +59,25 @@ Firmware source and protocol contract were synchronized to the user's original
 `motonav/moto_esp32` directory only after each destination matched the previously
 delivered baseline; no independent Android checkout edits were overwritten.
 
-## Remaining device acceptance
+## Actual device feedback and follow-up
 
-Install stable Android 0.7.16, accept the added OSM map-data purpose, reconnect and
-start a real route. Confirm NAV4S, local=1, matching map/route revisions and a
+After installing 0.7.16 the user rejected the actual map: incomplete geometry,
+appearance unlike the simulator, and long periods without movement/loading.
+The diagnostic capture recorded local focus at device_ms=560433 and all 192
+primitives at 564869 (about 4.4 seconds). Phone diagnostics remained GPS_WEAK,
+which explains the stationary camera but does not explain missing map detail.
+Nearest individual line/triangle selection was a separate completeness defect.
+
+The subsequent RGB565 test was visually accepted: colors/text normal and automatic
+pan/rotation smooth. This acceptance applies to the labeled test animation only.
+Android 0.7.17 / firmware 0.3.8 add whole-object selection, progressive loading,
+generation replacement and explicit map-ready/no-GPS status. Their delivery and
+measurements are recorded separately in `real-basemap-0.3.8-validation.md`.
+
+## Remaining real-navigation acceptance
+
+Install the follow-up Android build, reconnect and
+start a real route. Confirm NAV4S2, local=1, matching map/route revisions and a
 complete map primitive count. Verify actual local OSM/AMap alignment and appearance.
 Outdoor live-position following, GPS-loss recovery with real phone movement and
 FPS under simultaneous BLE updates remain unverified. Indoor GPS is not promoted

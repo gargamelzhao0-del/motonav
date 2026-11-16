@@ -8,6 +8,8 @@
 using namespace motonav;
 static unsigned takes, gives, clocks;
 static bool locked;
+static bool allocation_fails;
+static unsigned allocations,releases;
 static esp_err_t enqueue_error;
 static std::vector<std::string> queued;
 SemaphoreHandle_t xSemaphoreCreateMutex() { return &locked; }
@@ -18,6 +20,8 @@ BaseType_t xSemaphoreGive(SemaphoreHandle_t) {
     assert(locked); locked = false; ++gives; return pdTRUE;
 }
 namespace motonav::drivers {
+void *allocate_external(size_t bytes) { if(allocation_fails)return nullptr;++allocations;return std::malloc(bytes); }
+void free_external(void *memory) { ++releases;std::free(memory); }
 uint64_t monotonic_us() { ++clocks; return 100000; }
 esp_err_t ble_notify_batch(const BleNotification *messages, size_t count) {
     assert(!locked); // Enqueue never holds the business-state mutex.
@@ -33,6 +37,9 @@ static std::string frame(const std::string &body) {
     return body + tail;
 }
 int main(int argc, char **argv) {
+    allocation_fails=true;
+    {app::NavigationService unavailable;assert(unavailable.init()==ESP_ERR_NO_MEM);}
+    assert(allocations==0&&releases==0);allocation_fails=false;
     app::NavigationService service;
     assert(service.init() == ESP_OK);
     const auto cb = service.callbacks();

@@ -15,6 +15,8 @@ struct ScreenSnapshot {
     unsigned protocol = 3;
     uint32_t basemap_revision=0;
     uint16_t basemap_count=0;
+    uint32_t basemap_generation=0;
+    bool basemap_complete=true;
 };
 
 enum class ScreenMode { Disconnected, Pairing, Securing, Handshake, Ready, Waiting, Stale, Live, Arrived, Stopped };

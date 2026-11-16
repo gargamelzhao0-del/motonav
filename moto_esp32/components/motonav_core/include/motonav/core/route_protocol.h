@@ -24,7 +24,7 @@ public:
     void disconnect() {
         navigation_.disconnect(); scene_={}; plan_={}; used_=0; sequence_=0; checksum_=0;
         route_revision_=0; route_crc_=0; plan_crc_=0; preview_enabled_=false;
-        basemap_enabled_=false; map_={}; staging_={}; staged_=0;
+        basemap_enabled_=updates_enabled_=false; map_={}; staging_={}; staged_=0;
     }
     const NavigationReceiver &navigation() const { return navigation_; }
     ReceiverStats stats() const { return stats_; }
@@ -48,6 +48,7 @@ private:
     uint32_t plan_crc_=0;
     bool preview_enabled_=false;
     bool basemap_enabled_=false;
+    bool updates_enabled_=false;
     BasemapScene map_,staging_;
     unsigned staged_=0;
     NavigationReceiver navigation_;
@@ -71,9 +72,9 @@ private:
         if(NavigationReceiver::crc32(reinterpret_cast<const char *>(bytes_),expected_-4)!=crc
                 ||!seq||seq>INT_MAX||!session||session>INT_MAX)return false;
         const unsigned type=bytes_[4];
-        const bool hello=type==1||type==3||type==5;
-        const char *ack=hello?(type==5?"NAV4S":type==3?"NAV4P":"NAV4"):"OK";
-        if((hello && expected_!=17)||(!hello && type!=2 && type!=4 && type!=6 && type!=7))return false;
+        const bool hello=type==1||type==3||type==5||type==8;
+        const char *ack=hello?(type==8?"NAV4S2":type==5?"NAV4S":type==3?"NAV4P":"NAV4"):"OK";
+        if((hello && expected_!=17)||(!hello && type!=2 && type!=4 && type!=6 && type!=7 && type!=9))return false;
         if(navigation_.handshaken() && seq==sequence_ && session==session_ && crc==checksum_) {
             ++stats_.duplicates; std::snprintf(reply,sizeof(reply),"A,%lu,%s\n",static_cast<unsigned long>(seq),ack); return true;
         }
@@ -82,7 +83,7 @@ private:
             if(navigation_.handshaken()||seq!=1)return false;
             std::snprintf(body,sizeof(body),"H,3,%lu,%lu",static_cast<unsigned long>(seq),static_cast<unsigned long>(session));
             if(!core(body,now))return false;
-            scene_={}; plan_={}; preview_enabled_=type==3;basemap_enabled_=type==5;
+            scene_={}; plan_={}; preview_enabled_=type==3;basemap_enabled_=type==5||type==8;updates_enabled_=type==8;
             map_={};staging_={};staged_=0;
         } else if(type==6) {
             if(!basemap_enabled_||!navigation_.handshaken()||session!=session_||seq<=sequence_||expected_<45)return false;
@@ -102,22 +103,24 @@ private:
             }
             if(revision!=plan_.revision){map_={};staging_={};staged_=0;}
             plan_=next;plan_crc_=geometry_crc;
-        } else if(type==7) {
-            if(!basemap_enabled_||!navigation_.handshaken()||session!=session_||seq<=sequence_||expected_<26)return false;
-            uint32_t revision=u32(13);unsigned total=u16(17),offset=u16(19),count=bytes_[21];
-            if(!revision||revision!=plan_.revision||total>BasemapScene::Capacity||count>19||expected_!=26+14*count
-                ||offset+count>total||(!count&&total)||(!offset&&map_.revision==revision))return false;
-            if(offset&&(staging_.revision!=revision||staging_.count!=total||offset!=staged_))return false;
+        } else if(type==7||type==9) {
+            const bool update=type==9;const unsigned header=update?27:22;
+            if(!basemap_enabled_||(update&&!updates_enabled_)||!navigation_.handshaken()||session!=session_||seq<=sequence_||expected_<header+4)return false;
+            uint32_t revision=u32(13),generation=update?u32(17):1;
+            unsigned total=u16(update?21:17),offset=u16(update?23:19),count=bytes_[update?25:21],flags=update?bytes_[26]:1;
+            if(!revision||revision!=plan_.revision||!generation||generation>INT_MAX||flags>1||total>(update?BasemapScene::Capacity:192)||count>19||expected_!=header+4+14*count
+                ||offset+count>total||(!count&&total)||(map_.revision==revision&&generation<=map_.generation))return false;
+            if(offset&&(staging_.revision!=revision||staging_.generation!=generation||staging_.complete!=(flags==1)||staging_.count!=total||offset!=staged_))return false;
             // Validate the entire chunk before touching staging state.
             for(unsigned i=0;i<count;i++) {
-                size_t p=22+14*i;unsigned kind=bytes_[p];
+                size_t p=header+14*i;unsigned kind=bytes_[p];
                 if(kind>5||bytes_[p+1])return false;
                 for(unsigned j=0;j<6;j++)if(std::abs(i16(p+2+2*j))>2048)return false;
                 if(kind<3&&(i16(p+10)||i16(p+12)))return false;
             }
-            if(!offset){staging_={};staging_.revision=revision;staging_.count=total;staged_=0;}
+            if(!offset){staging_={};staging_.revision=revision;staging_.generation=generation;staging_.complete=flags==1;staging_.count=total;staged_=0;}
             for(unsigned i=0;i<count;i++) {
-                size_t p=22+14*i;auto &item=staging_.items[offset+i];item.kind=bytes_[p];
+                size_t p=header+14*i;auto &item=staging_.items[offset+i];item.kind=bytes_[p];
                 item.a={static_cast<int16_t>(i16(p+2)),static_cast<int16_t>(i16(p+4))};
                 item.b={static_cast<int16_t>(i16(p+6)),static_cast<int16_t>(i16(p+8))};
                 item.c={static_cast<int16_t>(i16(p+10)),static_cast<int16_t>(i16(p+12))};

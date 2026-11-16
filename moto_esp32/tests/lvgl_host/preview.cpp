@@ -264,17 +264,16 @@ int main(int argc, char **argv) {
     {
         auto previous=snapshot;motonav::NavigationSession session;
         session.connected();session.protocol(4);session.security(true);session.subscription(true);
-        std::ifstream fixture(SCENE_FIXTURE_PATH);std::string row;char reply[32]{};unsigned frame=0;
+        std::ifstream fixture(SCENE_FIXTURE_PATH);std::string row;char reply[32]{};bool saw_wait=false,saw_live=false,saw_lost=false;
         while(std::getline(fixture,row)) {
             for(size_t i=0;i<row.size();i+=2)session.feed(static_cast<char>(std::stoul(row.substr(i,2),nullptr,16)),clock_ms,reply);
             if(reply[0]!='A')return 1;snapshot=session.snapshot(clock_ms);
             session.read_map(snapshot.basemap_revision,basemap);
-            if(frame==13){save(display,directory/"real-map-waiting.ppm");require_label("WAIT GPS");if(basemap.count!=192)return 1;}
-            if(frame==14){save(display,directory/"real-map-live.ppm");require_label("36");require_label("120 m");}
-            if(frame==15){save(display,directory/"real-map-gps-lost.ppm");require_label("WAIT GPS");if(basemap.count!=192)return 1;}
-            frame++;
+            if(snapshot.basemap_count>192&&snapshot.guidance.mode==motonav::Waiting&&!saw_live){save(display,directory/"real-map-waiting.ppm");require_label("WAIT GPS");saw_wait=true;}
+            if(snapshot.guidance.mode==motonav::Live){save(display,directory/"real-map-live.ppm");require_label("36");require_label("120 m");saw_live=true;}
+            if(saw_live&&snapshot.guidance.mode==motonav::Waiting){save(display,directory/"real-map-gps-lost.ppm");require_label("WAIT GPS");if(basemap.count<300)return 1;saw_lost=true;}
         }
-        if(frame!=17)return 1;
+        if(!saw_wait||!saw_live||!saw_lost)return 1;
         snapshot=previous;save(display,directory/"real-map-stopped.ppm");
         if(pixels!=navigation_pixels)return 1;
     }

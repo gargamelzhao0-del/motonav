@@ -47,21 +47,39 @@ public final class BasemapTests {
         commands.add(protocol.snapshot(NavigationFrame.status(4),null,104003));
         var encoded=new StringBuilder();for(var command:commands){check(command.bytes().length<=304,"bounded radio frame");encoded.append(HexFormat.of().formatHex(command.bytes())).append('\n');}
         if(args.length>0)Files.writeString(Path.of(args[0]),encoded);
+        RouteProtocol progressive=new RouteProtocol(123);
+        var early=new Basemap.Scene(1,1,false,items);var completeMap=new Basemap.Scene(1,2,true,items);
+        var updates=List.of(progressive.helloWithMapUpdates(),progressive.snapshot(NavigationFrame.status(1),null,100000),
+                progressive.focus(new Basemap.Focus(frame,origin,1,5000,600)),progressive.basemap(early,0,true),progressive.basemap(early,19,true),
+                progressive.basemap(completeMap,0,true),progressive.basemap(completeMap,19,true),
+                progressive.snapshot(new NavigationFrame(2,3,120,4000,360,36,100000,100000),frame,100000),
+                progressive.snapshot(NavigationFrame.status(1),null,104002),progressive.snapshot(NavigationFrame.status(4),null,104003));
+        var updateWire=new StringBuilder();for(var command:updates){check(command.bytes().length<=304,"bounded progressive frame");updateWire.append(HexFormat.of().formatHex(command.bytes())).append('\n');}
+        if(args.length>0)Files.writeString(Path.of(args[0]).resolveSibling("nav4-map-updates.frames"),updateWire);
+        // A budget may omit a complete building, but must not take only one
+        // triangle from its footprint. Exercise dense MVT multipolygon data.
+        var syntheticTile=new Basemap.Tile(14,8186,5448);
+        var syntheticOrigin=Basemap.coordinate(syntheticTile,4096,2048,2048);
+        List<List<VectorTile.Point>> buildings=new ArrayList<>();
+        for(int i=0;i<400;i++){int x=1600+(i%10)*80,y=1600+(i/10)*80;buildings.add(List.of(new VectorTile.Point(x,y),new VectorTile.Point(x+40,y),new VectorTile.Point(x+40,y+40),new VectorTile.Point(x,y+40)));}
+        var grouped=new LocalMapBuilder(syntheticOrigin,c->c);grouped.add(syntheticTile,List.of(new VectorTile.Feature("buildings","",3,4096,buildings)));
+        var completeBuildings=grouped.finish(1).items();check(!completeBuildings.isEmpty()&&completeBuildings.size()%2==0,"building triangles kept as complete objects");
+        for(int i=0;i<completeBuildings.size();i+=2){var a=completeBuildings.get(i);var b=completeBuildings.get(i+1);long shared=List.of(a.a(),a.b(),a.c()).stream().filter(v->List.of(b.a(),b.b(),b.c()).contains(v)).count();check(shared==2,"each selected building retains both triangles");}
         if(args.length>1) {
             var tile=new Basemap.Tile(14,8186,5448);var features=VectorTile.decode(Files.readAllBytes(Path.of(args[1])));
-            var center=Basemap.coordinate(tile,4096,2048,2048);var builder=new LocalMapBuilder(center,c->c);builder.add(tile,features);var scene=builder.finish(1);
+            var center=Basemap.coordinate(tile,4096,800,3000);var builder=new LocalMapBuilder(center,c->c);builder.add(tile,features);var scene=builder.finish(1);
             System.out.println("REAL TILE: features="+features.size()+" primitives="+scene.items().size()+" kinds="+scene.items().stream().map(Basemap.Primitive::kind).collect(java.util.stream.Collectors.groupingBy(k->k,java.util.stream.Collectors.counting())));
             check(scene.items().size()>50,"actual public tile produces map detail");
             if(args.length>2){
-                var radio=new RouteProtocol(123);var lines=new ArrayList<String>();lines.add(HexFormat.of().formatHex(radio.helloWithBasemap().bytes()));
+                var radio=new RouteProtocol(123);var lines=new ArrayList<String>();lines.add(HexFormat.of().formatHex(radio.helloWithMapUpdates().bytes()));
                 lines.add(HexFormat.of().formatHex(radio.snapshot(NavigationFrame.status(1),null,100000).bytes()));
                 // Route for visual QA only, following a real decoded street path.
                 var street=features.stream().filter(f->f.type()==2&&f.layer().equals("streets")).flatMap(f->f.paths().stream())
-                    .filter(p->p.size()>=4&&p.size()<=64&&p.stream().anyMatch(q->Math.hypot(q.x()-2048,q.y()-2048)<600)).findFirst().orElseThrow();
+                    .filter(p->p.size()>=4&&p.size()<=64&&p.stream().anyMatch(q->Math.hypot(q.x()-800,q.y()-3000)<600)).findFirst().orElseThrow();
                 List<DeviceRoute.Point> points=new ArrayList<>();for(var q:street){var c=Basemap.coordinate(tile,4096,q.x(),q.y());points.add(p((int)Math.round((c.longitude()-center.longitude())*111319.49079327358*Math.cos(Math.toRadians(center.latitude()))),(int)Math.round((c.latitude()-center.latitude())*111319.49079327358)));}
                 var view=new DeviceRoute.Frame(1,points,0,0,0);
                 lines.add(HexFormat.of().formatHex(radio.focus(new Basemap.Focus(view,center,1,5000,600)).bytes()));
-                for(int i=0;i<scene.items().size();i+=19)lines.add(HexFormat.of().formatHex(radio.basemap(scene,i).bytes()));
+                for(int i=0;i<scene.items().size();i+=19)lines.add(HexFormat.of().formatHex(radio.basemap(scene,i,true).bytes()));
                 lines.add(HexFormat.of().formatHex(radio.snapshot(new NavigationFrame(2,3,120,4000,360,36,100000,100000),view,100000).bytes()));
                 lines.add(HexFormat.of().formatHex(radio.snapshot(NavigationFrame.status(1),null,104002).bytes()));
                 lines.add(HexFormat.of().formatHex(radio.snapshot(NavigationFrame.status(4),null,104003).bytes()));

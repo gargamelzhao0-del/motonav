@@ -23,4 +23,6 @@ MemoryStats memory_stats() {
     return {heap_caps_get_free_size(MALLOC_CAP_8BIT),
             heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)};
 }
+void *allocate_external(size_t bytes) { return bytes?heap_caps_malloc(bytes,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT):nullptr; }
+void free_external(void *memory) { heap_caps_free(memory); }
 } // namespace motonav::drivers
