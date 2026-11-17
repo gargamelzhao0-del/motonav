@@ -74,7 +74,7 @@ with tempfile.TemporaryDirectory(prefix='motonav-firmware-tests-') as directory:
         'display_runtime_test': ['components/motonav_display/display.cpp', 'components/motonav_display/pixel_pack.cpp',
                                  'main/app/device_supervisor.cpp'],
     }
-    for name in ['map_camera_motion_test', 'navigation_presentation_test', 'map_strip_index_test', 'map_labels_test', 'map_position_test', 'navigation_details_test', 'basemap_protocol_test', 'navigation_protocol_test', 'route_protocol_test', 'ble_channel_test', 'display_model_test', 'map_projection_test', 'map_raster_test', 'map_stroke_test',
+    for name in ['building_contours_test', 'map_camera_motion_test', 'navigation_presentation_test', 'map_strip_index_test', 'map_labels_test', 'map_position_test', 'navigation_details_test', 'basemap_protocol_test', 'navigation_protocol_test', 'route_protocol_test', 'ble_channel_test', 'display_model_test', 'map_projection_test', 'map_raster_test', 'map_stroke_test',
                  'navigation_session_test', 'display_qspi_test', 'pixel_pack_test',
                  'navigation_service_test', 'notification_queue_test', 'ble_transport_test', 'display_runtime_test', 'diagnostic_protocol_test', 'diagnostic_bridge_test']:
         executable = output / (name + ('.exe' if os.name == 'nt' else ''))

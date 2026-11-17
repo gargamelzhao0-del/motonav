@@ -40,6 +40,8 @@ moto_esp32/
 │           ├── route_trace.h         有界局部路线匹配，拒绝远离和歧义
 │           ├── map_strip_index.h     720 字节绘制顺序条带索引
 │           ├── map_style.h           地理类别的语义颜色与着色缓存调色板
+│           ├── map_feature.h         不依赖 LVGL 的输入图元
+│           ├── building_contours.h   从真实三角形恢复外轮廓/内院，缓存按图元版本更新
 │           ├── map_stroke.h          道路表面投影、接头/端帽
 │           └── map_raster.h          准备好的面/椭圆 → RGB565 条带
 ├── tests/

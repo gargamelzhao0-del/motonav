@@ -1,9 +1,9 @@
 #pragma once
 #include "motonav/graphics/map_projection.h"
+#include "motonav/graphics/map_feature.h"
 #include "lvgl.h"
 
 namespace motonav {
-struct MapFeature { uint8_t kind;MapPoint a,b,c; };
 struct MapGeometry {
     const MapPoint *route;
     size_t route_count;
@@ -17,6 +17,9 @@ struct MapGeometry {
     // Optional visual split: segment index + fraction, -1 means unknown.
     // The caller owns position validity; this does not change guidance/progress.
     float route_progress=-1;
+    // Optional stable content key for features. Change on ANY geometry change;
+    // zero rebuilds the derived contour cache on every call. No pointer retained.
+    uint64_t feature_version=0;
 };
 // All functions below require the LVGL thread or the caller's display lock.
 // Image owns a bounded scene; fallback decoding lazily allocates a strip buffer.

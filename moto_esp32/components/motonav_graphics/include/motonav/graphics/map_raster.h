@@ -204,9 +204,9 @@ private:
         if(cached_shades_&&cached_color_==color)return {color,cached_shades_};
         constexpr auto palette=NavigationMapStyle::Palette;
         static constexpr auto table=[] {
-            std::array<std::array<uint32_t,514>,18> result{};
+            std::array<std::array<uint32_t,514>,NavigationMapStyle::Palette.size()> result{};
             constexpr auto rgb=NavigationMapStyle::Palette;
-            for(unsigned c=0;c<18;c++)for(unsigned light=0;light<=256;light++)for(unsigned row=0;row<2;row++){
+            for(unsigned c=0;c<rgb.size();c++)for(unsigned light=0;light<=256;light++)for(unsigned row=0;row<2;row++){
                 const unsigned packed=((rgb[c]>>8)&0xf800)|((rgb[c]>>5)&0x7e0)|((rgb[c]>>3)&31);
                 uint32_t pair=0;
                 for(unsigned column=0;column<2;column++){
@@ -220,7 +220,7 @@ private:
             }
             return result;
         }();
-        for(unsigned i=0;i<18;i++){
+        for(unsigned i=0;i<palette.size();i++){
             const auto rgb565=rgb(palette[i]);
             if(color==static_cast<uint16_t>((rgb565>>8)|(rgb565<<8))){cached_color_=color;cached_shades_=table[i].data();return {color,cached_shades_};}
         }

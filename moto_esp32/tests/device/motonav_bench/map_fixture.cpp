@@ -29,7 +29,7 @@ MapCamera render_map_benchmark(lv_obj_t *view, uint64_t elapsed_ms) {
     static const RouteTrace trace=[] {RouteTrace value;value.prepare(RealMapRoute,sizeof(RealMapRoute)/sizeof(RealMapRoute[0]));return value;}();
     auto progress=trace.locate(camera.x,camera.y);
     render_route_map(view,camera,{RealMapRoute,sizeof(RealMapRoute)/sizeof(RealMapRoute[0]),nullptr,0,true,
-        RealMapFeatures,sizeof(RealMapFeatures)/sizeof(RealMapFeatures[0]),true,0,progress.valid?progress.index:-1});
+        RealMapFeatures,sizeof(RealMapFeatures)/sizeof(RealMapFeatures[0]),true,0,progress.valid?progress.index:-1,1});
     return camera;
 }
 } // namespace motonav

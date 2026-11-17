@@ -253,6 +253,24 @@ static void exercise_route_split(lv_display_t *display,const std::filesystem::pa
     lv_screen_load(previous);lv_obj_delete(screen);
     std::cout<<"PASS: passed/future route rendering, unknown progress and maximum split capacity\n";
 }
+static void exercise_building_edges(lv_display_t *display,const std::filesystem::path &directory) {
+    auto *previous=lv_screen_active(),*screen=lv_obj_create(nullptr);lv_screen_load(screen);
+    auto *map=motonav::create_route_map(screen,466,466);
+    motonav::MapFeature features[]{{3,{0,0},{50,0},{50,50}},{3,{0,0},{50,50},{0,50}}};
+    motonav::MapGeometry geometry{nullptr,0,nullptr,0,false,features,2};geometry.feature_version=1;
+    const motonav::MapCamera camera{0,0,0,1};
+    assert(motonav::render_route_map(map,camera,geometry));save(display,directory/"building-contour.ppm");
+    auto inside=pixels[300*466+259];assert(pixels[301*466+258]==inside); // No tessellation diagonal.
+    auto outline=pixels[300*466+233];assert(outline!=inside);
+    features[0].b.x=features[0].c.x=features[1].b.x=60;geometry.feature_version++;
+    assert(motonav::render_route_map(map,camera,geometry));save(display,directory/"building-contour-updated.ppm");
+    assert(pixels[300*466+283]==inside&&pixels[300*466+293]==outline);
+    geometry.features=nullptr;geometry.feature_count=0;geometry.feature_version++;
+    assert(motonav::render_route_map(map,camera,geometry));save(display,directory/"building-contour-cleared.ppm");
+    assert(pixels[300*466+233]!=outline);
+    lv_screen_load(previous);lv_obj_delete(screen);
+    std::cout<<"PASS: contour cache update, no triangle seams and removed-map cleanup\n";
+}
 int main(int argc, char **argv) {
     if (argc != 2) return 2;
     std::filesystem::path directory(argv[1]); std::filesystem::create_directories(directory);
@@ -327,6 +345,7 @@ int main(int argc, char **argv) {
     exercise_annotations(display,directory);
     exercise_maneuver_ui(display,directory);
     exercise_route_split(display,directory);
+    exercise_building_edges(display,directory);
     auto *navigation_screen = lv_screen_active();
     auto normal_children = lv_obj_get_child_count(lv_screen_active());
     lv_obj_add_event_cb(lv_obj_get_child(lv_screen_active(),0), [](lv_event_t *) { ++rim_draws; }, LV_EVENT_DRAW_MAIN, nullptr);

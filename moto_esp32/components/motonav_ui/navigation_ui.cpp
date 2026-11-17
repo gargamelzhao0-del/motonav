@@ -133,7 +133,8 @@ void route_map(const ScreenSnapshot &state,ManeuverEmphasis emphasis) {
     camera=next;
     if(changed) {
         if(!render_route_map(map_view,camera,{points,r.count,nullptr,0,marker!=0,features,basemap.count,r.local_view,
-                static_cast<uint8_t>(live?0:historical?3:r.position_quality),progress.valid?progress.index:-1})) {
+                static_cast<uint8_t>(live?0:historical?3:r.position_quality),progress.valid?progress.index:-1,
+                (uint64_t(r.revision)<<32)|basemap.generation})) {
             lv_obj_delete(map_view); map_view=nullptr;annotations={}; map_failed=true; layout(false);
         }
     }

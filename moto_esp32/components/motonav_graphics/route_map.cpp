@@ -2,6 +2,7 @@
 #include "motonav/graphics/map_raster.h"
 #include "motonav/graphics/map_stroke.h"
 #include "motonav/graphics/map_strip_index.h"
+#include "motonav/graphics/building_contours.h"
 #include "round_map_damage.h"
 #include "src/draw/lv_image_decoder_private.h"
 #include "src/draw/lv_draw_private.h"
@@ -44,6 +45,11 @@ struct MapScene {
     uint16_t area_count=0,surface_count=0,edge_count=0;
     uint16_t paint_order[384]{};
     MapStripIndex strips;
+    BuildingContours building_contours;
+    uint64_t feature_version=0;
+    size_t input_feature_count=0;
+    Segment building_edges[256]{};
+    size_t building_edge_count=0;
     size_t feature_count=0;
     bool compass=false;
     size_t road_count = 0, route_count = 0;
@@ -108,6 +114,12 @@ void paint(MapRaster &raster, MapScene &scene, int top, int bottom) {
     const uint64_t begin = scene.clock_us ? scene.clock_us() : 0;
     raster.navigation_style(scene.compass);
     raster.clear(panel_color(Style::Ground));
+    bool contours_painted=false;
+    auto contours=[&](){
+        if(contours_painted)return;
+        for(size_t i=0;i<scene.building_edge_count;i++)line(raster,scene.building_edges[i],1,Style::BuildingEdge,top,bottom);
+        contours_painted=true;
+    };
     // Resolve painter order and bounds once per camera update. Each strip visits
     // the compact list once, instead of scanning all PSRAM geometry six times.
     for(size_t block=0;block<(scene.feature_count+31)/32;block++) {
@@ -119,11 +131,13 @@ void paint(MapRaster &raster, MapScene &scene, int top, int bottom) {
         const unsigned kind=f.kind;
         if(kind>=3)raster.polygon(scene.areas[f.shape],panel_color(kind==4?Style::Water:kind==5?Style::Park:Style::Building));
         else {
+            contours(); // Above every building fill, below every road surface.
             if(kind==2)scene.edges[f.edge].paint(raster,panel_color(Style::RoadEdge));
             scene.surfaces[f.shape].paint(raster,panel_color(kind==2?Style::MajorRoad:kind==1?Style::SecondaryRoad:Style::MinorRoad));
         }
       }
     }
+    contours();
     for (size_t i=0; i<scene.road_count; ++i) {
         line(raster, scene.roads[i], 8, 0x10191e, top, bottom);
         line(raster, scene.roads[i], 4, 0x66757c, top, bottom);
@@ -305,6 +319,10 @@ bool render_route_map(lv_obj_t *view, const MapCamera &camera, const MapGeometry
     if (!scene) return false;
     MapProjection projection(scene->image.header.w, scene->image.header.h, camera);
     if (!projection.valid()) return false;
+    if(!geometry.feature_version||scene->feature_version!=geometry.feature_version||scene->input_feature_count!=geometry.feature_count){
+        scene->building_contours.prepare(geometry.features,geometry.feature_count);
+        scene->feature_version=geometry.feature_version;scene->input_feature_count=geometry.feature_count;
+    }
     scene->road_count = scene->route_count = 0;
     scene->show_position=geometry.show_position;
     scene->position_style=geometry.position_style;
@@ -312,6 +330,14 @@ bool render_route_map(lv_obj_t *view, const MapCamera &camera, const MapGeometry
     scene->area_count=scene->surface_count=scene->edge_count=0;
     scene->feature_count=0;scene->compass=geometry.compass;
     ProjectedPoint a, b;
+    scene->building_edge_count=0;
+    for(size_t i=0;i<scene->building_contours.count()&&scene->building_edge_count<256;i++){
+        const auto edge=scene->building_contours.edge(i);
+        if(!projection.segment(edge.a,edge.b,a,b,2))continue;
+        float dx=b.x-a.x,dy=b.y-a.y;
+        if(dx*dx+dy*dy<36||std::max(a.y,b.y)<140||std::min(a.y,b.y)>345)continue;
+        scene->building_edges[scene->building_edge_count++]=Segment(a,b);
+    }
     for(size_t i=0;i<geometry.feature_count;i++) {
         const auto &f=geometry.features[i];MapScene::Feature next;next.kind=f.kind;
         if(f.kind<3) {

@@ -60,7 +60,7 @@ phone's older 50-degree viewport plus its 120 m coverage margin.
 
 ## Validation
 
-- 23 host C++ programs and dependency checks pass. Added coverage includes
+- 24 host C++ programs and dependency checks pass. Added coverage includes
   independent motion channels, route bends, close parallel legs/crossings,
   clock wrapping, invalid/expired guidance, camera coverage and strip masks.
 - Analytic fractional-rectangle tests verify edge color blending. Antialiased
@@ -78,27 +78,73 @@ geographic fixture, draw-task profiling disabled. Each timed interval follows
 a 2.5 s warm-up. The final perspective/style differs, so this is not an isolated
 microbenchmark of the strip index.
 
-| Measurement | 0.3.14 | First 0.3.15 | Final refined 0.3.15 |
-| --- | ---: | ---: | ---: |
-| Minimum / mean sampled FPS | 21 / 23 | 21 / 24 | 19 / 23 |
-| Timed interval (ms) | 40528 | 40533 | 40544 |
-| Prepare mean (us) | 5147 | 5488 | 5017 |
-| Geometry / annotations / HUD (us) | 4402 / 470 / 274 | 4660 / 533 / 294 | 4139 / 570 / 307 |
-| Render mean (us) | 34757 | 33509 | 35164 |
-| Overlapping DMA mean (us) | 19617 | 19616 | 19629 |
+| Measurement | 0.3.14 | First 0.3.15 | Refined 35-degree view | Final with building contours |
+| --- | ---: | ---: | ---: | ---: |
+| Minimum / mean sampled FPS | 21 / 23 | 21 / 24 | 19 / 23 | 19 / 22 |
+| Timed interval (ms) | 40528 | 40533 | 40544 | 40552 |
+| Prepare mean (us) | 5147 | 5488 | 5017 | 5619 |
+| Geometry / annotations / HUD (us) | 4402 / 470 / 274 | 4660 / 533 / 294 | 4139 / 570 / 307 | 4729 / 581 / 308 |
+| Render mean (us) | 34757 | 33509 | 35164 | 35813 |
+| Overlapping DMA mean (us) | 19617 | 19616 | 19629 | 19631 |
 
 The final style trades the first iteration's small FPS gain for clearer map
 presentation and edge smoothing. **The complex-map 40 FPS target remains unmet.**
 DMA overlaps rendering and must not be added to render time. The subsequent
 held demo changes annotation budgets, so its samples are not the fixed-layout
-timed benchmark. Main-task minimum stack improved from 536 to 3456 bytes after
-deferring the optional fixture start; that was a test-startup change.
+timed benchmark. Main-task minimum stack improved from 536 to 3392 bytes in
+the final contour run after deferring the optional fixture start; that was a
+test-startup change. The final 100-second capture contains no panic, assertion
+or watchdog report. It is a fixed-map rendering test, not a road test or a
+long-duration BLE/GPS concurrency guarantee.
 
 Logs and native previews are retained in `moto_esp32/dist/`; preview images are
 native LVGL renders of a fixed London OSM fixture, not photographs, phone GPS
 captures or invented map geometry. Map data: © OpenStreetMap contributors,
 ODbL; fixture provenance remains in `tests/generate_real_map_fixture.py`.
 
-Final refined visual acceptance and normal-image boot/phone verification are
-recorded separately after the held test. A build or screenshot does not prove
-live phone-navigation acceptance or full simulator parity.
+The user confirmed that the 35-degree view, continuous route and revised map
+colors were a clear improvement, and requested more real map detail. An
+additional bounded `BuildingContours` layer extracts supplied building outer
+and courtyard boundaries by cancelling opposed shared triangle edges. It
+normalizes winding, tolerates duplicate triangles and skips degenerate faces.
+Up to 1152 world edges are processed on a map-content change; at most 256
+visible edges of at least 6 projected pixels receive outlines. Building fills
+are retained regardless of this contour detail budget. Input `feature_version`
+is an opaque caller-owned content key; zero disables cache reuse. Prepared
+outlines sit above building fills and below roads, route, position and labels.
+
+Host tests cover shared diagonals, reversed/duplicate triangles, courtyard
+holes, the maximum input and cache replacement/clearing. Native comparison
+previews are in `assets/navigation-0.3.15/` (the comparison is cropped to the
+physical round-screen outline). These contours recover existing transmitted
+detail; they do not add missing provider coverage or 3D building heights.
+
+## Production delivery
+
+The final RGB565 production image was written to COM21 at application offset
+`0x10000` with esptool hash verification. Bootloader, partition table and NVS
+were not rewritten. The 35-second boot capture confirms firmware 0.3.15,
+`device_tests=0`, `ble_diagnostics=1`, NAV3/NAV4 and DIAG1 handle 31. While
+advertising without a phone, minimum main-task stack was 3416 bytes, minimum
+BLE-task stack was 5548 bytes and reported free internal heap was 26547 bytes.
+No panic, assertion or watchdog was reported. These idle figures are not
+navigation-load memory guarantees.
+
+Production binary: 4165440 bytes; SHA-256
+`33b3324ec5cbd6aeae988d3ff6c4814cb2a7d7837566648902fd232e116bc9b1`.
+The final source export and binary are in `moto_esp32/dist/release-0.3.15-final/`;
+its manifest records source revision and artifact hashes. It supersedes the
+earlier 0.3.15 package that did not include building contours.
+
+Relevant local evidence:
+
+- `dist/COM21-0.3.15-detail-bench.log` (100 seconds, final contour fixture).
+- `dist/COM21-0.3.15-normal-final.log` (35 seconds, production startup).
+- `dist/flash-0.3.15-normal-final.log` (application-only flash and verification).
+- `dist/host-tests-0.3.15.log` and `dist/ctest-0.3.15.log` (24 host programs and
+  12 LVGL checks).
+
+The user accepted the 35-degree test's overall improvement. The final contour
+layer passed native-render and device checks; production phone navigation has
+not yet been re-observed in this run. Neither a build nor a screenshot proves
+full simulator parity or live phone-navigation acceptance.
