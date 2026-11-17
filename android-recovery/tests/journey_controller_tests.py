@@ -114,7 +114,7 @@ with tempfile.TemporaryDirectory(prefix="motonav-journey-") as directory:
     production = Path("app/src/main/java/com/motonav/companion")
     sources = [str(root / name) for name in stubs]
     sources += [str(production / (name + ".java")) for name in
-                ("JourneyController", "NavigationUiModel", "JourneyState", "NaviFixTracker", "DeviceRoute", "Basemap", "GuidanceHealth", "MapStartupPolicy", "NavigationFrame", "NavigationDetails", "DiagnosticRecord", "BleDiagnosticProtocol")]
+                ("JourneyController", "NavigationUiModel", "JourneyState", "NaviFixTracker", "DeviceRoute", "Basemap", "MapViewport", "GuidanceHealth", "MapStartupPolicy", "NavigationFrame", "NavigationDetails", "DiagnosticRecord", "BleDiagnosticProtocol")]
     classes = root / "classes"
     classes.mkdir()
     subprocess.run(["java", "-m", "jdk.compiler/com.sun.tools.javac.Main", "-encoding", "UTF-8",

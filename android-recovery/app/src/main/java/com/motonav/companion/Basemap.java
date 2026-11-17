@@ -74,12 +74,19 @@ public final class Basemap {
         return new DeviceRoute.Coordinate(latitude,longitude);
     }
     public static List<Tile> visibleTiles(DeviceRoute.Coordinate origin) {
+        return visibleTiles(origin,-900,-900,900,900);
+    }
+    public static List<Tile> visibleTiles(DeviceRoute.Coordinate origin,MapViewport viewport) {
+        return visibleTiles(origin,viewport.left,viewport.bottom,viewport.right,viewport.top);
+    }
+    private static List<Tile> visibleTiles(DeviceRoute.Coordinate origin,int minX,int minY,int maxX,int maxY) {
         double cosine=Math.cos(Math.toRadians(origin.latitude()));
-        int zoom=Math.max(0,Math.min(14,(int)Math.floor(Math.log(40075016*cosine/900)/Math.log(2))));
+        double radius=Math.max(maxX-minX,maxY-minY)/2.0;
+        int zoom=Math.max(0,Math.min(14,(int)Math.floor(Math.log(40075016*cosine/Math.max(1,radius))/Math.log(2))));
         int n=1<<zoom;
-        double latRadius=900/111319.49079327358,lonRadius=latRadius/cosine;
-        int left=(int)Math.floor((origin.longitude()-lonRadius+180)/360*n),right=(int)Math.floor((origin.longitude()+lonRadius+180)/360*n);
-        int top=tileY(origin.latitude()+latRadius,n),bottom=tileY(origin.latitude()-latRadius,n);
+        double unit=111319.49079327358;
+        int left=(int)Math.floor((origin.longitude()+minX/unit/cosine+180)/360*n),right=(int)Math.floor((origin.longitude()+maxX/unit/cosine+180)/360*n);
+        int top=tileY(origin.latitude()+maxY/unit,n),bottom=tileY(origin.latitude()+minY/unit,n);
         java.util.ArrayList<Tile> result=new java.util.ArrayList<>();
         for(int y=Math.max(0,top);y<=Math.min(n-1,bottom);y++)for(int x=left;x<=right;x++)result.add(new Tile(zoom,Math.floorMod(x,n),y));
         if(result.size()>9)throw new IllegalArgumentException("visible map bounds");

@@ -19,7 +19,8 @@ final class BasemapLoader implements AutoCloseable {
     private final Listener listener;
     private volatile int generation;
     private int revision,update;
-    private int cameraX,cameraY,cameraHeading;
+    private MapViewport camera;
+    private long cameraRequestedMs;
     private boolean busy;
     private volatile boolean closed;
     private long retryAt;
@@ -29,14 +30,17 @@ final class BasemapLoader implements AutoCloseable {
         store=new MapTileStore(new java.io.File(context.getFilesDir(),"visible-map-tiles").toPath(),MapTileStore.TEMPLATE,
                 "MotoNav/"+BuildConfig.VERSION_NAME+" (https://github.com/gargamelzhao0-del/motonav)");
     }
-    void request(Basemap.Focus focus,boolean progressive) {
+    void request(Basemap.Focus focus,boolean progressive,NavigationFrame navigation) {
         if(closed||focus==null)return;
         int requested=focus.route().revision();
-        int heading=Math.max(0,focus.route().heading());
-        boolean moved=progressive&&(Math.hypot(focus.route().x()-cameraX,focus.route().y()-cameraY)>90
-                ||Math.abs(Math.IEEEremainder((heading-cameraHeading)/10.0,360))>45);
+        // Finish an in-flight region rather than cancelling it for every
+        // speed/GPS-state fluctuation. Origin changes still cancel immediately.
+        if(busy&&requested==revision)return;
+        var viewport=MapViewport.of(focus,navigation);
+        long now=SystemClock.elapsedRealtime();
+        boolean moved=progressive&&viewport.refreshFrom(camera)&&(camera==null||now-cameraRequestedMs>=1500);
         if(requested!=revision||moved){
-            revision=requested;cameraX=focus.route().x();cameraY=focus.route().y();cameraHeading=heading;
+            revision=requested;camera=viewport;cameraRequestedMs=now;
             scene=null;retryAt=0;generation++;
         }
         if(scene!=null)return;
@@ -51,9 +55,9 @@ final class BasemapLoader implements AutoCloseable {
                     if(value==null)throw new IllegalArgumentException("coordinate conversion failed");
                     return new DeviceRoute.Coordinate(value.latitude,value.longitude);
                 };
-                var builder=new LocalMapBuilder(focus,conversion);
+                var builder=new LocalMapBuilder(focus.origin(),conversion,viewport);
                 var gps=Basemap.gpsOrigin(focus.origin(),conversion);
-                var tiles=Basemap.visibleTiles(gps);int loaded=0;
+                var tiles=Basemap.visibleTiles(gps,viewport);int loaded=0;
                 for(var tile:tiles) {
                     if(closed||token!=generation)throw new InterruptedException();
                     builder.add(tile,VectorTile.decode(store.get(tile)));
@@ -75,6 +79,6 @@ final class BasemapLoader implements AutoCloseable {
             });
         });
     }
-    void clear(){generation++;revision=0;scene=null;retryAt=0;}
+    void clear(){generation++;revision=0;scene=null;camera=null;retryAt=0;}
     @Override public void close(){closed=true;clear();worker.shutdownNow();}
 }

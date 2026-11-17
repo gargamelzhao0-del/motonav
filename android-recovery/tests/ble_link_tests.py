@@ -406,7 +406,7 @@ with tempfile.TemporaryDirectory(prefix='motonav-ble-tests-') as directory:
         path.write_text(source, encoding='utf-8')
     (output / 'BleLinkTests.java').write_text(harness, encoding='utf-8')
     names = ['BleLink', 'DiagnosticRecord', 'Simulation', 'Protocol', 'LocalNetwork', 'NetworkProtocol',
-             'NavigationProtocol', 'NavigationFrame', 'DeviceRoute', 'Basemap', 'RouteProtocol', 'NavigationDetails', 'BleDiagnosticProtocol']
+             'NavigationProtocol', 'NavigationFrame', 'DeviceRoute', 'Basemap', 'MapViewport', 'RouteProtocol', 'NavigationDetails', 'BleDiagnosticProtocol']
     sources = [root / 'app/src/main/java/com/motonav/companion' / (name + '.java') for name in names]
     java = str(Path(os.environ['JAVA_HOME']) / 'bin' / ('java.exe' if os.name == 'nt' else 'java')) if os.environ.get('JAVA_HOME') else 'java'
     subprocess.run([java, '-m', 'jdk.compiler/com.sun.tools.javac.Main', '-encoding', 'UTF-8', '-source', '17', '-target', '17',

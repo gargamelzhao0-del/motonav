@@ -61,7 +61,7 @@ public final class BasemapTests {
         var syntheticTile=new Basemap.Tile(14,8186,5448);
         var syntheticOrigin=Basemap.coordinate(syntheticTile,4096,2048,2048);
         List<List<VectorTile.Point>> buildings=new ArrayList<>();
-        for(int i=0;i<400;i++){int x=1600+(i%10)*80,y=1600+(i/10)*80;buildings.add(List.of(new VectorTile.Point(x,y),new VectorTile.Point(x+40,y),new VectorTile.Point(x+40,y+40),new VectorTile.Point(x,y+40)));}
+        for(int i=0;i<400;i++){int x=1800+(i%20)*20,y=1800+(i/20)*20;buildings.add(List.of(new VectorTile.Point(x,y),new VectorTile.Point(x+10,y),new VectorTile.Point(x+10,y+10),new VectorTile.Point(x,y+10)));}
         var grouped=new LocalMapBuilder(syntheticOrigin,c->c);grouped.add(syntheticTile,List.of(new VectorTile.Feature("buildings","",3,4096,buildings)));
         var completeBuildings=grouped.finish(1).items();check(!completeBuildings.isEmpty()&&completeBuildings.size()%2==0,"building triangles kept as complete objects");
         for(int i=0;i<completeBuildings.size();i+=2){var a=completeBuildings.get(i);var b=completeBuildings.get(i+1);long shared=List.of(a.a(),a.b(),a.c()).stream().filter(v->List.of(b.a(),b.b(),b.c()).contains(v)).count();check(shared==2,"each selected building retains both triangles");}
