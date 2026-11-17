@@ -155,3 +155,19 @@ requires a live authenticated link; STOP, arrival and disconnect clear it.
 WAIT with an actual position shows a yellow approximate or blue precise dot
 and an accuracy label. Valid live guidance retains the white directional
 vehicle marker. Old FOCUS frames have no measured-position semantics.
+
+### Firmware 0.3.11: separate historical display context
+
+The wire format and current-position lifetime are unchanged. Quality zero and
+source expiry still clear the current position. A separate bounded
+`MapPositionHistory` retains the last validated observation, its original age
+and its coordinate revision for at most 60 seconds of measurement age.
+Unknown focus frames and navigation heartbeats cannot renew this history.
+Origin changes, STOP/arrival and session/security/subscription resets clear it.
+
+During a temporary observation gap, the UI may show that historical coordinate
+as a gray point with an explicit approximate age. It centers on the retained
+coordinate, not on any unmeasured camera position in an unknown focus frame.
+The gray style is a graphics choice, not a new wire quality value. History never
+makes navigation live, supplies speed, or creates turn instructions. Older apps
+without independently measured positions do not produce a historical marker.

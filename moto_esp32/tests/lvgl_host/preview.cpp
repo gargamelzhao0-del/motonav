@@ -287,6 +287,22 @@ int main(int argc, char **argv) {
         if(marker_changes<30){std::cerr<<"Measured WAIT position has no visible marker\n";return 1;}
         snapshot.route.position_quality=2;snapshot.route.position_accuracy_m=8;
         save(display,directory/"position-precise.ppm");require_label("已定位 · 精度约 8 m");
+        const auto measured_x=snapshot.route.x;
+        snapshot.route.last_position={snapshot.route.revision,snapshot.route.x,snapshot.route.y,snapshot.route.heading,8,2,20000};
+        snapshot.route.position_quality=0;snapshot.route.position_accuracy_m=0;
+        snapshot.route.x+=120; // An unavailable camera focus is not an observed position.
+        save(display,directory/"position-historical.ppm");require_label("等待定位");require_label("上次位置 · 约 20 秒前");require_label("--");
+        auto historical_pixels=pixels;marker_changes=0;
+        for(int y=288;y<=324;y++)for(int x=215;x<=251;x++)marker_changes+=pixels[y*466+x]!=without_position[y*466+x];
+        if(marker_changes<30){std::cerr<<"Historical position is invisible\n";return 1;}
+        snapshot.route.last_position.age_ms=26000;
+        save(display,directory/"position-historical-aged.ppm");require_label("上次位置 · 约 26 秒前");
+        for(int y=160;y<330;y++)for(int x=50;x<416;x++)if(pixels[y*466+x]!=historical_pixels[y*466+x]){
+            std::cerr<<"Age update moves the historical map/marker\n";return 1;
+        }
+        snapshot.route.x=measured_x;snapshot.route.position_quality=1;snapshot.route.position_accuracy_m=550;
+        save(display,directory/"position-recovered.ppm");require_label("等待指引");require_label("大致位置 · 精度约 550 m");
+        snapshot.route.last_position.age_ms=60000;
         snapshot.route.position_quality=0;snapshot.route.position_accuracy_m=0;
         save(display,directory/"position-expired.ppm");require_label("等待定位");
         if(pixels!=without_position){std::cerr<<"Unavailable position leaves a stale marker\n";return 1;}

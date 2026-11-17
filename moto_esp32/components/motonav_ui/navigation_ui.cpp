@@ -62,7 +62,8 @@ void route_map(const ScreenSnapshot &state) {
     layout(true);
     const auto &r=state.route;
     const bool live=mode==ScreenMode::Live && !r.overview;
-    const int marker=live?3:r.position_quality;
+    const bool historical=!live&&!r.position_quality&&has_last_position(r);
+    const int marker=live?3:historical?4:r.position_quality;
     const bool marker_changed=map_marker!=marker;map_marker=marker;
     const bool changed_mode=live!=map_live;
     map_live=live;
@@ -96,7 +97,9 @@ void route_map(const ScreenSnapshot &state) {
         }
         return;
     }
-    float heading=r.heading<0?0:static_cast<float>(r.heading)*0.001745329252f;
+    const int position_x=historical?r.last_position.x:r.x,position_y=historical?r.last_position.y:r.y;
+    const int bearing=historical?r.last_position.heading:r.heading;
+    float heading=bearing<0?0:static_cast<float>(bearing)*0.001745329252f;
     bool changed=base_changed||marker_changed;
     const float speed=live?std::max(0,state.guidance.speed_kmh):0;
     // Waiting preview uses a fixed framing preset, never a simulated speed/fix.
@@ -106,10 +109,10 @@ void route_map(const ScreenSnapshot &state) {
     const float anchor=r.local_view?(270+36*tilt/0.872664626f)/466:0.7f;
     uint32_t now=lv_tick_get();
     if(map_revision!=r.revision || changed_mode) {
-        map_revision=r.revision; camera={static_cast<float>(r.x),static_cast<float>(r.y),heading,scale,tilt,anchor};
+        map_revision=r.revision; camera={static_cast<float>(position_x),static_cast<float>(position_y),heading,scale,tilt,anchor};
         from_camera=target_camera=camera; transition_at=now; changed=true;
-    } else if(target_camera.x!=r.x || target_camera.y!=r.y || std::abs(target_camera.heading-heading)>0.0001f||target_camera.perspective!=tilt||target_camera.scale!=scale) {
-        from_camera=camera; target_camera={static_cast<float>(r.x),static_cast<float>(r.y),heading,scale,tilt,anchor}; transition_at=now;
+    } else if(target_camera.x!=position_x || target_camera.y!=position_y || std::abs(target_camera.heading-heading)>0.0001f||target_camera.perspective!=tilt||target_camera.scale!=scale) {
+        from_camera=camera; target_camera={static_cast<float>(position_x),static_cast<float>(position_y),heading,scale,tilt,anchor}; transition_at=now;
     }
     float fraction=std::min(1.0f,static_cast<float>(now-transition_at)/900);
     float turn=std::remainder(target_camera.heading-from_camera.heading,6.283185307f);
@@ -124,7 +127,7 @@ void route_map(const ScreenSnapshot &state) {
     if(changed) {
         MapPoint points[64];
         for(unsigned i=0;i<r.count;i++)points[i]={r.points[i].x,r.points[i].y};
-        if(!render_route_map(map_view,camera,{points,r.count,nullptr,0,marker!=0,features,basemap.count,r.local_view,static_cast<uint8_t>(live?0:r.position_quality)})) {
+        if(!render_route_map(map_view,camera,{points,r.count,nullptr,0,marker!=0,features,basemap.count,r.local_view,static_cast<uint8_t>(live?0:historical?3:r.position_quality)})) {
             lv_obj_delete(map_view); map_view=nullptr; map_failed=true; layout(false);
         }
     }

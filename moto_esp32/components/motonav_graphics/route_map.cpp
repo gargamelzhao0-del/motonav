@@ -83,10 +83,14 @@ void player(MapRaster &raster, float x, float y) {
     raster.polygon(right,3,panel_color(0xf2f3e9));
 }
 void position_dot(MapRaster &raster,float x,float y,uint8_t style) {
-    const auto color=panel_color(style==1?0xffc265:0x77caff);
-    constexpr float step=6.283185307f/16;
-    for(unsigned i=0;i<16;i++)raster.line({x+18*std::sin(i*step),y+18*std::cos(i*step)},
-        {x+18*std::sin((i+1)*step),y+18*std::cos((i+1)*step)},1,color);
+    const auto color=panel_color(style==1?0xffc265:style==2?0x77caff:0xaab0b4);
+    static const auto offsets=[] {
+        std::array<ProjectedPoint,17> result{};constexpr float step=6.283185307f/16;
+        for(unsigned i=0;i<result.size();i++)result[i]={18*std::sin(i*step),18*std::cos(i*step)};
+        return result;
+    }();
+    for(unsigned i=0;i<16;i++)raster.line({x+offsets[i].x,y+offsets[i].y},
+        {x+offsets[i+1].x,y+offsets[i+1].y},1,color);
     raster.line({x,y},{x,y},16,panel_color(0x12171c));
     raster.line({x,y},{x,y},10,color);
 }
@@ -119,7 +123,7 @@ void paint(MapRaster &raster, MapScene &scene, int top, int bottom) {
         for (size_t i=0; i<scene.route_count; ++i)
             line(raster, scene.route[i], pass ? 7 : 12, pass ? 0xb66dff : 0x2a1440, top, bottom);
     for(size_t i=0;i<scene.highlight_count;i++)line(raster,scene.highlights[i],3,0xe3cfff,top,bottom);
-    if(scene.show_position){
+    if(scene.show_position&&scene.player_y+20>=top&&scene.player_y-20<=bottom+1){
         if(scene.position_style)position_dot(raster,scene.image.header.w/2,scene.player_y,scene.position_style);
         else player(raster, scene.image.header.w/2, scene.player_y);
     }
@@ -273,7 +277,7 @@ lv_obj_t *create_route_map(lv_obj_t *parent, int width, int height) {
 }
 
 bool render_route_map(lv_obj_t *view, const MapCamera &camera, const MapGeometry &geometry) {
-    if (!view || geometry.route_count > 64 || geometry.road_count > 64 ||geometry.feature_count>384||geometry.position_style>2||
+    if (!view || geometry.route_count > 64 || geometry.road_count > 64 ||geometry.feature_count>384||geometry.position_style>3||
         (geometry.feature_count&&!geometry.features)||
         (geometry.route_count && !geometry.route) || (geometry.road_count && !geometry.roads)) return false;
     for(size_t i=0;i<geometry.feature_count;i++) {

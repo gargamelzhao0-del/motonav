@@ -28,6 +28,7 @@ public:
         basemap_enabled_=updates_enabled_=false; map_={}; staging_={}; staged_=0;
         details_enabled_=false;details_={};navigation_sequence_=0;details_at_=0;
         positions_enabled_=false;position_at_=position_until_=0;
+        position_history_.clear();
     }
     const NavigationReceiver &navigation() const { return navigation_; }
     ReceiverStats stats() const { return stats_; }
@@ -47,6 +48,7 @@ public:
         if(plan_.count>=2){
             auto result=plan_;
             if(!navigation_.connected(now)||now<position_at_||now>=position_until_){result.position_quality=0;result.position_accuracy_m=0;}
+            if(navigation_.connected(now))result.last_position=position_history_.last(now,result.revision);
             return result;
         }
         // Older senders can retain their last real route as a static overview.
@@ -64,6 +66,7 @@ private:
     bool details_enabled_=false;
     bool positions_enabled_=false;
     uint64_t position_at_=0,position_until_=0;
+    MapPositionHistory position_history_;
     NavigationDetails details_;
     uint32_t navigation_sequence_=0;
     uint64_t details_at_=0;
@@ -104,6 +107,7 @@ private:
             scene_={}; plan_={}; preview_enabled_=type==3;basemap_enabled_=type==5||type==8||type==11||type==13;updates_enabled_=type==8||type==11||type==13;
             details_enabled_=type==11||type==13;details_={};navigation_sequence_=0;details_at_=0;
             positions_enabled_=type==13;position_at_=position_until_=0;
+            position_history_.clear();
             map_={};staging_={};staged_=0;
         } else if(type==10) {
             if(!details_enabled_||!navigation_.handshaken()||session!=session_||seq<=sequence_||expected_<31)return false;
@@ -142,9 +146,11 @@ private:
                 if(std::abs(px)>32000||std::abs(py)>32000)return false;
                 next.points[i]={static_cast<int16_t>(px),static_cast<int16_t>(py)};
             }
-            if(revision!=plan_.revision){map_={};staging_={};staged_=0;}
+            if(revision!=plan_.revision){map_={};staging_={};staged_=0;position_history_.clear();}
             plan_=next;plan_crc_=geometry_crc;
             position_at_=now;position_until_=quality?now+15000-age:0;
+            if(quality)position_history_.remember({revision,static_cast<int16_t>(x),static_cast<int16_t>(y),
+                static_cast<int16_t>(heading),static_cast<uint16_t>(accuracy),static_cast<uint8_t>(quality),age},now);
         } else if(type==7||type==9) {
             const bool update=type==9;const unsigned header=update?27:22;
             if(!basemap_enabled_||(update&&!updates_enabled_)||!navigation_.handshaken()||session!=session_||seq<=sequence_||expected_<header+4)return false;
@@ -206,7 +212,7 @@ private:
             if(!core(body,now))return false;
             navigation_sequence_=seq;
             if(bytes_[13]!=Live||revision!=details_.revision)details_={};
-            if(bytes_[13]==Stopped || bytes_[13]==Arrived) { scene_={}; plan_={}; plan_crc_=0;map_={};staging_={};staged_=0; }
+            if(bytes_[13]==Stopped || bytes_[13]==Arrived) { scene_={}; plan_={}; plan_crc_=0;map_={};staging_={};staged_=0;position_history_.clear(); }
             else if(bytes_[13]==Live)scene_=next;
             if(count) { route_revision_=revision; route_crc_=geometry_crc; }
         }

@@ -1,5 +1,6 @@
 #pragma once
 #include <cstdint>
+#include "motonav/core/map_position_history.h"
 namespace motonav {
 struct RoutePoint { int16_t x=0,y=0; };
 struct RouteScene {
@@ -16,5 +17,10 @@ struct RouteScene {
     // It never supplies turn instructions or speed.
     uint8_t position_quality=0;
     uint16_t position_accuracy_m=0;
+    MapPositionObservation last_position{};
 };
+inline bool has_last_position(const RouteScene &scene){
+    return scene.last_position.quality&&scene.last_position.revision==scene.revision
+        &&scene.last_position.age_ms<MapPositionHistory::MaxAgeMs;
+}
 }

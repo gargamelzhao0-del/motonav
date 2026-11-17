@@ -128,6 +128,9 @@ void update_navigation_hud(NavigationHud &hud,const ScreenSnapshot &state,float 
     if(!live&&state.route.position_quality){
         std::snprintf(value,sizeof(value),"%s · 精度约 %u m",state.route.position_quality==1?"大致位置":"已定位",state.route.position_accuracy_m);
         status=value;
+    }else if(!live&&has_last_position(state.route)){
+        std::snprintf(value,sizeof(value),"上次位置 · 约 %lu 秒前",static_cast<unsigned long>((state.route.last_position.age_ms+999)/1000));
+        status=value;
     }
     set_label_text(hud.status,status);
     for(unsigned i=0;i<4;i++) {
