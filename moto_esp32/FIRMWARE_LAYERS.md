@@ -1,4 +1,4 @@
-# 固件分层与接口（0.3.5）
+# 固件分层与接口（0.3.13）
 
 本文件描述当前已实现的结构。主程序只组装模块；板级实现由独立 ESP-IDF 组件管理，应用不直接调用 BSP、NimBLE 或 LCD/I²C 接口。NAV3 协议保持兼容；NAV4 接收器和路线状态属于核心层，正式 UI 通过图形接口渲染路线。
 
@@ -25,8 +25,15 @@ moto_esp32/
 │   ├── motonav_platform/             NVS 初始化、设备名、版本、时钟、内存
 │   ├── motonav_core/                 纯 C++ 协议、会话、显示状态模型
 │   ├── motonav_ui/                   导航页面、仪表控件、可选页面扩展接口
-│   │   └── label_cache.*            私有的有界标签像素缓存，不接触驱动
-│   └── motonav_graphics/             全屏地图投影、裁剪、RGB565 条带渲染
+│   │   ├── navigation_hud.*         转向、速度、道路与状态提示
+│   │   ├── map_annotations.*        独立名称/地标投影和避让
+│   │   └── *label_cache.*           有界像素/透明遮罩缓存，不接触驱动
+│   └── motonav_graphics/             地图绘制，不读取手机或驱动状态
+│       ├── route_map.cpp             LVGL 接入、PSRAM 场景缓存与绘制顺序
+│       └── include/motonav/graphics/
+│           ├── map_projection.h      相机、近裁面和中心线裁剪
+│           ├── map_stroke.h          道路表面投影、接头/端帽
+│           └── map_raster.h          准备好的面/椭圆 → RGB565 条带
 ├── tests/
 │   ├── device/motonav_bench/         可选设备测试组件，模拟地图也在这里
 │   ├── host/                        协议、会话、状态、栅格和 QSPI 的 SDK 替身测试
@@ -71,6 +78,10 @@ flowchart TD
 
 驱动不包含导航协议、页面或模拟数据；核心不包含 RTOS、LVGL 或硬件头文件；导航 UI 不包含任何驱动头文件。图形组件只接受相机与几何，不连接蓝牙，也不内置模拟路线。应用在启动时注入快照读取器；测试在启动时注入时钟/FPS 服务。
 
+0.3.13 的地图条带缓存按图形类型分池，存放在有界 PSRAM 场景中；DMA 缓冲仍由显示驱动独占。`MapStroke` 将地面线宽投影为四边形及局部椭圆端帽，`MapRaster` 只负责裁切和扫描线填充。缓存每次相机变化时准备一次，条带绘制不分配内存。首批修改保持 `render_route_map()` 和 NAV4S5 调用接口，手机的 `MapViewport` / `MapDetailSelector` / `MapPolygon` 负责可见范围、细节预算和建筑内院，固件不承担地图供应商解析。
+
+LVGL 样式属性缓存由 `CONFIG_LV_OBJ_STYLE_CACHE=y` 开启，每个对象增加 8 字节。旧本地 `sdkconfig` 也需开启此项；仅修改 defaults 不会覆盖既有设置。性能以本版本真实底图测试为准，不能沿用早期合成地图的 60 FPS 数字。
+
 ## 应用调用接口
 
 | 公共头文件 | 接口 | 责任 |
@@ -112,7 +123,7 @@ ESP_ERROR_CHECK(drivers::ble_start(name, drivers::firmware_version(), navigation
 
 ### 显示颜色选择
 
-`display_init(&display)` 默认使用已实屏确认的 RGB332 传输。LVGL 和图形组件仍绘制 RGB565_SWAPPED，应用不用更改页面、字图或地图绘制接口。需要完整 16 位配色时：
+驱动的默认 `DisplayConfig` 使用已实屏确认的 RGB332 传输；当前正常应用通过 CMake 配置显式选择 RGB565 全彩。LVGL 和图形组件始终绘制 RGB565_SWAPPED，颜色传输方式不改变页面或地图接口。直接调用驱动并选择完整 16 位配色时：
 
 ```cpp
 drivers::DisplayConfig config;
@@ -136,7 +147,7 @@ ESP_ERROR_CHECK(drivers::display_init(&display, config));
 - 从普通应用任务调用 LVGL 时先 `display_lock()`，完成后解锁；LVGL 自己的事件和定时回调已经持锁。亮度接口自己加锁，并在完成上一笔 DMA 后操作面板。
 - Dashboard 的点数组必须与页面同寿命。导航页持有自己的 Dashboard；测试组件创建独立 LVGL screen，退出时切回导航页并删除测试 screen，连同地图/仪表背景一起释放。
 - `motonav_ui/label_cache.cpp` 独立管理 8 槽标签缓存，仅接受已验证的内置字体、ASCII 单行居中标签和实色背景；透明、渐变、多行、选中、旋转及其他字体交回 LVGL。圆角仍由 LVGL 绘制，缓存只复制实色中部。缓存键包含文字副本、绘制描述、尺寸、背景色与圆角；不保存可变文字指针作为内容依据。一个延迟分配的约 466 KiB 像素池按平台的大块分配策略进入 PSRAM，槽位复用，不逐帧分配；跨页面保留，LVGL 反初始化时释放。`label_cache_stats()` 只读命中/重绘/容量，调用时持 LVGL 锁。
-- 地图接口调用必须持 LVGL 锁。路线最多 512 点、背景道路最多 64 段；输入在函数返回前复制/投影。当前自定义绘制单元依赖 LVGL 9.5.0 私有接口，不能单独升级 LVGL 而跳过回归。
+- 地图接口调用必须持 LVGL 锁。当前渲染接口的局部路线最多 64 点、背景道路最多 64 段、真实底图最多 384 图元；完整路线的接收容量与局部绘制容量不同。输入在函数返回前复制/投影。当前自定义绘制单元依赖 LVGL 9.5.0 私有接口，不能单独升级 LVGL 而跳过回归。
 
 ## 正式构建与可删除测试
 

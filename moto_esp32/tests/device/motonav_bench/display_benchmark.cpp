@@ -32,6 +32,7 @@ uint64_t test_started = 0, last_sample = 0;
 uint32_t minimum_fps = UINT32_MAX, samples = 0;
 uint64_t total_fps = 0;
 uint64_t map_render_us = 0, map_render_max_us = 0, map_frames = 0;
+uint64_t geometry_us=0,annotations_us=0,hud_us=0;
 LabelCacheStats cache_start;
 
 const char *workload_name() {
@@ -79,6 +80,7 @@ void reset_benchmark() {
     test_started = last_sample = milliseconds();
     minimum_fps = UINT32_MAX; samples = 0; total_fps = 0;
     map_render_us = map_render_max_us = map_frames = 0;
+    geometry_us=annotations_us=hud_us=0;
     cache_start = label_cache_stats();
     if (map_canvas) configure_route_map_profiler(map_canvas, services.now_us);
     services.reset_fps(display);
@@ -102,6 +104,9 @@ void report_benchmark() {
     if (map_frames) ESP_LOGI("map_profile", "frames=%llu prepare_avg_us=%llu prepare_max_us=%llu",
         static_cast<unsigned long long>(map_frames), static_cast<unsigned long long>(map_render_us / map_frames),
         static_cast<unsigned long long>(map_render_max_us));
+    if(map_frames)ESP_LOGI("map_prepare", "geometry_us=%llu annotations_us=%llu hud_us=%llu",
+        static_cast<unsigned long long>(geometry_us/map_frames),static_cast<unsigned long long>(annotations_us/map_frames),
+        static_cast<unsigned long long>(hud_us/map_frames));
     if (map_canvas) {
         const auto paint = route_map_paint_stats(map_canvas);
         ESP_LOGI("map_paint", "tiles=%llu total_us=%llu tile_avg_us=%llu",
@@ -195,7 +200,9 @@ bool refresh(void *, const ScreenSnapshot &state) {
             if (!map_canvas) { set_label_text(view.title, "MAP MEMORY ERROR"); return true; }
             uint64_t begin = static_cast<uint64_t>(services.now_us());
             auto camera=render_map_benchmark(map_canvas, now - test_started);
+            uint64_t geometry_end=static_cast<uint64_t>(services.now_us());
             render_map_benchmark_labels(map_annotations,camera);
+            uint64_t annotations_end=static_cast<uint64_t>(services.now_us());
             // The removable test exercises the production HUD, with an explicit
             // DISPLAY TEST marker and no synthetic input sent to the navigation service.
             ScreenSnapshot test{};test.linked=test.encrypted=test.subscribed=test.handshaken=true;
@@ -204,11 +211,13 @@ bool refresh(void *, const ScreenSnapshot &state) {
             std::snprintf(test.details.next_road,sizeof(test.details.next_road),"下一路段");
             test.has_guidance=test.stream_fresh=true;test.guidance={Live,3,120,4000,360,36};
             test.route.local_view=true;test.route.revision=test.basemap_revision=1;
-            test.basemap_count=383;test.basemap_complete=true;
+            test.basemap_count=384;test.basemap_complete=true;
             update_navigation_hud(map_hud,test,camera.heading);
             uint64_t duration = static_cast<uint64_t>(services.now_us()) - begin;
             if (now - test_started >= 2500) {
                 map_render_us += duration; ++map_frames;
+                geometry_us+=geometry_end-begin;annotations_us+=annotations_end-geometry_end;
+                hud_us+=begin+duration-annotations_end;
                 if (duration > map_render_max_us) map_render_max_us = duration;
             }
         } else {

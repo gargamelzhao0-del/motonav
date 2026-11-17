@@ -34,9 +34,11 @@ bool eligible(lv_draw_task_t *task) {
             ||d->opa!=LV_OPA_COVER||d->rotation||d->ofs_x||d->ofs_y||d->outline_stroke_width||d->decor
             ||d->base.drop_shadow_opa||d->hint||d->sel_start!=LV_DRAW_LABEL_NO_TXT_SEL||d->sel_end!=LV_DRAW_LABEL_NO_TXT_SEL)return false;
     if(d->font!=&motonav_ui_18&&d->font!=&motonav_speed_66&&d->font!=&motonav_distance_36&&d->font!=&motonav_small_14
-            &&d->font!=&lv_font_montserrat_20)return false;
+            &&d->font!=&lv_font_montserrat_16&&d->font!=&lv_font_montserrat_20
+            &&d->font!=&lv_font_montserrat_28&&d->font!=&lv_font_montserrat_48)return false;
     // Solid legacy labels keep their faster RGB565 copy cache.
-    if(d->font==&lv_font_montserrat_20&&lv_obj_get_style_bg_opa(d->base.obj,LV_PART_MAIN)==LV_OPA_COVER)return false;
+    if((d->font==&lv_font_montserrat_16||d->font==&lv_font_montserrat_20||d->font==&lv_font_montserrat_28||d->font==&lv_font_montserrat_48)
+            &&lv_obj_get_style_bg_opa(d->base.obj,LV_PART_MAIN)==LV_OPA_COVER)return false;
 #if LV_DRAW_TRANSFORM_USE_MATRIX
     if(!lv_matrix_is_identity(&task->matrix))return false;
 #endif

@@ -14,6 +14,8 @@ bool circle(Box a){
     return a.top>=140&&a.bottom<=337;
 }
 bool crosses(Box r,ProjectedPoint a,ProjectedPoint b) {
+    if(std::max(a.x,b.x)<r.left||std::min(a.x,b.x)>r.right||
+       std::max(a.y,b.y)<r.top||std::min(a.y,b.y)>r.bottom)return false;
     float lo=0,hi=1,dx=b.x-a.x,dy=b.y-a.y;
     const float p[]{-dx,dx,-dy,dy},q[]{a.x-r.left,r.right-a.x,a.y-r.top,r.bottom-a.y};
     for(unsigned i=0;i<4;i++){
@@ -99,12 +101,13 @@ void update_map_annotations(MapAnnotations &view,const MapLabels &labels,const M
         if(!placed)continue;
         auto *text=view.text[used];set_label_text(text,label.name);
         lv_obj_set_pos(text,selected.left,selected.top);lv_obj_set_size(text,width,height);
-        lv_obj_set_style_text_color(text,lv_color_hex(color(label.kind)),0);
+        const auto ink=lv_color_hex(color(label.kind));
+        if(!lv_color_eq(lv_obj_get_style_text_color(text,LV_PART_MAIN),ink))lv_obj_set_style_text_color(text,ink,0);
         lv_obj_remove_flag(text,LV_OBJ_FLAG_HIDDEN);
         auto *symbol=view.icon[used];lv_obj_set_flag(symbol,LV_OBJ_FLAG_HIDDEN,!poi);
         if(poi){
             set_label_text(symbol,icon(label.kind));lv_obj_set_pos(symbol,marker.left,marker.top);
-            lv_obj_set_style_text_color(symbol,lv_color_hex(color(label.kind)),0);
+            if(!lv_color_eq(lv_obj_get_style_text_color(symbol,LV_PART_MAIN),ink))lv_obj_set_style_text_color(symbol,ink,0);
             occupied[boxes++]={marker.left-3,marker.top-3,marker.right+3,marker.bottom+3};
         }
         occupied[boxes++]={selected.left-4,selected.top-3,selected.right+4,selected.bottom+3};

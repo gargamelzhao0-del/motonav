@@ -25,18 +25,20 @@ with tempfile.TemporaryDirectory(prefix='motonav-firmware-tests-') as directory:
     if args.android_source:
         java = Path(os.environ['JAVA_HOME']) / 'bin' / ('java.exe' if os.name == 'nt' else 'java')
         source = args.android_source.resolve()
-        classes = ['Simulation', 'Protocol', 'NavigationFrame', 'NavigationProtocol', 'DeviceRoute', 'Basemap', 'VectorTile', 'LocalMapLabels', 'LocalMapBuilder', 'MapTileStore', 'RouteProtocol', 'NavigationDetails', 'BleDiagnosticProtocol']
+        classes = ['Simulation', 'Protocol', 'NavigationFrame', 'NavigationProtocol', 'DeviceRoute', 'Basemap', 'MapViewport', 'MapDetailSelector', 'MapPolygon', 'VectorTile', 'LocalMapLabels', 'LocalMapBuilder', 'MapTileStore', 'RouteProtocol', 'NavigationDetails', 'BleDiagnosticProtocol']
         sources = [source / 'app/src/main/java/com/motonav/companion' / (name + '.java') for name in classes]
         sources.append(source / 'tests/NavigationProtocolTests.java')
         sources.append(source / 'tests/RouteProtocolTests.java')
         sources.append(source / 'tests/RoutePlanTests.java')
         sources.append(source / 'tests/BasemapTests.java')
+        sources.append(source / 'tests/MapGeometryTests.java')
         sources.append(source / 'tests/BleDiagnosticProtocolTests.java')
         sources.append(source / 'tests/NavigationDetailsTests.java')
         sources.append(source / 'tests/MapPositionTests.java')
         sources.append(source / 'tests/MapLabelTests.java')
         subprocess.run([str(java), '-m', 'jdk.compiler/com.sun.tools.javac.Main', '-encoding', 'UTF-8',
                         '-d', str(output), *map(str, sources)], check=True)
+        subprocess.run([str(java), '-cp', str(output), 'com.motonav.companion.MapGeometryTests'], check=True)
         labels_fixture = output / 'nav4-labels.frames'
         subprocess.run([str(java), '-cp', str(output), 'com.motonav.companion.MapLabelTests', str(labels_fixture)], check=True)
         assert labels_fixture.read_bytes() == (root / 'tests/fixtures/nav4-labels.frames').read_bytes(), 'Label fixture changed'
@@ -72,7 +74,7 @@ with tempfile.TemporaryDirectory(prefix='motonav-firmware-tests-') as directory:
         'display_runtime_test': ['components/motonav_display/display.cpp', 'components/motonav_display/pixel_pack.cpp',
                                  'main/app/device_supervisor.cpp'],
     }
-    for name in ['map_labels_test', 'map_position_test', 'navigation_details_test', 'basemap_protocol_test', 'navigation_protocol_test', 'route_protocol_test', 'ble_channel_test', 'display_model_test', 'map_projection_test', 'map_raster_test',
+    for name in ['map_labels_test', 'map_position_test', 'navigation_details_test', 'basemap_protocol_test', 'navigation_protocol_test', 'route_protocol_test', 'ble_channel_test', 'display_model_test', 'map_projection_test', 'map_raster_test', 'map_stroke_test',
                  'navigation_session_test', 'display_qspi_test', 'pixel_pack_test',
                  'navigation_service_test', 'notification_queue_test', 'ble_transport_test', 'display_runtime_test', 'diagnostic_protocol_test', 'diagnostic_bridge_test']:
         executable = output / (name + ('.exe' if os.name == 'nt' else ''))

@@ -1,5 +1,6 @@
 #include "motonav/graphics/route_map.h"
 #include "motonav/graphics/map_raster.h"
+#include "motonav/graphics/map_stroke.h"
 #include "round_map_damage.h"
 #include "src/draw/lv_image_decoder_private.h"
 #include "src/draw/lv_draw_private.h"
@@ -27,16 +28,19 @@ struct MapScene {
     lv_image_dsc_t image{};
     Segment roads[64]{}, route[63]{};
     Segment highlights[48]{};
+    struct StrokePair { MapStroke body,edge; } route_surfaces[63]{};
     size_t highlight_count=0;
     float player_y=326;
     struct Feature {
+        int16_t top=0,bottom=0;
+        uint16_t shape=0,edge=0;
         uint8_t kind=0;
-        float top=0,bottom=0;
-        union Geometry {
-            ProjectedPoint points[3];Segment line;
-            Geometry():points{}{}
-        } geometry;
     } features[384]{};
+    // Compact typed pools keep active cache lines contiguous. A triangle no
+    // longer reserves/copies space for two complete road surfaces.
+    MapRaster::PreparedPolygon areas[384]{};
+    MapStroke surfaces[384]{},edges[384]{};
+    uint16_t area_count=0,surface_count=0,edge_count=0;
     uint16_t paint_order[384]{};
     size_t feature_count=0;
     bool compass=false;
@@ -108,11 +112,10 @@ void paint(MapRaster &raster, MapScene &scene, int top, int bottom) {
         const auto &f=scene.features[scene.paint_order[i]];
         if(f.bottom<top||f.top>bottom+0.5f)continue;
         const unsigned kind=f.kind;
-        if(kind>=3)raster.polygon(f.geometry.points,3,panel_color(kind==4?0x1e4560:kind==5?0x2a4430:0x313b3f));
+        if(kind>=3)raster.polygon(scene.areas[f.shape],panel_color(kind==4?0x1e4560:kind==5?0x2a4430:0x313b3f));
         else {
-            const auto &segment=f.geometry.line;
-            if(kind==2)line(raster,segment,10,0x3a4144,top,bottom);
-            line(raster,segment,kind==2?6:kind==1?5:3,kind==2?0xc4cacc:kind==1?0x929ca1:0x6c787e,top,bottom);
+            if(kind==2)scene.edges[f.edge].paint(raster,panel_color(0x3a4144));
+            scene.surfaces[f.shape].paint(raster,panel_color(kind==2?0xc4cacc:kind==1?0x929ca1:0x6c787e));
         }
     }
     for (size_t i=0; i<scene.road_count; ++i) {
@@ -120,8 +123,11 @@ void paint(MapRaster &raster, MapScene &scene, int top, int bottom) {
         line(raster, scene.roads[i], 4, 0x66757c, top, bottom);
     }
     for (int pass=0; pass<2; ++pass)
-        for (size_t i=0; i<scene.route_count; ++i)
-            line(raster, scene.route[i], pass ? 7 : 12, pass ? 0xb66dff : 0x2a1440, top, bottom);
+        for (size_t i=0; i<scene.route_count; ++i) {
+            if(scene.compass){const auto &stroke=pass?scene.route_surfaces[i].body:scene.route_surfaces[i].edge;
+                if(stroke.intersects_y(top,bottom))stroke.paint(raster,panel_color(pass?0xb66dff:0x2a1440));}
+            else line(raster, scene.route[i], pass ? 7 : 12, pass ? 0xb66dff : 0x2a1440, top, bottom);
+        }
     for(size_t i=0;i<scene.highlight_count;i++)line(raster,scene.highlights[i],3,0xe3cfff,top,bottom);
     if(scene.show_position&&scene.player_y+20>=top&&scene.player_y-20<=bottom+1){
         if(scene.position_style)position_dot(raster,scene.image.header.w/2,scene.player_y,scene.position_style);
@@ -229,7 +235,9 @@ lv_obj_t *create_route_map(lv_obj_t *parent, int width, int height) {
 #endif
     }
 #ifdef ESP_PLATFORM
-    void *memory = heap_caps_malloc(sizeof(MapScene), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    // Projected surfaces are bounded but larger than centerlines. Keep their
+    // cache in PSRAM; internal RAM is reserved for the driver and BLE runtime.
+    void *memory = heap_caps_malloc(sizeof(MapScene), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
 #else
     void *memory = std::malloc(sizeof(MapScene));
 #endif
@@ -293,20 +301,25 @@ bool render_route_map(lv_obj_t *view, const MapCamera &camera, const MapGeometry
     scene->position_style=geometry.position_style;
     scene->player_y=scene->image.header.h*camera.anchor_y;
     scene->highlight_count=0;
+    scene->area_count=scene->surface_count=scene->edge_count=0;
     scene->feature_count=0;scene->compass=geometry.compass;
     ProjectedPoint a, b;
     for(size_t i=0;i<geometry.feature_count;i++) {
         const auto &f=geometry.features[i];MapScene::Feature next;next.kind=f.kind;
         if(f.kind<3) {
-            if(!projection.segment(f.a,f.b,a,b))continue;
-            new(&next.geometry.line) Segment(a,b);
-            next.top=std::min(a.y,b.y)-10;next.bottom=std::max(a.y,b.y)+10;
+            if(!projection.segment(f.a,f.b,a,b,20))continue;
+            next.shape=scene->surface_count;
+            if(!scene->surfaces[next.shape].prepare_projected(projection,f.a,f.b,a,b,f.kind==2?6.5f:f.kind==1?5.0f:2.8f))continue;
+            scene->surface_count++;
+            if(f.kind==2){next.edge=scene->edge_count++;scene->edges[next.edge].prepare_projected(projection,f.a,f.b,a,b,10);}
+            next.top=static_cast<int16_t>(std::floor(std::min(a.y,b.y)-24));next.bottom=static_cast<int16_t>(std::ceil(std::max(a.y,b.y)+24));
         } else {
-            next.geometry.points[0]=projection.project(f.a);next.geometry.points[1]=projection.project(f.b);next.geometry.points[2]=projection.project(f.c);
-            float left=next.geometry.points[0].x,right=left,top=next.geometry.points[0].y,bottom=top;
-            for(const auto &p:next.geometry.points){left=std::min(left,p.x);right=std::max(right,p.x);top=std::min(top,p.y);bottom=std::max(bottom,p.y);}
+            ProjectedPoint points[]{projection.project(f.a),projection.project(f.b),projection.project(f.c)};
+            float left=points[0].x,right=left,top=points[0].y,bottom=top;
+            for(const auto &p:points){left=std::min(left,p.x);right=std::max(right,p.x);top=std::min(top,p.y);bottom=std::max(bottom,p.y);}
             if(right<0||left>scene->image.header.w||bottom<0||top>scene->image.header.h)continue;
-            next.top=top;next.bottom=bottom;
+            next.shape=scene->area_count++;scene->areas[next.shape]=MapRaster::PreparedPolygon(points,3);
+            next.top=static_cast<int16_t>(std::floor(std::max(-8192.0f,top)));next.bottom=static_cast<int16_t>(std::ceil(std::min(8192.0f,bottom)));
         }
         scene->features[scene->feature_count++]=next;
     }
@@ -318,8 +331,13 @@ bool render_route_map(lv_obj_t *view, const MapCamera &camera, const MapGeometry
             scene->roads[scene->road_count++] = Segment(a, b);
     }
     for (size_t i=1; i<geometry.route_count; ++i) {
-        if (projection.segment(geometry.route[i-1], geometry.route[i], a, b)) {
-            scene->route[scene->route_count++] = Segment(a, b);
+        if (projection.segment(geometry.route[i-1], geometry.route[i], a, b,geometry.compass?20:8)) {
+            const size_t index=scene->route_count++;
+            scene->route[index] = Segment(a, b);
+            if(geometry.compass) {
+                scene->route_surfaces[index].body.prepare_projected(projection,geometry.route[i-1],geometry.route[i],a,b,8);
+                scene->route_surfaces[index].edge.prepare_projected(projection,geometry.route[i-1],geometry.route[i],a,b,13);
+            }
             if(geometry.compass) {
                 float dx=b.x-a.x,dy=b.y-a.y,length=std::sqrt(dx*dx+dy*dy);
                 if(length>0.01f)for(float d=10;d<length&&scene->highlight_count<48;d+=35) {

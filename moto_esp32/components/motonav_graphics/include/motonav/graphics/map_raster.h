@@ -31,6 +31,47 @@ public:
         ProjectedPoint a_{}, b_{};
         float inverse_length_ = -1;
     };
+    // Edges are prepared once per camera update, reused across DMA strips.
+    class PreparedPolygon {
+        friend class MapRaster;
+    public:
+        PreparedPolygon()=default;
+        PreparedPolygon(const ProjectedPoint *points,size_t count) {
+            if(!points||count<3||count>4)return;
+            for(size_t i=0;i<count;i++)if(!bounded(points[i]))return;
+            for(size_t i=0;i<count;i++) {
+                auto a=points[i],b=points[(i+1)%count];if(a.y==b.y)continue;
+                const float slope=(b.x-a.x)/(b.y-a.y);
+                if(!std::isfinite(slope)){count_=0;return;}
+                int first=ceil_int(std::min(a.y,b.y)-.5f),last=ceil_int(std::max(a.y,b.y)-.5f)-1;
+                edges_[count_++]={a.x+(.5f-a.y)*slope,slope,static_cast<int16_t>(first),static_cast<int16_t>(last)};
+                top_=std::min<int>(top_,first);bottom_=std::max<int>(bottom_,last);
+            }
+        }
+        bool intersects_y(int top,int bottom)const{return count_>=2&&bottom_>=top&&top_<=bottom;}
+    private:
+        struct Edge { float intercept,slope;int16_t first,last; } edges_[4]{};
+        int16_t top_=8192,bottom_=-8192;
+        uint8_t count_=0;
+    };
+    class PreparedEllipse {
+        friend class MapRaster;
+    public:
+        PreparedEllipse()=default;
+        PreparedEllipse(ProjectedPoint center,ProjectedPoint xAxis,ProjectedPoint yAxis):center_(center) {
+            if(!bounded(center)||!bounded(xAxis)||!bounded(yAxis))return;
+            float yy=xAxis.y*xAxis.y+yAxis.y*yAxis.y,det=xAxis.x*yAxis.y-xAxis.y*yAxis.x;
+            if(yy<.000001f||std::abs(det)<.000001f)return;
+            inverse_y_=1/yy;shear_=(xAxis.x*xAxis.y+yAxis.x*yAxis.y)/yy;half_squared_=det*det/yy;
+            float radius=std::sqrt(yy);
+            first_=static_cast<int16_t>(ceil_int(center.y-radius-.5f));last_=static_cast<int16_t>(floor_int(center.y+radius-.5f));
+        }
+        bool intersects_y(int top,int bottom)const{return inverse_y_>0&&last_>=top&&first_<=bottom;}
+    private:
+        ProjectedPoint center_{};
+        float inverse_y_=0,shear_=0,half_squared_=0;
+        int16_t first_=0,last_=-1;
+    };
     MapRaster(uint16_t *pixels, size_t count, int width, int height, size_t stride, int origin_x=0, int origin_y=0)
         : pixels_(pixels), width_(width), height_(height), origin_x_(origin_x), origin_y_(origin_y), stride_(stride),
           valid_(pixels && width > 0 && width <= 466 && height > 0 && height <= 466 &&
@@ -99,6 +140,36 @@ public:
             }
         }
     }
+    void polygon(const PreparedPolygon &polygon,uint16_t color) {
+        if(!valid_||!polygon.intersects_y(origin_y_,origin_y_+height_-1))return;
+        const auto paint=prepare_color(color);
+        int first=std::max<int>(origin_y_,polygon.top_),last=std::min<int>(origin_y_+height_-1,polygon.bottom_);
+        for(int y=first;y<=last;) {
+            const PreparedPolygon::Edge *active[4];unsigned count=0;int end=last;
+            for(unsigned i=0;i<polygon.count_;i++) {
+                const auto &edge=polygon.edges_[i];
+                if(y<edge.first)end=std::min<int>(end,edge.first-1);
+                else if(y<=edge.last){active[count++]=&edge;end=std::min<int>(end,edge.last);}
+            }
+            if(count<2){y=end+1;continue;}
+            for(;y<=end;y++) {
+                float left=8192,right=-8192;
+                for(unsigned i=0;i<count;i++){float x=active[i]->intercept+y*active[i]->slope;left=std::min(left,x);right=std::max(right,x);}
+                span(y,ceil_int(left-.5f),floor_int(right-.5f),paint);
+            }
+        }
+    }
+    void ellipse(const PreparedEllipse &ellipse,uint16_t color) {
+        if(!valid_||!ellipse.intersects_y(origin_y_,origin_y_+height_-1))return;
+        const auto paint=prepare_color(color);
+        int first=std::max<int>(origin_y_,ellipse.first_),last=std::min<int>(origin_y_+height_-1,ellipse.last_);
+        for(int y=first;y<=last;y++) {
+            float dy=y+.5f-ellipse.center_.y;
+            float half=std::sqrt(std::max(0.0f,ellipse.half_squared_*(1-dy*dy*ellipse.inverse_y_)));
+            float center=ellipse.center_.x+ellipse.shear_*dy;
+            span(y,ceil_int(center-half-.5f),floor_int(center+half-.5f),paint);
+        }
+    }
     void line(ProjectedPoint a, ProjectedPoint b, int width, uint16_t color) {
         if (!valid_ || width < 1 || width > 16) return;
         line(PreparedLine(a, b), width, color);
@@ -126,6 +197,7 @@ private:
     struct SpanColor { uint16_t value; const uint32_t *shades; };
     SpanColor prepare_color(uint16_t color) const {
         if(!navigation_style_)return {color,nullptr};
+        if(cached_shades_&&cached_color_==color)return {color,cached_shades_};
         constexpr uint32_t palette[]{0x283033,0x1e4560,0x2a4430,0x313b3f,0x3a4144,0xc4cacc,
             0x929ca1,0x6c787e,0x10191e,0x66757c,0xb66dff,0x2a1440,0xe3cfff,0x12171c,0xf2f3e9,0x899398};
         static constexpr auto table=[] {
@@ -148,7 +220,7 @@ private:
         }();
         for(unsigned i=0;i<16;i++){
             const auto rgb565=rgb(palette[i]);
-            if(color==static_cast<uint16_t>((rgb565>>8)|(rgb565<<8)))return {color,table[i].data()};
+            if(color==static_cast<uint16_t>((rgb565>>8)|(rgb565<<8))){cached_color_=color;cached_shades_=table[i].data();return {color,cached_shades_};}
         }
         return {color,nullptr};
     }
@@ -222,5 +294,7 @@ private:
     size_t stride_;
     bool valid_;
     bool navigation_style_=false;
+    mutable uint16_t cached_color_=0;
+    mutable const uint32_t *cached_shades_=nullptr;
 };
 } // namespace motonav

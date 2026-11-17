@@ -22,3 +22,13 @@ update the removable device benchmark geometry. All motion remains synthetic.
 The 0.3.12 extract adds up to 24 real names/POIs from the same tile. Selection
 uses the test camera's forward view and spatial cells; the 383 geometry
 primitives are unchanged. The data remains ODbL and test-only.
+
+The 0.3.13 extract uses the camera-aware selector with the fixture's LIVE
+36 km/h heading/position: 384 primitives (44 minor-road segments, 101 major-road
+segments, 160 building triangles, 47 water triangles, 32 park triangles), and
+24 labels. The source tile and synthetic route are unchanged. Building holes
+use even-odd tessellation, and context has independent budgets. The animated
+device benchmark keeps its established scale 0.88/pitch 50 degrees for workload
+continuity; its camera moves through this fixed extract, without fetching new
+tiles. The old/new extract benchmarks are different workloads and their FPS
+must not be presented as a pure renderer speedup comparison.
