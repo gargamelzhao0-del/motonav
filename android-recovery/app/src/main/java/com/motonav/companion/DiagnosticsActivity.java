@@ -1,13 +1,13 @@
 package com.motonav.companion;
 
 import android.app.Activity;
+import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Intent;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.text.InputType;
-import android.view.WindowManager;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.LinearLayout;
@@ -25,12 +25,12 @@ public final class DiagnosticsActivity extends Activity {
     };
     @Override public void onCreate(Bundle saved) {
         super.onCreate(saved);
-        getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);
         LinearLayout page=AppUi.page(this,"问题诊断","遇到定位或导航异常时，记录一次复现过程。");
         ScrollView scroll=AppUi.scroll(this,page);
         LinearLayout summary=AppUi.card(this);state=AppUi.text(this,Diagnostics.status(),15,AppUi.ACCENT);summary.addView(state);AppUi.add(page,summary,18);
         LinearLayout mapCard=AppUi.card(this);mapCard.addView(AppUi.text(this,"圆屏底图完整性",17,AppUi.TEXT));
-        mapState=AppUi.text(this,Diagnostics.mapStatus(),13,AppUi.MUTED);mapCard.addView(mapState);AppUi.add(page,mapCard,12);
+        mapState=AppUi.text(this,Diagnostics.mapStatus(),13,AppUi.MUTED);mapState.setTextIsSelectable(true);mapCard.addView(mapState);
+        AppUi.add(mapCard,AppUi.button(this,"复制底图统计",false,this::copyMapStatus),10);AppUi.add(page,mapCard,12);
         text(page, "仅记录定位质量、权限和错误等诊断信息，不含经纬度、目的地、车牌或高德 Key。", 13);
         text(page, "手机连接圆屏，圆屏用 USB 接电脑，即可转发关键状态。默认持续 1 小时，可随时停止。", 13);
         android.widget.Switch extended = new android.widget.Switch(this); extended.setText("本次诊断持续 4 小时");extended.setTextColor(AppUi.TEXT);extended.setMinHeight(AppUi.dp(this,56));page.addView(extended);
@@ -79,6 +79,16 @@ public final class DiagnosticsActivity extends Activity {
         explanation.setOnClickListener(view->{boolean show=details.getVisibility()!=android.view.View.VISIBLE;details.setVisibility(show?android.view.View.VISIBLE:android.view.View.GONE);explanation.setText(show?"收起记录与上传说明":"查看记录与上传说明");});
         AppUi.add(page,explanation,16);AppUi.add(page,details,10);
         setContentView(scroll);
+    }
+    private void copyMapStatus() {
+        ClipboardManager clipboard=getSystemService(ClipboardManager.class);
+        if(clipboard==null){result.setText("剪贴板不可用，可长按底图统计文字选择复制，或截屏发送。");return;}
+        try {
+            clipboard.setPrimaryClip(ClipData.newPlainText("MotoNav 底图统计",
+                "MotoNav "+BuildConfig.VERSION_NAME+"\n"+Diagnostics.mapStatus()));
+            result.setText("底图统计已复制，可粘贴发送。");
+            android.widget.Toast.makeText(this,"底图统计已复制",android.widget.Toast.LENGTH_SHORT).show();
+        } catch(SecurityException error) { result.setText("系统不允许访问剪贴板，可截屏发送底图统计。"); }
     }
     private TextView text(LinearLayout page, String value, int size) {
         TextView text=AppUi.text(this,value,size,AppUi.MUTED);AppUi.add(page,text,12);return text;
