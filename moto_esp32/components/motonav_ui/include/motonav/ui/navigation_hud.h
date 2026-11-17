@@ -10,6 +10,7 @@ struct NavigationHud {
     lv_point_precise_t points[6]{};
     int icon=-1;
     int live=-1;
+    char road_name[64]{};
 };
 void create_navigation_hud(lv_obj_t *parent,NavigationHud &hud);
 void update_navigation_hud(NavigationHud &hud,const ScreenSnapshot &state,float heading);

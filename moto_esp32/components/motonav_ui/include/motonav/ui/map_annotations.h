@@ -7,12 +7,15 @@ namespace motonav {
 // Fixed UI pool; no driver, provider or navigation-liveness dependency.
 struct MapAnnotations {
     static constexpr unsigned Capacity=8;
+    static constexpr unsigned IconCapacity=12;
     lv_obj_t *root=nullptr;
-    lv_obj_t *text[Capacity]{},*icon[Capacity]{};
-    unsigned visible=0;
+    lv_obj_t *text[Capacity]{},*icon[IconCapacity]{};
+    unsigned visible=0,visible_icons=0;
     uint32_t revision=0;
     uint32_t generation=0;
     int widths[MapLabels::Capacity]{};
+    struct Retained { uint64_t key=0;uint8_t side=0;bool text=false,icon=false; } retained[MapLabels::Capacity]{};
+    uint64_t text_keys[Capacity]{},icon_keys[IconCapacity]{};
 };
 void create_map_annotations(lv_obj_t *parent,MapAnnotations &view);
 void update_map_annotations(MapAnnotations &view,const MapLabels &labels,const MapCamera &camera,

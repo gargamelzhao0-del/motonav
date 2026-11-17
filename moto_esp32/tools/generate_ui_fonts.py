@@ -50,7 +50,7 @@ def generate(name, filename, size, charset, weight=None, fallback=None):
                    'static const uint16_t unicodes[] = {'])
     offsets = [ord(c)-start for c in characters]
     source.extend('    '+','.join(map(str, offsets[i:i+24]))+',' for i in range(0,len(offsets),24))
-    line_height,baseline=(25,6) if filename.startswith('Noto') else (bottom-top+2,bottom+1)
+    line_height,baseline=(22,5) if filename.startswith('Noto') else (bottom-top+2,bottom+1)
     source.extend(['};', 'static const lv_font_fmt_txt_cmap_t cmaps[] = {{',
         f'    .range_start={start}, .range_length={end-start+1}, .glyph_id_start=1,',
         f'    .unicode_list=unicodes, .list_length={len(characters)}, .type=LV_FONT_FMT_TXT_CMAP_SPARSE_TINY',
@@ -84,7 +84,7 @@ with TTFont(args.source_directory/'NotoSansSC[wght].ttf') as source_font:
                   if n in supported}-cjk)
 chunks=[extra[i:i+5000] for i in range(0,len(extra),5000)]
 for i,characters in enumerate(chunks):
-    fallback=f'motonav_ui_18_extra_{i+1}' if i+1<len(chunks) else None
-    generate(f'motonav_ui_18_extra_{i}','NotoSansSC[wght].ttf',18,characters,500,fallback)
-generate('motonav_ui_18_ext','NotoSansSC[wght].ttf',18,[c for c in cjk if ord(c)>0x7000],500,'motonav_ui_18_extra_0')
-generate('motonav_ui_18','NotoSansSC[wght].ttf',18,[c for c in cjk if ord(c)<=0x7000],500,'motonav_ui_18_ext')
+    fallback=f'motonav_ui_16_extra_{i+1}' if i+1<len(chunks) else None
+    generate(f'motonav_ui_16_extra_{i}','NotoSansSC[wght].ttf',16,characters,400,fallback)
+generate('motonav_ui_16_ext','NotoSansSC[wght].ttf',16,[c for c in cjk if ord(c)>0x7000],400,'motonav_ui_16_extra_0')
+generate('motonav_ui_16','NotoSansSC[wght].ttf',16,[c for c in cjk if ord(c)<=0x7000],400,'motonav_ui_16_ext')

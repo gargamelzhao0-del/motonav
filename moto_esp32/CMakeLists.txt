@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-set(PROJECT_VER "0.3.13")
+set(PROJECT_VER "0.3.14")
 option(MOTONAV_BLE_DIAGNOSTICS "Include optional phone-to-serial diagnostics bridge" ON)
 option(MOTONAV_NAV_METRICS "Log real navigation display FPS without synthetic input" OFF)
 option(MOTONAV_DEVICE_TESTS "Include removable on-device test screens" OFF)

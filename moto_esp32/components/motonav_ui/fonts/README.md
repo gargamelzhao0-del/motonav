@@ -7,6 +7,13 @@ under the LVGL compact bitmap-offset limit. Unsupported glyphs must remain visib
 with invented text. All three upstream fonts are licensed under SIL OFL 1.1;
 their licenses accompany the generated sources.
 
+From 0.3.14 the Noto UI family is 16 px, weight 400, with 22 px line height
+and a 5 px baseline. It replaces the previous 18 px / weight 500 family rather
+than duplicating it in flash. The character repertoire is unchanged. Anton
+speed digits and Barlow distance fonts keep their original sizes and weights.
+Map captions cache a one-pixel dark halo around the glyph mask; there is no
+opaque rectangular nameplate. This is UI rendering, not a modified typeface.
+
 Pinned source SHA256 values are in `tools/generate_ui_fonts.py`. Sources:
 
 - https://github.com/google/fonts/blob/main/ofl/anton/Anton-Regular.ttf

@@ -1,6 +1,8 @@
 #include "motonav/ui/navigation_hud.h"
 #include "motonav/ui/dashboard.h"
 #include "motonav/ui/fonts.h"
+#include "map_caption.h"
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 
@@ -40,7 +42,7 @@ void create_navigation_hud(lv_obj_t *parent,NavigationHud &hud) {
     lv_obj_set_style_text_align(hud.distance,LV_TEXT_ALIGN_LEFT,0);
     hud.unit=text(hud.root,278,67,45,&motonav_small_14,0x9aa2a5);
     lv_obj_set_style_text_align(hud.unit,LV_TEXT_ALIGN_LEFT,0);
-    hud.maneuver=text(hud.root,196,82,137,&motonav_ui_18,0xd6d9d6);
+    hud.maneuver=text(hud.root,196,84,137,&motonav_ui_16,0xd6d9d6);
     lv_obj_set_style_text_align(hud.maneuver,LV_TEXT_ALIGN_LEFT,0);
     hud.progress=lv_obj_create(hud.root);lv_obj_remove_style_all(hud.progress);lv_obj_set_pos(hud.progress,184,105);lv_obj_set_size(hud.progress,0,3);
     lv_obj_set_style_bg_color(hud.progress,lv_color_hex(0xf0c850),0);lv_obj_set_style_bg_opa(hud.progress,LV_OPA_COVER,0);
@@ -50,20 +52,17 @@ void create_navigation_hud(lv_obj_t *parent,NavigationHud &hud) {
     hud.speed=text(hud.root,178,345,110,&motonav_speed_66,0xffffff);
     auto *unit=text(hud.root,196,409,74,&motonav_small_14,0x9aa2a5);lv_label_set_text(unit,"KM/H");
     hud.time=text(hud.root,65,354,103,&lv_font_montserrat_20,0xffffff);
-    hud.remaining=text(hud.root,65,383,103,&motonav_ui_18,0x9aa2a5);
+    hud.remaining=text(hud.root,65,384,103,&motonav_ui_16,0x9aa2a5);
     lv_obj_set_style_text_align(hud.time,LV_TEXT_ALIGN_RIGHT,0);lv_obj_set_style_text_align(hud.remaining,LV_TEXT_ALIGN_RIGHT,0);
     auto *limit=lv_obj_create(hud.root);lv_obj_remove_style_all(limit);lv_obj_set_pos(limit,297,361);lv_obj_set_size(limit,42,42);
     lv_obj_set_style_bg_color(limit,lv_color_hex(0xf5f5f3),0);lv_obj_set_style_bg_opa(limit,LV_OPA_COVER,0);
     lv_obj_set_style_border_color(limit,lv_color_hex(0xe5484d),0);lv_obj_set_style_border_width(limit,5,0);lv_obj_set_style_radius(limit,LV_RADIUS_CIRCLE,0);
     hud.speed_limit=text(hud.root,300,368,36,&lv_font_montserrat_20,0x111111);lv_label_set_text(hud.speed_limit,"--");
-    auto *limit_name=text(hud.root,294,405,48,&motonav_ui_18,0x9aa2a5);lv_label_set_text(limit_name,"限速");
-    hud.status=text(hud.root,113,112,240,&motonav_ui_18,0xe1bc66);
-    hud.current_road=text(hud.root,266,301,135,&motonav_ui_18,0xffffff);
-    lv_obj_set_style_text_align(hud.current_road,LV_TEXT_ALIGN_RIGHT,0);
-    lv_obj_set_style_bg_color(hud.current_road,lv_color_hex(0x101719),0);
-    lv_obj_set_style_bg_opa(hud.current_road,LV_OPA_70,0);
+    auto *limit_name=text(hud.root,294,405,48,&motonav_ui_16,0x9aa2a5);lv_label_set_text(limit_name,"限速");
+    hud.status=text(hud.root,113,112,240,&motonav_ui_16,0xe1bc66);
+    hud.current_road=create_map_caption(hud.root);
     hud.road_accent=lv_obj_create(hud.root);lv_obj_remove_style_all(hud.road_accent);
-    lv_obj_set_pos(hud.road_accent,405,301);lv_obj_set_size(hud.road_accent,3,25);
+    lv_obj_set_pos(hud.road_accent,405,303);lv_obj_set_size(hud.road_accent,2,20);
     lv_obj_set_style_bg_color(hud.road_accent,lv_color_hex(0xf0c850),0);lv_obj_set_style_bg_opa(hud.road_accent,LV_OPA_COVER,0);
     auto *credit=text(hud.root,143,437,180,&motonav_small_14,0x9aa2a5);lv_label_set_text(credit,"© OpenStreetMap");
     const char *letters[]{"N","E","S","W"};
@@ -77,7 +76,7 @@ void update_navigation_hud(NavigationHud &hud,const ScreenSnapshot &state,float 
     const bool live=screen_mode(state)==ScreenMode::Live&&!state.route.overview;
     char value[128];int icon=live?state.guidance.icon:0;
     const bool details=live&&state.details.revision==state.route.revision&&state.details.revision;
-    if(hud.live!=live){hud.live=live;lv_obj_set_style_text_font(hud.distance,live?&motonav_distance_36:&motonav_ui_18,0);}
+    if(hud.live!=live){hud.live=live;lv_obj_set_style_text_font(hud.distance,live?&motonav_distance_36:&motonav_ui_16,0);}
     if(hud.icon!=icon) {
         hud.icon=icon;auto shape=arrow_shape(icon);lv_obj_set_flag(hud.arrow,LV_OBJ_FLAG_HIDDEN,!shape.count);
         for(unsigned i=0;i<shape.count;i++)hud.points[i]={static_cast<lv_value_precise_t>(shape.points[i].x*.33f),static_cast<lv_value_precise_t>(shape.points[i].y*.33f)};
@@ -101,14 +100,16 @@ void update_navigation_hud(NavigationHud &hud,const ScreenSnapshot &state,float 
         set_label_text(hud.maneuver,state.route.waiting_reason==7?"正在重算路线":state.route.waiting_reason==1?"GPS 信号弱":state.route.position_quality?"等待导航指令":"无实时位置");
     }
     const char *road=details?state.details.current_road:"";
-    if(std::strcmp(lv_label_get_text(hud.current_road),road)){
-        set_label_text(hud.current_road,road);
+    if(std::strcmp(hud.road_name,road)){
         if(*road){
-            lv_point_t measured{};lv_text_get_size(&measured,road,&motonav_ui_18,0,0,LV_COORD_MAX,LV_TEXT_FLAG_NONE);
-            const int width=std::min<int>(135,measured.x);lv_obj_set_width(hud.current_road,width);lv_obj_set_x(hud.current_road,401-width);
-        }
+            lv_point_t measured{};lv_text_get_size(&measured,road,&motonav_ui_16,0,0,LV_COORD_MAX,LV_TEXT_FLAG_NONE);
+            const int width=std::clamp<int>(measured.x+4,16,139);
+            if(set_map_caption(hud.current_road,road,width,0xf2f3e9)){
+                lv_obj_set_pos(hud.current_road,401-width,301);std::snprintf(hud.road_name,sizeof(hud.road_name),"%s",road);
+            }
+        }else hud.road_name[0]=0;
     }
-    lv_obj_set_flag(hud.current_road,LV_OBJ_FLAG_HIDDEN,!details||!state.details.current_road[0]);
+    lv_obj_set_flag(hud.current_road,LV_OBJ_FLAG_HIDDEN,!details||!state.details.current_road[0]||std::strcmp(hud.road_name,road));
     lv_obj_set_flag(hud.road_accent,LV_OBJ_FLAG_HIDDEN,!details||!state.details.current_road[0]);
     if(details&&state.details.speed_limit>0)std::snprintf(value,sizeof(value),"%d",state.details.speed_limit);
     else std::snprintf(value,sizeof(value),"--");

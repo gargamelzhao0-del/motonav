@@ -3,6 +3,7 @@
 #include "motonav/ui/navigation_ui.h"
 #include "motonav/ui/dashboard.h"
 #include "motonav/core/navigation_session.h"
+#include "../../components/motonav_ui/map_caption.h"
 #if MOTONAV_DEVICE_TESTS
 #include "motonav/testing/display_benchmark.h"
 #include "../device/motonav_bench/map_fixture.h"
@@ -73,6 +74,8 @@ static void save(lv_display_t *display, const std::filesystem::path &path) {
 }
 static bool contains_label(lv_obj_t *object, const char *text) {
     if (lv_obj_check_type(object, &lv_label_class) && std::strcmp(lv_label_get_text(object), text) == 0) return true;
+    const auto *caption=motonav::map_caption_text(object);
+    if(caption&&lv_obj_is_visible(object)&&!std::strcmp(caption,text))return true;
     for (uint32_t i = 0; i < lv_obj_get_child_count(object); ++i)
         if (contains_label(lv_obj_get_child(object, i), text)) return true;
     return false;
@@ -137,7 +140,7 @@ static void exercise_label_cache(lv_display_t *display, const std::filesystem::p
 static void exercise_annotations(lv_display_t *display,const std::filesystem::path &directory) {
     for(uint32_t cp:{0x5ef3u,0x81fau,0x7063u,0x00e9u}){
         lv_font_glyph_dsc_t glyph{};
-        if(!lv_font_get_glyph_dsc(&motonav_ui_18,&glyph,cp,0)||glyph.is_placeholder){
+        if(!lv_font_get_glyph_dsc(&motonav_ui_16,&glyph,cp,0)||glyph.is_placeholder){
             std::cerr<<"Real map-name glyph is missing\n";std::abort();
         }
     }
@@ -155,16 +158,33 @@ static void exercise_annotations(lv_display_t *display,const std::filesystem::pa
     lv_screen_load(screen);update();save(display,directory/"annotations.ppm");
     if(view.visible<3||view.visible>8){std::cerr<<"Annotation layout lost useful names\n";std::abort();}
     auto firstX=lv_obj_get_x(view.text[0]);auto original=pixels;
-    for(unsigned i=0;i<view.visible;i++){
+    for(unsigned i=0;i<motonav::MapAnnotations::Capacity;i++){
+        if(!lv_obj_is_visible(view.text[i]))continue;
         lv_area_t a;lv_obj_get_coords(view.text[i],&a);
         if(a.y1<140||a.y2>337||(a.x1<=239&&a.x2>=227)){std::cerr<<"Annotation obscures route/HUD\n";std::abort();}
         for(unsigned j=0;j<i;j++){
+            if(!lv_obj_is_visible(view.text[j]))continue;
             lv_area_t b;lv_obj_get_coords(view.text[j],&b);
             if(a.x1<=b.x2&&a.x2>=b.x1&&a.y1<=b.y2&&a.y2>=b.y1)std::abort();
         }
     }
+    if(!view.retained[2].icon||view.retained[2].text||view.visible_icons<2){
+        std::cerr<<"POI icon must survive without a redundant caption\n";std::abort();
+    }
+    for(auto *object:view.text)if(lv_obj_is_visible(object)){
+        const auto *image=static_cast<const lv_image_dsc_t *>(lv_image_get_src(object));
+        auto *data=reinterpret_cast<const uint32_t *>(image->data);unsigned ink=0,empty=0;
+        for(unsigned i=0;i<image->header.w*image->header.h;i++){if(data[i]>>24)ink++;else empty++;}
+        if(!ink||empty*4<ink+empty||(data[0]>>24)||(data[image->header.w-1]>>24)){
+            std::cerr<<"Caption must retain transparent map background\n";std::abort();
+        }
+    }
     update();save(display,directory/"annotations-static.ppm");
     if(pixels!=original)std::abort();
+    std::swap(labels.items[0],labels.items[1]);labels.generation++;update();
+    save(display,directory/"annotations-reordered.ppm");
+    if(pixels!=original){std::cerr<<"Harmless packet reorder moved retained captions\n";std::abort();}
+    std::swap(labels.items[0],labels.items[1]);labels.generation++;update();
     camera.x=20;update();save(display,directory/"annotations-moving.ppm");
     if(lv_obj_get_x(view.text[0])==firstX||pixels==original){std::cerr<<"Names failed to follow map\n";std::abort();}
     auto prior_width=view.widths[0];labels.revision=2;
@@ -172,7 +192,8 @@ static void exercise_annotations(lv_display_t *display,const std::filesystem::pa
     if(view.widths[0]==prior_width){std::cerr<<"New origin reused old text dimensions\n";std::abort();}
     labels={};update();save(display,directory/"annotations-cleared.ppm");
     if(view.visible)std::abort();
-    for(unsigned i=0;i<motonav::MapAnnotations::Capacity;i++)if(lv_obj_is_visible(view.text[i])||lv_obj_is_visible(view.icon[i]))std::abort();
+    for(auto *text:view.text)if(lv_obj_is_visible(text))std::abort();
+    for(auto *icon:view.icon)if(lv_obj_is_visible(icon))std::abort();
     lv_screen_load(previous);lv_obj_delete(screen);
     std::cout<<"PASS: map names, POI icons, collision avoidance, movement and clear\n";
 }
