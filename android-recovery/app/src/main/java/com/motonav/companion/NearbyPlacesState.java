@@ -2,6 +2,7 @@ package com.motonav.companion;
 
 import java.util.List;
 import java.util.LinkedHashMap;
+import java.util.ArrayList;
 
 /** Bounded in-memory catalog and refresh/backoff policy, with no SDK or Android dependency. */
 public final class NearbyPlacesState {
@@ -25,8 +26,10 @@ public final class NearbyPlacesState {
         places=List.copyOf(unique.values());center=point;received=now;complete=successes==3;
     }
     public List<NearbyPlace> visible(DeviceRoute.Coordinate point,long now) {
-        return center!=null&&now-received<900000&&NearbyPlace.distance(center,point)<1000
-            ?places.stream().filter(e->now-e.at()<900000).map(Entry::place).toList():List.of();
+        if(center==null||now-received>=900000||NearbyPlace.distance(center,point)>=1000)return List.of();
+        var visible=new ArrayList<NearbyPlace>();
+        for(var entry:places)if(now-entry.at()<900000)visible.add(entry.place());
+        return List.copyOf(visible);
     }
     public void clear(){places=List.of();center=null;received=0;complete=false;}
 }
