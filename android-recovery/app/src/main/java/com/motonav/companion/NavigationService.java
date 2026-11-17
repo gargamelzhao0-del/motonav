@@ -93,7 +93,14 @@ public final class NavigationService extends Service implements JourneyControlle
         link.configureNavigation(new SecureRandom().nextInt(Integer.MAX_VALUE - 1) + 1);
         basemapLoader=new BasemapLoader(this,new BasemapLoader.Listener(){
             @Override public void loaded(Basemap.Scene scene){basemapScene=scene;if(!destroyed)publish();}
-            @Override public void unavailable(){if(!destroyed)status("圆屏已连接 · 底图暂不可用，30 秒后重试；导航路线保留");}
+            @Override public void quality(MapQuality quality){
+                if(destroyed)return;Diagnostics.mapQuality(quality);if(!link.ready())return;
+                status(quality.tilesStale()>0?"圆屏已连接 · 正在使用已有底图，稍后更新":
+                    !quality.downloaded()?"圆屏已连接 · 周边底图正在补全，已收到地图保持显示":
+                    quality.geometrySelected()==0&&quality.labelsSelected()==0?"圆屏已连接 · 此区域底图数据有限，导航路线保留":
+                    "圆屏已连接 · OpenStreetMap 实景道路 / 局部导航");
+            }
+            @Override public void unavailable(){if(!destroyed&&link.ready())status("圆屏已连接 · 底图暂不可用，30 秒后重试；保留已收到的地图和路线");}
         });
         handler.post(diagnosticTick);
         NotificationChannel channel = new NotificationChannel(CHANNEL, "正在导航", NotificationManager.IMPORTANCE_LOW);
@@ -288,7 +295,7 @@ public final class NavigationService extends Service implements JourneyControlle
     }
 
     @Override public void finished() {
-        basemapLoader.clear();basemapScene=null;
+        basemapLoader.clear();basemapScene=null;Diagnostics.clearMap();
         pendingStart = null;
         feed.stop(); fixes.clear();
         if (!navigating) { publish(); return; }

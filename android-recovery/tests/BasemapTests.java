@@ -66,8 +66,8 @@ public final class BasemapTests {
         var completeBuildings=grouped.finish(1).items();check(!completeBuildings.isEmpty()&&completeBuildings.size()%2==0,"building triangles kept as complete objects");
         for(int i=0;i<completeBuildings.size();i+=2){var a=completeBuildings.get(i);var b=completeBuildings.get(i+1);long shared=List.of(a.a(),a.b(),a.c()).stream().filter(v->List.of(b.a(),b.b(),b.c()).contains(v)).count();check(shared==2,"each selected building retains both triangles");}
         if(args.length>1) {
-            var tile=new Basemap.Tile(14,8186,5448);var features=VectorTile.decode(Files.readAllBytes(Path.of(args[1])));
-            var center=Basemap.coordinate(tile,4096,800,3000);var builder=new LocalMapBuilder(center,c->c);builder.add(tile,features);var scene=builder.finish(1);
+            var tile=new Basemap.Tile(14,8186,5448);var decoded=VectorTile.decodeDetailed(Files.readAllBytes(Path.of(args[1])));var features=decoded.features();
+            var center=Basemap.coordinate(tile,4096,800,3000);var builder=new LocalMapBuilder(center,c->c);builder.add(tile,decoded);var scene=builder.finish(1);
             System.out.println("REAL TILE: features="+features.size()+" primitives="+scene.items().size()+" kinds="+scene.items().stream().map(Basemap.Primitive::kind).collect(java.util.stream.Collectors.groupingBy(k->k,java.util.stream.Collectors.counting())));
             check(scene.items().size()>50,"actual public tile produces map detail");
             if(args.length>2){
@@ -84,9 +84,10 @@ public final class BasemapTests {
                 var focus=new Basemap.Focus(view,center,1,5000,600);
                 var navigation=new NavigationFrame(2,3,120,4000,360,36,100000,100000);
                 var visibleBuilder=new LocalMapBuilder(center,c->c,MapViewport.of(focus,navigation));
-                visibleBuilder.add(tile,features);
+                visibleBuilder.add(tile,decoded);
                 scene=visibleBuilder.finish(1);
                 System.out.println("REAL CAMERA: primitives="+scene.items().size()+" labels="+scene.labels().size()+" kinds="+scene.items().stream().map(Basemap.Primitive::kind).collect(java.util.stream.Collectors.groupingBy(k->k,java.util.stream.Collectors.counting())));
+                System.out.println("REAL QUALITY: "+visibleBuilder.quality(1,1,0,0,scene));
                 lines.add(HexFormat.of().formatHex(radio.focus(focus).bytes()));
                 for(int i=0;i<scene.items().size();i+=19)lines.add(HexFormat.of().formatHex(radio.basemap(scene,i,true).bytes()));
                 for(int i=0;i<Math.max(1,scene.labels().size());i+=4)lines.add(HexFormat.of().formatHex(radio.labels(scene,i).bytes()));

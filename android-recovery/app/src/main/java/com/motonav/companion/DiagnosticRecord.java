@@ -9,14 +9,17 @@ public final class DiagnosticRecord {
     public static final Set<String> EVENTS = new HashSet<>(Arrays.asList(
         "session_start", "session_stop", "user_mark", "environment", "lifecycle", "location_start",
         "location_stop", "location_callback", "location_decision", "location_state", "location_retry",
-        "location_exception", "route_action", "route_result", "search_result", "navigation_state", "ble_state", "java_crash"));
+        "location_exception", "route_action", "route_result", "search_result", "navigation_state", "ble_state", "java_crash", "map_quality", "map_delivery"));
     public static final Set<String> TEXT = new HashSet<>(Arrays.asList(
         "owner", "reason", "state", "error_class", "manufacturer", "model", "version", "phase", "action"));
     public static final Set<String> NUMBERS = new HashSet<>(Arrays.asList(
         "api", "version_code", "error", "source", "original_source", "accuracy_m", "measurement_age_ms", "elapsed_age_ms",
         "wall_age_ms", "callback_gap_ms", "observation_age_ms", "navigation_age_ms", "generation",
         "satellites", "gps_status", "trusted_level", "count", "route_age_ms", "moved_m", "icon",
-        "fix_age_ms", "dropped", "queue", "line"));
+        "fix_age_ms", "dropped", "queue", "line", "tiles_required", "tiles_loaded", "tiles_stale", "tiles_failed",
+        "source_features", "source_roads", "source_buildings", "source_labels", "ignored_features",
+        "geometry_candidates", "geometry_selected", "oversized_groups", "geometry_duplicates",
+        "label_candidates", "labels_selected", "label_duplicates"));
     public static final Set<String> FLAGS = new HashSet<>(Arrays.asList(
         "fine", "coarse", "system_location", "foreground", "consent", "map_ready", "requested", "accepted",
         "eligible", "mock", "network", "wifi", "cellular", "vpn", "battery_saver", "idle",

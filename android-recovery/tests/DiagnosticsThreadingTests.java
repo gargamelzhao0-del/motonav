@@ -134,6 +134,18 @@ public final class DiagnosticsThreadingTests {
         check(FakeHttps.requests==requests,"Bluetooth diagnosis does not create a public upload");
     }
 
+    private static void mapSnapshotOnSessionStart(File directory)throws Exception {
+        responsive(()->Diagnostics.mapQuality(new MapQuality(2,1,0,1,20,4,8,6,2,18,12,0,3,6,4,1)));
+        responsive(()->Diagnostics.mapDelivered(7,12,4));
+        responsive(()->Diagnostics.start(null));drain();
+        String data=java.nio.file.Files.readString(new File(directory,"diagnostics/current.jsonl").toPath());
+        check(data.contains("\"event\":\"map_quality\"")&&data.contains("\"tiles_failed\":1.0"),"Starting diagnostics snapshots an already loaded map");
+        check(data.contains("\"event\":\"map_delivery\"")&&data.contains("\"generation\":7.0"),"Existing acknowledged delivery is recorded in the new session");
+        responsive(Diagnostics::mapDisconnected);
+        check(!Diagnostics.mapStatus().contains("圆屏已确认"),"Disconnect cannot advertise an old map as currently delivered");
+        responsive(Diagnostics::clearMap);responsive(Diagnostics::stop);drain();
+    }
+
     public static void main(String[] args) throws Exception {
         // A test-only handler prevents all real network access by the production class.
         URL.setURLStreamHandlerFactory(protocol->protocol.equals("https")?new URLStreamHandler(){
@@ -142,6 +154,7 @@ public final class DiagnosticsThreadingTests {
         boolean success=false;
         try {
             Diagnostics.initialize(new android.content.Context(new File(args[0])));
+            mapSnapshotOnSessionStart(new File(args[0]));
             recoveryDoesNotBlockUi();acknowledgementDoesNotBlockUi();disconnectDoesNotBlockUi();backpressureIsBounded();
             initializationFailureIsVisibleAndLocalRecordingSurvives(new File(args[0]));
             bluetoothSessionControls();

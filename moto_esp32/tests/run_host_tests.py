@@ -25,7 +25,7 @@ with tempfile.TemporaryDirectory(prefix='motonav-firmware-tests-') as directory:
     if args.android_source:
         java = Path(os.environ['JAVA_HOME']) / 'bin' / ('java.exe' if os.name == 'nt' else 'java')
         source = args.android_source.resolve()
-        classes = ['Simulation', 'Protocol', 'NavigationFrame', 'NavigationProtocol', 'DeviceRoute', 'Basemap', 'MapViewport', 'MapDetailSelector', 'MapPolygon', 'VectorTile', 'LocalMapLabels', 'LocalMapBuilder', 'MapTileStore', 'RouteProtocol', 'NavigationDetails', 'BleDiagnosticProtocol']
+        classes = ['Simulation', 'Protocol', 'NavigationFrame', 'NavigationProtocol', 'DeviceRoute', 'Basemap', 'MapViewport', 'MapDetailSelector', 'MapPolygon', 'VectorTile', 'LocalMapLabels', 'LocalMapBuilder', 'MapTileStore', 'MapQuality', 'RouteProtocol', 'NavigationDetails', 'BleDiagnosticProtocol']
         sources = [source / 'app/src/main/java/com/motonav/companion' / (name + '.java') for name in classes]
         sources.append(source / 'tests/NavigationProtocolTests.java')
         sources.append(source / 'tests/RouteProtocolTests.java')

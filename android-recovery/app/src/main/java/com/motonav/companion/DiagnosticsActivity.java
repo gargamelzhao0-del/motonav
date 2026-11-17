@@ -18,10 +18,10 @@ import java.io.OutputStream;
 /** User-controlled remote session; this screen never starts location or reads map credentials. */
 public final class DiagnosticsActivity extends Activity {
     private final Handler main = new Handler(Looper.getMainLooper());
-    private TextView state, result;
+    private TextView state, result, mapState;
     private EditText link;
     private final Runnable refresh = new Runnable() {
-        @Override public void run() { AppUi.setText(state,Diagnostics.status()); main.postDelayed(this, 1000); }
+        @Override public void run() { AppUi.setText(state,Diagnostics.status()); AppUi.setText(mapState,Diagnostics.mapStatus());main.postDelayed(this, 1000); }
     };
     @Override public void onCreate(Bundle saved) {
         super.onCreate(saved);
@@ -29,6 +29,8 @@ public final class DiagnosticsActivity extends Activity {
         LinearLayout page=AppUi.page(this,"问题诊断","遇到定位或导航异常时，记录一次复现过程。");
         ScrollView scroll=AppUi.scroll(this,page);
         LinearLayout summary=AppUi.card(this);state=AppUi.text(this,Diagnostics.status(),15,AppUi.ACCENT);summary.addView(state);AppUi.add(page,summary,18);
+        LinearLayout mapCard=AppUi.card(this);mapCard.addView(AppUi.text(this,"圆屏底图完整性",17,AppUi.TEXT));
+        mapState=AppUi.text(this,Diagnostics.mapStatus(),13,AppUi.MUTED);mapCard.addView(mapState);AppUi.add(page,mapCard,12);
         text(page, "仅记录定位质量、权限和错误等诊断信息，不含经纬度、目的地、车牌或高德 Key。", 13);
         text(page, "手机连接圆屏，圆屏用 USB 接电脑，即可转发关键状态。默认持续 1 小时，可随时停止。", 13);
         android.widget.Switch extended = new android.widget.Switch(this); extended.setText("本次诊断持续 4 小时");extended.setTextColor(AppUi.TEXT);extended.setMinHeight(AppUi.dp(this,56));page.addView(extended);

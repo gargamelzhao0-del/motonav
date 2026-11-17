@@ -11,6 +11,7 @@ public final class LocalMapBuilder {
     private final MapViewport viewport;
     private final MapDetailSelector selection;
     private final LocalMapLabels labels;
+    private int sourceFeatures,sourceRoads,sourceBuildings,sourceLabels,ignoredFeatures,oversizedGroups;
     public LocalMapBuilder(DeviceRoute.Coordinate origin,Basemap.Coordinates conversion) {
         this(origin,conversion,new MapViewport(0,0,0,false,0));
     }
@@ -20,11 +21,25 @@ public final class LocalMapBuilder {
     public LocalMapBuilder(DeviceRoute.Coordinate origin,Basemap.Coordinates conversion,MapViewport viewport) {
         this.origin=origin;this.conversion=conversion;this.viewport=viewport;
         longitudeScale=111319.49079327358*Math.cos(Math.toRadians(origin.latitude()));
-        selection=new MapDetailSelector(viewport);
-        labels=new LocalMapLabels(viewport.x+Math.sin(viewport.heading)*80,viewport.y+Math.cos(viewport.heading)*80);
+        selection=new MapDetailSelector(viewport.detailView());
+        labels=new LocalMapLabels(viewport.detailView());
+    }
+    public void add(Basemap.Tile tile,VectorTile.Decoded decoded) {
+        int skipped=decoded.sourceFeatures()-decoded.features().size();
+        sourceFeatures+=skipped;ignoredFeatures+=skipped;
+        add(tile,decoded.features());
     }
     public void add(Basemap.Tile tile,List<VectorTile.Feature> features) {
         for(var feature:features) {
+            sourceFeatures++;
+            if(feature.layer().equals("streets"))sourceRoads++;
+            if(feature.layer().equals("buildings"))for(var ring:feature.paths())if(tileArea(ring)>0)sourceBuildings++;
+            if(LocalMapLabels.supported(feature))sourceLabels++;
+            if(kind(feature)<0&&!LocalMapLabels.supported(feature))ignoredFeatures++;
+            try{addFeature(tile,feature);}catch(IllegalArgumentException ignored){ignoredFeatures++;}
+        }
+    }
+    private void addFeature(Basemap.Tile tile,VectorTile.Feature feature) {
             if((!feature.name().isEmpty()||feature.layer().equals("pois")||feature.layer().equals("public_transport"))
                     &&(feature.type()==1||feature.type()==2)) {
                 for(var path:feature.paths())if(!path.isEmpty()&&path.size()<=4096&&near(tile,feature.extent(),path)) {
@@ -33,13 +48,13 @@ public final class LocalMapBuilder {
                     labels.add(feature,points);
                 }
             }
-            int kind=kind(feature);if(kind<0)continue;
+            int kind=kind(feature);if(kind<0)return;
             for(int ring=0;ring<feature.paths().size();ring++) {
                 var path=feature.paths().get(ring);
                 if(feature.type()==3&&tileArea(path)<=0)continue;
                 if(path.size()<2||!near(tile,feature.extent(),path))continue;
                 if(kind<3) {
-                    if(path.size()>4096)continue;
+                    if(path.size()>4096){oversizedGroups++;continue;}
                     List<DeviceRoute.Point> road=new ArrayList<>();for(var p:path)road.add(point(tile,feature.extent(),p));
                     road=DeviceRoute.simplify(road,2);
                     DeviceRoute.Point previous=road.get(0);
@@ -52,7 +67,8 @@ public final class LocalMapBuilder {
                     }
                     // Long streets may extend across many cells. Split only
                     // at existing segment boundaries, never midway through a building.
-                    for(int i=0;i<group.size();i+=16)selection.add(group.subList(i,Math.min(i+16,group.size())));
+                    boolean pathContext=List.of("footway","path","cycleway","steps","bridleway").contains(feature.kind());
+                    for(int i=0;i<group.size();i+=16)selection.add(group.subList(i,Math.min(i+16,group.size())),pathContext?2.5:1);
                 } else if(path.size()<=4096) {
                     List<DeviceRoute.Point> points=ringPoints(tile,feature.extent(),path);
                     List<List<DeviceRoute.Point>> rings=new ArrayList<>();rings.add(points);
@@ -61,20 +77,25 @@ public final class LocalMapBuilder {
                     if(rings.size()==1&&points.size()>24) {
                         points.add(points.get(0));
                         List<DeviceRoute.Point> reduced=DeviceRoute.simplify(points,2);
-                        if(reduced.size()>65)reduced=DeviceRoute.simplify(points,4);
-                        if(reduced.size()>65)reduced=DeviceRoute.simplify(points,8);
-                        if(reduced.size()>65)continue;
+                        if(reduced.size()>193)reduced=DeviceRoute.simplify(points,4);
+                        if(reduced.size()>385)reduced=DeviceRoute.simplify(points,8);
+                        if(reduced.size()>385){oversizedGroups++;continue;}
                         points=new ArrayList<>(reduced);points.remove(points.size()-1);
                     }
                     // Even-odd tessellation retains courtyard holes. Clip each
                     // resulting triangle to camera coverage and radio bounds.
                     List<Basemap.Primitive> group=new ArrayList<>();
                     var triangles=rings.size()>1?MapPolygon.withHoles(rings):triangulate(points);
+                    if(triangles.isEmpty()){ignoredFeatures++;continue;}
                     for(var triangle:triangles)addClipped(kind,triangle,group);
                     selection.add(group);
-                }
+                }else oversizedGroups++;
             }
-        }
+    }
+    public MapQuality quality(int required,int loaded,int stale,int failed,Basemap.Scene scene) {
+        return new MapQuality(required,loaded,stale,failed,sourceFeatures,sourceRoads,sourceBuildings,sourceLabels,
+                ignoredFeatures,selection.candidateItems(),scene.items().size(),selection.oversizedGroups()+oversizedGroups,
+                selection.duplicateItems(),labels.candidateCount(),scene.labels().size(),labels.duplicateCount());
     }
     public Basemap.Scene finish(int revision) {
         return finish(revision,Basemap.MAX_ITEMS);
@@ -88,12 +109,13 @@ public final class LocalMapBuilder {
             case "streets" -> switch(f.kind()) {
                 case "motorway","trunk" -> 2;
                 case "primary","secondary","tertiary","primary_link","secondary_link","tertiary_link","motorway_link","trunk_link" -> 1;
-                case "residential","unclassified","living_street","service","pedestrian","road","track" -> 0;
+                case "residential","unclassified","living_street","service","pedestrian","road","track",
+                     "footway","path","cycleway","steps","bridleway","busway","bus_guideway" -> 0;
                 default -> -1;
             };
             case "buildings" -> 3;
-            case "water_polygons" -> 4;
-            case "land","sites" -> List.of("park","forest","wood","grass","garden","recreation_ground","scrub","meadow").contains(f.kind())?5:-1;
+            case "ocean","water_polygons" -> 4;
+            case "land","sites" -> List.of("park","forest","wood","grass","grassland","garden","recreation_ground","scrub","meadow","heath","fell","village_green").contains(f.kind())?5:-1;
             default -> -1;
         };
     }

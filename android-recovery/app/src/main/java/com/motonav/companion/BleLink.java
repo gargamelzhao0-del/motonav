@@ -127,7 +127,7 @@ public final class BleLink {
                 boolean complete=false;
                 if(labels){mapLabelOffset+=count;complete=mapLabelOffset==scene.labels().size();}
                 else {mapOffset+=count;if(mapOffset==scene.items().size()){mapGeometrySent=true;complete=!mapLabels;}}
-                if(complete){sentMapRevision=revision;sentMapUpdate=scene.update();pendingMap=nextMap;nextMap=null;mapOffset=mapLabelOffset=0;mapGeometrySent=false;}
+                if(complete){Diagnostics.mapDelivered(scene.update(),scene.items().size(),mapLabels?scene.labels().size():0);sentMapRevision=revision;sentMapUpdate=scene.update();pendingMap=nextMap;nextMap=null;mapOffset=mapLabelOffset=0;mapGeometrySent=false;}
             }
             if(done!=null)done.run();
         });return true;
@@ -288,6 +288,7 @@ public final class BleLink {
         }
     }
     public void disconnect(){
+        Diagnostics.mapDisconnected();
         clearBondWait();
         stopScan();handler.removeCallbacks(timeout);ready=false;pending=null;completion=null;chunks=null;chunkIndex=0;ackReceived=false;rx=null;writing=false;incoming.setLength(0);protocol.reset();networkProtocol.reset();transfer=null;transferIndex=0;
         handler.removeCallbacks(diagnosticTimeout);inFlightWrite=null;diagnosticRx=null;diagnosticFrame=null;nextDiagnostic=null;

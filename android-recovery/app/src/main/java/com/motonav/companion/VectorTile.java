@@ -3,6 +3,8 @@ package com.motonav.companion;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.LinkedHashMap;
 
 /** Bounded reader for public MVT geometry; no rendering, Android or networking dependencies. */
 public final class VectorTile {
@@ -11,13 +13,21 @@ public final class VectorTile {
     public record Feature(String layer,String kind,int type,int extent,List<List<Point>> paths,String name) {
         public Feature(String layer,String kind,int type,int extent,List<List<Point>> paths){this(layer,kind,type,extent,paths,"");}
     }
+    public record Decoded(List<Feature> features,Map<String,Integer> layers) {
+        public Decoded {features=List.copyOf(features);layers=Map.copyOf(layers);}
+        public int sourceFeatures(){return layers.values().stream().mapToInt(Integer::intValue).sum();}
+    }
     public static List<Feature> decode(byte[] bytes) {
+        return decodeDetailed(bytes).features();
+    }
+    public static Decoded decodeDetailed(byte[] bytes) {
         if(bytes.length>4*1024*1024)throw new IllegalArgumentException("tile size");
         Reader tile=new Reader(bytes,0,bytes.length);List<Feature> result=new ArrayList<>();int[] budget={250000};
-        while(tile.more()) { int tag=tile.tag();if(tag==26)layer(tile.message(),result,budget);else tile.skip(tag); }
-        return List.copyOf(result);
+        Map<String,Integer> layers=new LinkedHashMap<>();
+        while(tile.more()) { int tag=tile.tag();if(tag==26)layer(tile.message(),result,budget,layers);else tile.skip(tag); }
+        return new Decoded(result,layers);
     }
-    private static void layer(Reader reader,List<Feature> output,int[] budget) {
+    private static void layer(Reader reader,List<Feature> output,int[] budget,Map<String,Integer> layers) {
         String name="";int extent=4096,version=0;List<String> keys=new ArrayList<>(),values=new ArrayList<>();List<Reader> features=new ArrayList<>();
         while(reader.more()) {
             int tag=reader.tag();
@@ -32,7 +42,9 @@ public final class VectorTile {
                 default -> reader.skip(tag);
             }
         }
-        if(!List.of("streets","buildings","water_polygons","land","sites","street_labels",
+        layers.merge(name,features.size(),Integer::sum);
+        if(!List.of("streets","buildings","ocean","water_polygons","land","sites","street_labels",
+                "street_labels_points","street_polygons_labels","streets_polygons_labels",
                 "place_labels","pois","public_transport","water_polygons_labels","water_lines_labels").contains(name))return;
         if(extent<256||extent>65536||version!=2)throw new IllegalArgumentException("tile schema");
         for(Reader feature:features) {

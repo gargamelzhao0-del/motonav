@@ -59,6 +59,31 @@ final class Diagnostics {
     private static int bluetoothSession;
     private static long bluetoothMarkers, bluetoothSent, bluetoothDropped;
     private static String bluetoothState = "等待圆屏连接";
+    private static volatile MapQuality mapQuality;
+    private static volatile String mapDelivery="圆屏地图尚未确认";
+    private record MapDelivery(int generation,int geometry,int labels) { }
+    private static volatile MapDelivery lastMapDelivery;
+    static void clearMap(){mapQuality=null;lastMapDelivery=null;mapDelivery="圆屏地图尚未确认";}
+    static void mapDisconnected(){lastMapDelivery=null;mapDelivery="圆屏未连接，等待地图重新确认";}
+    static String mapStatus(){var quality=mapQuality;return (quality==null?"暂无本次导航的底图处理记录":quality.summary())+"\n"+mapDelivery;}
+    static void mapQuality(MapQuality value){
+        if(value.equals(mapQuality))return;mapQuality=value;
+        recordMapQuality(value);
+    }
+    private static void recordMapQuality(MapQuality value){
+        record("map_quality","tiles_required",value.tilesRequired(),"tiles_loaded",value.tilesLoaded(),
+            "tiles_stale",value.tilesStale(),"tiles_failed",value.tilesFailed(),"source_features",value.sourceFeatures(),
+            "source_roads",value.sourceRoads(),"source_buildings",value.sourceBuildings(),"source_labels",value.sourceLabels(),
+            "ignored_features",value.ignoredFeatures(),"geometry_candidates",value.geometryCandidates(),
+            "geometry_selected",value.geometrySelected(),"oversized_groups",value.oversizedGroups(),
+            "geometry_duplicates",value.geometryDuplicates(),"label_candidates",value.labelCandidates(),
+            "labels_selected",value.labelsSelected(),"label_duplicates",value.labelDuplicates());
+    }
+    static void mapDelivered(int generation,int geometry,int labels){
+        lastMapDelivery=new MapDelivery(generation,geometry,labels);
+        mapDelivery="圆屏已确认图元 "+geometry+" · 名称 "+labels+" · 地图代次 "+generation;
+        record("map_delivery","generation",generation,"geometry_selected",geometry,"labels_selected",labels);
+    }
     private static volatile boolean storageFailed;
     private static volatile String storageFailureClass = "";
     private static String session = "", transportState = "未连接";
@@ -129,6 +154,9 @@ final class Diagnostics {
         }
         record("session_start", "version", BuildConfig.VERSION_NAME, "version_code", BuildConfig.VERSION_CODE,
             "api", Build.VERSION.SDK_INT, "manufacturer", Build.MANUFACTURER, "model", Build.MODEL);
+        var quality=mapQuality;if(quality!=null)recordMapQuality(quality);
+        var delivery=lastMapDelivery;if(delivery!=null)record("map_delivery","generation",delivery.generation(),
+                "geometry_selected",delivery.geometry(),"labels_selected",delivery.labels());
         synchronized (LOCK) {
             if (destination != null) pump = sender.scheduleWithFixedDelay(Diagnostics::upload, 0, 2, TimeUnit.SECONDS);
         }

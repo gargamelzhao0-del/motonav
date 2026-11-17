@@ -6,13 +6,20 @@ public final class MapViewport {
     public final double x,y,heading,metersPerPixel,pitch,anchor;
     public final int left,right,bottom,top;
     private final double sine,cosine,ps,pc;
+    private final boolean live;
+    private final int speedKmh,headingTenths;
     private static final int MARGIN=120,MAX_COORDINATE=1900;
     public MapViewport(double x,double y,int headingTenths,boolean live,int speedKmh) {
+        this(x,y,headingTenths,live,speedKmh,false);
+    }
+    private MapViewport(double x,double y,int headingTenths,boolean live,int speedKmh,boolean detail) {
+        this.live=live;this.speedKmh=speedKmh;this.headingTenths=headingTenths;
         this.x=x;this.y=y;heading=Math.toRadians(Math.max(0,headingTenths)/10.0);
         double speed=Math.max(0,speedKmh);
-        metersPerPixel=live?.85+clamp((speed-12)/68,0,1)*1.6:1.13;
-        pitch=Math.toRadians(50)*(live?clamp((speed-6)/16,0,1):1);
-        anchor=270+36*pitch/Math.toRadians(50);
+        double maxPitch=Math.toRadians(detail?35:50);
+        metersPerPixel=live?(detail?1.02+clamp((speed-10)/70,0,1)*.65:.85+clamp((speed-12)/68,0,1)*1.6):1.13;
+        pitch=maxPitch*(live?clamp((speed-6)/16,0,1):1);
+        anchor=detail?286+12*pitch/maxPitch:270+36*pitch/maxPitch;
         sine=Math.sin(heading);cosine=Math.cos(heading);ps=Math.sin(pitch);pc=Math.cos(pitch);
         double l=x,r=x,b=y,t=y;
         // The top 64 rows are the fog/rim region. Keep all remaining screen
@@ -29,9 +36,17 @@ public final class MapViewport {
         bottom=(int)Math.max(-MAX_COORDINATE,Math.floor(b)-MARGIN);
         top=(int)Math.min(MAX_COORDINATE,Math.ceil(t)+MARGIN);
     }
+    /** Match firmware 0.3.15's detail priority, while retaining the wider legacy
+     * download/clip coverage for movement, easing and older receivers. */
+    public MapViewport detailView(){return new MapViewport(x,y,headingTenths,live,speedKmh,true);}
     public static MapViewport of(Basemap.Focus focus,NavigationFrame frame) {
-        return new MapViewport(focus.route().x(),focus.route().y(),focus.route().heading(),
-                frame.mode()==NavigationFrame.LIVE,frame.speedKmh());
+        return of(focus,frame,null);
+    }
+    public static MapViewport of(Basemap.Focus focus,NavigationFrame frame,MapViewport previous) {
+        boolean live=frame.mode()==NavigationFrame.LIVE;int bearing=focus.route().heading();
+        if(previous!=null&&(bearing<0||live&&previous.live&&frame.speedKmh()>=0&&frame.speedKmh()<4))
+            bearing=previous.headingTenths;
+        return new MapViewport(focus.route().x(),focus.route().y(),bearing,live,frame.speedKmh());
     }
     public Screen project(double px,double py) {
         double dx=px-x,dy=py-y,forward=dx*sine+dy*cosine;

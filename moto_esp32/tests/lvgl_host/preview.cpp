@@ -272,7 +272,7 @@ static void exercise_building_edges(lv_display_t *display,const std::filesystem:
     std::cout<<"PASS: contour cache update, no triangle seams and removed-map cleanup\n";
 }
 int main(int argc, char **argv) {
-    if (argc != 2) return 2;
+    if (argc != 2 && argc != 3) return 2;
     std::filesystem::path directory(argv[1]); std::filesystem::create_directories(directory);
     lv_init();
     auto display = lv_display_create(466, 466);
@@ -412,7 +412,7 @@ int main(int argc, char **argv) {
     {
         auto previous=snapshot;motonav::NavigationSession session;
         session.connected();session.protocol(4);session.security(true);session.subscription(true);
-        std::ifstream fixture(SCENE_FIXTURE_PATH);std::string row;char reply[32]{};bool saw_wait=false,saw_live=false,saw_lost=false;
+        std::ifstream fixture(argc==3?argv[2]:SCENE_FIXTURE_PATH);std::string row;char reply[32]{};bool saw_wait=false,saw_live=false,saw_lost=false;
         while(std::getline(fixture,row)) {
             for(size_t i=0;i<row.size();i+=2)session.feed(static_cast<char>(std::stoul(row.substr(i,2),nullptr,16)),clock_ms,reply);
             if(reply[0]!='A')return 1;snapshot=session.snapshot(clock_ms);

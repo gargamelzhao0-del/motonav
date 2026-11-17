@@ -80,7 +80,7 @@ with tempfile.TemporaryDirectory(prefix='motonav-diagnostics-threads-') as direc
         path = output / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(source, encoding='utf-8')
-    names = ['Diagnostics', 'DiagnosticRecord', 'DiagnosticEndpoint', 'MapStartupPolicy', 'MapFixTracker', 'AmapLocationSample']
+    names = ['Diagnostics', 'DiagnosticRecord', 'DiagnosticEndpoint', 'MapStartupPolicy', 'MapFixTracker', 'AmapLocationSample', 'MapQuality']
     sources = [root / 'app/src/main/java/com/motonav/companion' / (name + '.java') for name in names]
     if args.diagnostics_source:
         sources[0] = args.diagnostics_source.resolve()

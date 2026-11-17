@@ -76,6 +76,9 @@ stubs = {
     'com/motonav/companion/Diagnostics.java': '''package com.motonav.companion; public class Diagnostics {
         public static java.util.List<String> lines=new java.util.ArrayList<>();
         public static int session; public static String bridgeStatus=""; public static long delivered,skipped;
+        public static int mapGeometry=-1,mapNames=-1,mapUpdate=-1;
+        public static void mapDisconnected(){mapGeometry=mapNames=mapUpdate=-1;}
+        public static void mapDelivered(int generation,int geometry,int labels){mapGeometry=geometry;mapNames=labels;mapUpdate=generation;}
         public static int bluetoothSession(){return session;} public static long bluetoothMarkers(){return 2;}
         public static void bluetoothStatus(int s,String text,long sent,long dropped){if(s==session){bridgeStatus=text;delivered=sent;skipped=dropped;}}
         public static void record(String event,Object... fields){lines.add(DiagnosticRecord.line("0".repeat(32),1,1,event,fields));} }''',
@@ -290,12 +293,14 @@ public class BleLinkTests implements BleLink.Listener {
         writeAck(g,0);t.check(g.lastWrite.value.length==53,"Remaining bytes stay in the same application frame");
         writeAck(g,0);g.callback.onCharacteristicChanged(g,t.tx,"A,3,OK\n".getBytes());Handler.flush();
         t.check(!t.link.busy(),"Chunk ACK yields to navigation scheduler");
+        t.check(Diagnostics.mapGeometry==-1,"Partial radio map is not reported as delivered");
         t.check(t.link.sendNavigation(NavigationFrame.status(1),null,null),"WAIT can preempt the next map chunk");
         writeAck(g,0);g.callback.onCharacteristicChanged(g,t.tx,"A,4,OK\n".getBytes());Handler.flush();
         t.check(t.link.sendMapChunkIfNeeded(1,null),"Map resumes after WAIT");
         writeAck(g,0);g.callback.onCharacteristicChanged(g,t.tx,"A,5,OK\n".getBytes());Handler.flush();
         var ack=BleLink.class.getDeclaredField("lastAckSequence");ack.setAccessible(true);
         t.check(ack.getInt(t.link)==4,"Map ACK never counts as navigation delivery");
+        t.check(Diagnostics.mapGeometry==23&&Diagnostics.mapNames==0,"Map delivery count follows the last geometry ACK for older receivers");
         t.link.offerBasemap(new Basemap.Scene(1,items));t.check(!t.link.sendMapChunkIfNeeded(1,null),"No repeated map upload");
         t.link.offerBasemap(new Basemap.Scene(1,2,false,items));
         t.check(t.link.sendMapChunkIfNeeded(1,null),"Partial update starts");
@@ -382,11 +387,13 @@ public class BleLinkTests implements BleLink.Listener {
         writeAck(g,0);g.callback.onCharacteristicChanged(g,t.tx,"A,6,OK\n".getBytes());Handler.flush();
         var ack=BleLink.class.getDeclaredField("lastAckSequence");ack.setAccessible(true);
         t.check(ack.getInt(t.link)==4,"Label ACK is not navigation delivery");
+        t.check(Diagnostics.mapUpdate==1&&Diagnostics.mapNames==names.size(),"Names are reported delivered only after the final label ACK");
         t.check(t.link.sendMapChunkIfNeeded(1,null)&&g.lastWrite.value[4]==9&&g.lastWrite.value[17]==2,"Newest geometry starts after label completion");
         writeAck(g,0);g.callback.onCharacteristicChanged(g,t.tx,"A,7,OK\n".getBytes());Handler.flush();
         t.check(t.link.sendMapChunkIfNeeded(1,null)&&g.lastWrite.value[4]==14&&g.lastWrite.value[21]==0,"Empty replacement explicitly clears old names");
         writeAck(g,0);g.callback.onCharacteristicChanged(g,t.tx,"A,8,OK\n".getBytes());Handler.flush();
         t.check(!t.link.sendMapChunkIfNeeded(1,null),"Completed annotations are not uploaded repeatedly");
+        t.check(Diagnostics.mapUpdate==2&&Diagnostics.mapNames==0,"Empty-label replacement updates delivery counts");
         t.link.offerBasemap(new Basemap.Scene(1,3,true,items,names));
         t.link.sendNavigation(NavigationFrame.status(4),null,null);
         writeAck(g,0);g.callback.onCharacteristicChanged(g,t.tx,"A,9,OK\n".getBytes());Handler.flush();
