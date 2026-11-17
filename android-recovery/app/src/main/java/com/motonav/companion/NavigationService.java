@@ -47,6 +47,8 @@ public final class NavigationService extends Service implements JourneyControlle
     private BleLink link;
     private BasemapLoader basemapLoader;
     private Basemap.Scene basemapScene;
+    private NearbyPlacesLoader nearbyPlaces;
+    private final MapSceneComposer sceneComposer=new MapSceneComposer();
     private long navigationSentMs=-1000;
     private View view;
     private BluetoothDevice selectedDevice;
@@ -101,6 +103,10 @@ public final class NavigationService extends Service implements JourneyControlle
                     "圆屏已连接 · OpenStreetMap 实景道路 / 局部导航");
             }
             @Override public void unavailable(){if(!destroyed&&link.ready())status("圆屏已连接 · 底图暂不可用，30 秒后重试；保留已收到的地图和路线");}
+        });
+        nearbyPlaces=new NearbyPlacesLoader(this,new NearbyPlacesLoader.Listener(){
+            public void changed(){if(!destroyed)publish();}
+            public void status(String phase,int received,int ok,int failed,int error){Diagnostics.mapPlaces(phase,received,ok,failed,error);}
         });
         handler.post(diagnosticTick);
         NotificationChannel channel = new NotificationChannel(CHANNEL, "正在导航", NotificationManager.IMPORTANCE_LOW);
@@ -252,7 +258,9 @@ public final class NavigationService extends Service implements JourneyControlle
         Basemap.Focus focus=stopping?null:journey.deviceFocus();
         if(link.basemaps()&&focus!=null){
             basemapLoader.request(focus,link.mapUpdates(),link.mapSurfaces(),frame);
-            if(basemapScene!=null&&basemapScene.revision()==focus.route().revision())link.offerBasemap(basemapScene);
+            if(nearbyPlaces!=null&&link.mapLabelSources()&&navigating&&navigationAllowed())nearbyPlaces.request(focus,key());
+            var composed=sceneComposer.compose(basemapScene,focus,frame,nearbyPlaces==null?java.util.List.of():nearbyPlaces.places(focus),link.mapLabelSources());
+            if(composed!=null){Diagnostics.mapPlaceSelection(sceneComposer.selectedPlaces(),link.mapLabelSources());link.offerBasemap(composed);}
         }
         if (link.ready() && !link.busy()) {
             // Clear a previously sent live instruction before spending radio time
@@ -295,7 +303,7 @@ public final class NavigationService extends Service implements JourneyControlle
     }
 
     @Override public void finished() {
-        basemapLoader.clear();basemapScene=null;Diagnostics.clearMap();
+        basemapLoader.clear();basemapScene=null;sceneComposer.clear();if(nearbyPlaces!=null)nearbyPlaces.clear();Diagnostics.clearMap();
         pendingStart = null;
         feed.stop(); fixes.clear();
         if (!navigating) { publish(); return; }
@@ -338,7 +346,7 @@ public final class NavigationService extends Service implements JourneyControlle
 
     @Override public void onDestroy() {
         destroyed = true;
-        basemapLoader.close();
+        basemapLoader.close();if(nearbyPlaces!=null)nearbyPlaces.close();
         journey.close(); shutdownForeground(); keys.clear(); view = null;
         handler.removeCallbacksAndMessages(null);
         super.onDestroy();

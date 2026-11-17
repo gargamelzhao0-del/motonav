@@ -205,6 +205,18 @@ static void exercise_annotations(lv_display_t *display,const std::filesystem::pa
     advance_host_clock(400);motonav::update_map_annotations(view,labels,camera,obstructed,2,true);
     assert(view.retained[0].text&&view.retained[0].side==1&&!view.layout_pending);
     motonav::update_map_annotations(view,labels,camera,route,2,true,{0,0});assert(!view.visible&&!view.visible_icons);
+    // Useful area captions are no longer limited to one name per screen.
+    labels={};labels.revision=4;labels.generation=1;labels.count=3;
+    labels.items[0]={1,{-125,150},"北苑小区"};
+    labels.items[1]={1,{65,130},"东苑小区"};
+    labels.items[2]={1,{-125,35},"南苑小区"};
+    update();assert(view.visible==3);
+    save(display,directory/"annotations-estates.ppm");
+    // A transit name on a road remains useful even when its symbol is blocked.
+    labels={};labels.revision=5;labels.generation=1;labels.count=1;
+    labels.items[0]={7,{0,130},"测试地铁站"};update();
+    assert(view.retained[0].text&&!view.retained[0].icon);
+    save(display,directory/"annotations-caption-without-icon.ppm");
     labels={};update();save(display,directory/"annotations-cleared.ppm");
     if(view.visible)std::abort();
     for(auto *text:view.text)if(lv_obj_is_visible(text))std::abort();
@@ -223,6 +235,11 @@ static void exercise_maneuver_ui(lv_display_t *display,const std::filesystem::pa
     motonav::NavigationPresentation policy;
     auto update=[&](){motonav::update_navigation_hud(hud,state,0,policy.update(state));};
     update();save(display,directory/"hud-normal.ppm");const auto normal_width=lv_obj_get_width(hud.card);
+    motonav::update_map_attribution(hud,3);lv_obj_update_layout(screen);
+    assert(lv_obj_is_visible(hud.amap_credit)&&lv_obj_get_y(hud.osm_credit)==426);
+    save(display,directory/"hud-mixed-sources.ppm");
+    motonav::update_map_attribution(hud,1);lv_obj_update_layout(screen);
+    assert(!lv_obj_is_visible(hud.amap_credit)&&lv_obj_get_y(hud.osm_credit)==437);
     assert(lv_obj_is_visible(hud.arrow)&&lv_obj_is_visible(hud.remaining));
     state.guidance.turn_m=120;update();save(display,directory/"hud-approach.ppm");
     assert(lv_obj_get_width(hud.card)>normal_width&&lv_obj_is_visible(hud.remaining));
@@ -480,7 +497,11 @@ int main(int argc, char **argv) {
         snapshot.route.last_position.age_ms=60000;
         snapshot.route.position_quality=0;snapshot.route.position_accuracy_m=0;
         save(display,directory/"position-expired.ppm");require_label("等待定位");
-        if(pixels!=without_position){std::cerr<<"Unavailable position leaves a stale marker\n";return 1;}
+        // Captions can retain a different valid placement after the player
+        // exclusion box disappears. Compare the actual marker region only.
+        for(int y=288;y<=324;y++)for(int x=215;x<=251;x++)if(pixels[y*466+x]!=without_position[y*466+x]){
+            std::cerr<<"Unavailable position leaves a stale marker\n";return 1;
+        }
 saw_lost=true;}
             if(snapshot.guidance.mode!=motonav::Live&&contains_label(lv_screen_active(),"测试道路"))return 1;
         }

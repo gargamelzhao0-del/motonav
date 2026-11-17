@@ -64,13 +64,20 @@ void create_navigation_hud(lv_obj_t *parent,NavigationHud &hud) {
     hud.road_accent=lv_obj_create(hud.root);lv_obj_remove_style_all(hud.road_accent);
     lv_obj_set_pos(hud.road_accent,405,303);lv_obj_set_size(hud.road_accent,2,20);
     lv_obj_set_style_bg_color(hud.road_accent,lv_color_hex(0xf0c850),0);lv_obj_set_style_bg_opa(hud.road_accent,LV_OPA_COVER,0);
-    auto *credit=text(hud.root,143,437,180,&motonav_small_14,0x9aa2a5);lv_label_set_text(credit,"© OpenStreetMap");
+    hud.osm_credit=text(hud.root,143,437,180,&motonav_small_14,0x9aa2a5);lv_label_set_text(hud.osm_credit,"© OpenStreetMap");
+    hud.amap_credit=text(hud.root,193,442,80,&motonav_ui_16,0x9aa2a5);lv_label_set_text(hud.amap_credit,"高德地图");
+    lv_obj_add_flag(hud.amap_credit,LV_OBJ_FLAG_HIDDEN);
     const char *letters[]{"N","E","S","W"};
     for(unsigned i=0;i<4;i++) {
         hud.compass[i]=text(hud.root,0,0,20,&motonav_small_14,i?0x899194:0xffffff);lv_label_set_text(hud.compass[i],letters[i]);
         if(!i){lv_obj_set_style_bg_color(hud.compass[i],lv_color_hex(0x0d0f10),0);lv_obj_set_style_bg_opa(hud.compass[i],LV_OPA_COVER,0);lv_obj_set_style_radius(hud.compass[i],LV_RADIUS_CIRCLE,0);}
     }
     lv_obj_add_flag(hud.root,LV_OBJ_FLAG_HIDDEN);
+}
+void update_map_attribution(NavigationHud &hud,uint8_t label_sources) {
+    const bool amap=(label_sources&2)!=0;
+    lv_obj_set_y(hud.osm_credit,amap?426:437);
+    lv_obj_set_flag(hud.amap_credit,LV_OBJ_FLAG_HIDDEN,!amap);
 }
 void update_navigation_hud(NavigationHud &hud,const ScreenSnapshot &state,float heading,ManeuverEmphasis emphasis) {
     const bool live=screen_mode(state)==ScreenMode::Live&&!state.route.overview;

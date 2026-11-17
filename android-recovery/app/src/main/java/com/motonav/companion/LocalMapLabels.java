@@ -36,6 +36,14 @@ public final class LocalMapLabels {
             if(distance(p)<nearest){point=p;nearest=distance(p);}
         }
         if(Math.abs(point.x())>2048||Math.abs(point.y())>2048)return;
+        add(new Basemap.Label(kind,point,name),nearest,1);
+    }
+
+    public void addNamed(Basemap.Label label) {
+        add(label,distance(label.point()),label.kind()==1?.55:label.kind()==7?.65:1);
+    }
+    private void add(Basemap.Label label,double nearest,double importance) {
+        var point=label.point();int kind=label.kind();
         double score=nearest;
         if(view==null){if(nearest>650*650)return;}
         else {
@@ -45,9 +53,8 @@ public final class LocalMapLabels {
             score=Math.pow(screen.x()-233,2)+Math.pow(screen.y()-250,2);
             if(radius>233||screen.y()<140||screen.y()>375)score=score*4+100000;
         }
-        var label=new Basemap.Label(kind,point,name);
         double priority=kind==3||kind==6?.6:kind==0?.8:1;
-        var candidate=new Candidate(label,score*priority);
+        var candidate=new Candidate(label,score*priority*importance);
         // Deduplicate before the bounded candidate queue, otherwise repeated
         // tile buffers can evict distinct names before the final selection.
         Candidate duplicate=null;

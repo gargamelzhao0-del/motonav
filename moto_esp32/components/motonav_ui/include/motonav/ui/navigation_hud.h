@@ -9,6 +9,7 @@ struct NavigationHud {
     lv_obj_t *unit=nullptr,*progress=nullptr;
     lv_obj_t *current_road=nullptr,*road_accent=nullptr,*speed_limit=nullptr;
     lv_obj_t *card=nullptr,*icon_background=nullptr;
+    lv_obj_t *osm_credit=nullptr,*amap_credit=nullptr;
     lv_point_precise_t points[ArrowShape::Capacity]{};
     int icon=-1;
     int live=-1;
@@ -16,6 +17,7 @@ struct NavigationHud {
     char road_name[64]{};
 };
 void create_navigation_hud(lv_obj_t *parent,NavigationHud &hud);
+void update_map_attribution(NavigationHud &hud,uint8_t label_sources);
 void update_navigation_hud(NavigationHud &hud,const ScreenSnapshot &state,float heading,
                            ManeuverEmphasis emphasis=ManeuverEmphasis::Normal);
 }

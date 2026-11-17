@@ -248,3 +248,31 @@ Source counts cover the full downloaded tile region and can overlap; selected
 geometry covers the current local view. They are not a retention percentage.
 [Luxiao validation](map-surfaces-0.3.16-validation.md) records actual source
 omissions, fixed-scene comparisons and hardware performance separately.
+
+
+## NAV4S7 attributed names (Android 0.7.26 / ESP32 0.3.17)
+
+HELLO type `19` (17 bytes, same CRC/session/sequence framing) replies
+`A,<seq>,NAV4S7`. It includes S6 surfaces and all prior capabilities. The App
+falls back through 17, 15, 13, 11, 8, 5, 3, 1 on an explicit legacy rejection.
+GATT UUIDs and MTU negotiation are unchanged.
+
+Name packet type `18` uses the S5 type 14 fields through byte 23: route revision
+at 13, scene generation at 17, total/offset/count at 21/22/23. Byte 24 is a
+source mask: 1 OpenStreetMap, 2 AMap, 3 both. Entries begin at byte 25 and retain
+the kind/int16 x/int16 y/uint8 UTF-8 length/name representation. Maximum three
+entries per chunk, 24 per scene; total length is `29 + sum(6 + nameBytes)`
+including CRC, never over 304 bytes. No empty names or invented positions.
+
+All chunks must have the same revision, geometry generation, total and source.
+Names and source publish atomically only after the final chunk. Invalid chunks
+do not mutate the accepted sequence or published labels. Type 18 requires S7;
+type 14 remains accepted as OSM source 1. STOP and disconnect clear capability
+and labels. The App does not send AMap-sourced names to S6 or older firmware.
+
+OSM geometry always retains its credit. The additional source bit controls the
+AMap credit only when a complete attributed label set has been received.
+Independent tile and nearby-search workers publish through one scene composer;
+all scene replacements preserve monotonically increasing generations.
+
+See [validation and limits](map-place-names-0.3.17-validation.md).

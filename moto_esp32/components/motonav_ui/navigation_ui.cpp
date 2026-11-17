@@ -141,7 +141,7 @@ void route_map(const ScreenSnapshot &state,ManeuverEmphasis emphasis) {
     if(map_view&&(changed||annotations.layout_pending)) {
         const bool approach=emphasis!=ManeuverEmphasis::Normal,immediate=emphasis==ManeuverEmphasis::Immediate;
         update_map_annotations(annotations,basemap.labels,camera,points,r.count,marker!=0,
-            {immediate?2u:approach?3u:6u,immediate?4u:approach?6u:12u,approach?155:140,road});
+            {immediate?2u:approach?5u:8u,immediate?4u:approach?6u:12u,approach?155:140,road});
     }
 }
 void touch(lv_event_t *event) {
@@ -161,7 +161,7 @@ void refresh(lv_timer_t *) {
         for(auto *object:{view.top,view.title,view.number,view.speed,view.remaining,view.footer,view.arrow})lv_obj_set_flag(object,LV_OBJ_FLAG_HIDDEN,local);
         view.last_icon=-1;
     }
-    if(local){update_navigation_hud(hud,state,camera.heading,emphasis);return;}
+    if(local){update_navigation_hud(hud,state,camera.heading,emphasis);update_map_attribution(hud,basemap.labels.sources);return;}
     set_label_text(view.top, state.linked ? (state.encrypted ? "PHONE CONNECTED" : "PHONE CONNECTING") : name);
     const bool overview=map_layout && mode!=ScreenMode::Live;
     lv_obj_set_flag(view.number,LV_OBJ_FLAG_HIDDEN,overview);

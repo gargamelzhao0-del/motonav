@@ -60,12 +60,26 @@ final class Diagnostics {
     private static long bluetoothMarkers, bluetoothSent, bluetoothDropped;
     private static String bluetoothState = "等待圆屏连接";
     private static volatile MapQuality mapQuality;
+    private static volatile String placePhase="idle";
+    private static volatile int placeReceived,placeSelected,placeOk,placeFailed,placeError;
+    private static volatile boolean placeSupported;
     private static volatile String mapDelivery="圆屏地图尚未确认";
     private record MapDelivery(int generation,int geometry,int labels) { }
     private static volatile MapDelivery lastMapDelivery;
-    static void clearMap(){mapQuality=null;lastMapDelivery=null;mapDelivery="圆屏地图尚未确认";}
-    static void mapDisconnected(){lastMapDelivery=null;mapDelivery="圆屏未连接，等待地图重新确认";}
-    static String mapStatus(){var quality=mapQuality;return (quality==null?"暂无本次导航的底图处理记录":quality.summary())+"\n"+mapDelivery;}
+    static void clearMap(){placePhase="idle";placeReceived=placeSelected=placeOk=placeFailed=placeError=0;placeSupported=false;mapQuality=null;lastMapDelivery=null;mapDelivery="圆屏地图尚未确认";}
+    static void mapDisconnected(){placeSupported=false;lastMapDelivery=null;mapDelivery="圆屏未连接，等待地图重新确认";}
+    static String mapStatus(){var quality=mapQuality;return (quality==null?"暂无本次导航的底图处理记录":quality.summary())+"\n"+placeSummary()+"\n"+mapDelivery;}
+    static void mapPlaces(String phase,int received,int ok,int failed,int error){
+        placePhase=phase;placeReceived=received;placeOk=ok;placeFailed=failed;placeError=error;
+        record("map_places","phase",phase,"poi_received",received,"poi_selected",placeSelected,"requests_ok",ok,"requests_failed",failed,"error",error);
+    }
+    static void mapPlaceSelection(int selected,boolean supported){placeSelected=selected;placeSupported=supported;}
+    private static String placeSummary(){
+        if(!placeSupported)return "周边名称补充：等待支持此功能的圆屏连接";
+        String phase=switch(placePhase){case "loading"->"查询中";case "ready"->"已返回";case "partial"->"部分返回";case "error"->"查询失败";default->"等待查询";};
+        return "高德周边名称："+phase+" · 收到 "+placeReceived+" · 当前局部采用 "+placeSelected
+            +" · 请求 "+placeOk+"/3 · 失败 "+placeFailed+(placeError==0?"":" · 错误码 "+placeError);
+    }
     static void mapQuality(MapQuality value){
         if(value.equals(mapQuality))return;mapQuality=value;
         recordMapQuality(value);

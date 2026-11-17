@@ -82,3 +82,9 @@ java -m jdk.compiler/com.sun.tools.javac.Main -encoding UTF-8 -source 17 -target
 java -cp "$build" com.motonav.companion.MapSurfaceTests "$build/nav4-surfaces.frames"
 g++ -std=c++17 -Wall -Wextra -Werror -I../moto_esp32/components/motonav_core/include ../moto_esp32/tests/host/map_surfaces_test.cpp -o "$build/map-surfaces-test"
 "$build/map-surfaces-test" "$build/nav4-surfaces.frames"
+
+java -m jdk.compiler/com.sun.tools.javac.Main -encoding UTF-8 -source 17 -target 17 -cp "$build" -d "$build" app/src/main/java/com/motonav/companion/NearbyPlace.java app/src/main/java/com/motonav/companion/NearbyPlacesState.java app/src/main/java/com/motonav/companion/MapSceneComposer.java tests/NearbyPlaceTests.java
+java -cp "$build" com.motonav.companion.NearbyPlaceTests "$build/nav4-label-sources.frames"
+g++ -std=c++17 -Wall -Wextra -Werror -I../moto_esp32/components/motonav_core/include ../moto_esp32/tests/host/map_label_sources_test.cpp -o "$build/map-label-sources-test"
+"$build/map-label-sources-test" "$build/nav4-label-sources.frames"
+python3 -B tests/nearby_places_loader_tests.py

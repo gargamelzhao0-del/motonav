@@ -230,10 +230,12 @@ public class BleLinkTests implements BleLink.Listener {
     static void previewCompatibility() throws Exception {
         var t=new BleLinkTests();var g=t.start(true);t.discover(g);
         g.callback.onDescriptorWrite(g,g.descriptor,0);Handler.flush();
-        t.check(g.lastWrite.value[4]==17,"Negotiate surface capability explicitly");
+        t.check(g.lastWrite.value[4]==19,"Negotiate source capability explicitly");
         g.callback.onCharacteristicChanged(g,t.tx,"E,NAV4\n".getBytes());Handler.flush();
         t.check(g.writes==1&&!g.closed,"Legacy rejection waits for outstanding ATT completion");
-        writeAck(g,0);t.check(g.writes==2&&g.lastWrite.value[4]==15,"Fallback preserves map labels on S5 firmware");
+        writeAck(g,0);t.check(g.writes==2&&g.lastWrite.value[4]==17,"Fallback preserves S6 surfaces");
+        g.callback.onCharacteristicChanged(g,t.tx,"E,NAV4\n".getBytes());Handler.flush();writeAck(g,0);
+        t.check(g.writes==3&&g.lastWrite.value[4]==15,"Fallback preserves map labels on S5 firmware");
         g.callback.onCharacteristicChanged(g,t.tx,"E,NAV4\n".getBytes());Handler.flush();writeAck(g,0);
         t.check(g.lastWrite.value[4]==13,"Fallback probes measured positions");
         g.callback.onCharacteristicChanged(g,t.tx,"E,NAV4\n".getBytes());Handler.flush();writeAck(g,0);
@@ -245,11 +247,12 @@ public class BleLinkTests implements BleLink.Listener {
         g.callback.onCharacteristicChanged(g,t.tx,"E,NAV4\n".getBytes());Handler.flush();writeAck(g,0);
         t.check(g.lastWrite.value[4]==3,"Fallback probes route preview");
         g.callback.onCharacteristicChanged(g,t.tx,"E,NAV4\n".getBytes());Handler.flush();writeAck(g,0);
-        t.check(g.writes==8&&g.lastWrite.value[4]==1,"Old firmware fallback uses normal HELLO");
+        t.check(g.writes==9&&g.lastWrite.value[4]==1,"Old firmware fallback uses normal HELLO");
         writeAck(g,0);g.callback.onCharacteristicChanged(g,t.tx,"A,1,NAV4\n".getBytes());Handler.flush();
         t.check(t.link.ready()&&!t.link.routePreview(),"Older firmware remains usable");t.link.disconnect();
         t=new BleLinkTests();g=t.start(true);t.discover(g);
         g.callback.onDescriptorWrite(g,g.descriptor,0);Handler.flush();
+        g.callback.onCharacteristicChanged(g,t.tx,"E,NAV4\n".getBytes());Handler.flush();writeAck(g,0);
         g.callback.onCharacteristicChanged(g,t.tx,"E,NAV4\n".getBytes());Handler.flush();writeAck(g,0);
         g.callback.onCharacteristicChanged(g,t.tx,"E,NAV4\n".getBytes());Handler.flush();writeAck(g,0);
         g.callback.onCharacteristicChanged(g,t.tx,"E,NAV4\n".getBytes());Handler.flush();writeAck(g,0);
@@ -280,6 +283,7 @@ public class BleLinkTests implements BleLink.Listener {
         var t=new BleLinkTests();Handler.clear();Diagnostics.session=0;t.link.configureNavigation(123);t.link.connect(t.device);
         var g=t.device.last;g.mtuAccepted=true;t.configure(g,true);t.discover(g);
         g.callback.onDescriptorWrite(g,g.descriptor,0);Handler.flush();writeAck(g,0);
+        g.callback.onCharacteristicChanged(g,t.tx,"E,NAV4\n".getBytes());Handler.flush();writeAck(g,0);
         g.callback.onCharacteristicChanged(g,t.tx,"E,NAV4\n".getBytes());Handler.flush();writeAck(g,0);
         g.callback.onCharacteristicChanged(g,t.tx,"E,NAV4\n".getBytes());Handler.flush();writeAck(g,0);
         g.callback.onCharacteristicChanged(g,t.tx,"E,NAV4\n".getBytes());Handler.flush();writeAck(g,0);
@@ -328,6 +332,7 @@ public class BleLinkTests implements BleLink.Listener {
         g.callback.onCharacteristicChanged(g,t.tx,"E,NAV4\n".getBytes());Handler.flush();writeAck(g,0);
         g.callback.onCharacteristicChanged(g,t.tx,"E,NAV4\n".getBytes());Handler.flush();writeAck(g,0);
         g.callback.onCharacteristicChanged(g,t.tx,"E,NAV4\n".getBytes());Handler.flush();writeAck(g,0);
+        g.callback.onCharacteristicChanged(g,t.tx,"E,NAV4\n".getBytes());Handler.flush();writeAck(g,0);
         g.callback.onCharacteristicChanged(g,t.tx,"A,1,NAV4S3\n".getBytes());Handler.flush();
         var points=List.of(new DeviceRoute.Point(0,0),new DeviceRoute.Point(0,400));
         var route=new DeviceRoute.Frame(1,points,0,0,0);
@@ -355,6 +360,7 @@ public class BleLinkTests implements BleLink.Listener {
         g.callback.onDescriptorWrite(g,g.descriptor,0);Handler.flush();writeAck(g,0);
         g.callback.onCharacteristicChanged(g,t.tx,"E,NAV4\n".getBytes());Handler.flush();writeAck(g,0);
         g.callback.onCharacteristicChanged(g,t.tx,"E,NAV4\n".getBytes());Handler.flush();writeAck(g,0);
+        g.callback.onCharacteristicChanged(g,t.tx,"E,NAV4\n".getBytes());Handler.flush();writeAck(g,0);
         g.callback.onCharacteristicChanged(g,t.tx,"A,1,NAV4S4\n".getBytes());Handler.flush();
         var route=new DeviceRoute.Frame(1,List.of(new DeviceRoute.Point(0,0),new DeviceRoute.Point(0,400)),12,34,-1);
         var focus=new Basemap.Focus(route,new DeviceRoute.Coordinate(30,120),1,5000,600,new Basemap.Position(1,550,android.os.SystemClock.elapsedRealtime()));
@@ -369,13 +375,14 @@ public class BleLinkTests implements BleLink.Listener {
         t.check(t.link.sendFocusIfNeeded(new Basemap.Focus(route,focus.origin(),1,5000,600),null)&&g.lastWrite.value[33]==0,"Lost observation clears marker without changing route revision");
         writeAck(g,0);g.callback.onCharacteristicChanged(g,t.tx,"A,4,OK\n".getBytes());Handler.flush();t.link.disconnect();
     }
-    static void labelMap(boolean surfaces) throws Exception {
+    static void labelMap(boolean surfaces,boolean sources) throws Exception {
         var t=new BleLinkTests();Handler.clear();Diagnostics.session=0;t.link.configureNavigation(123);t.link.connect(t.device);
         var g=t.device.last;g.mtuAccepted=true;t.configure(g,true);t.discover(g);
         g.callback.onDescriptorWrite(g,g.descriptor,0);Handler.flush();writeAck(g,0);
+        if(!sources){g.callback.onCharacteristicChanged(g,t.tx,"E,NAV4\n".getBytes());Handler.flush();writeAck(g,0);}
         if(!surfaces){g.callback.onCharacteristicChanged(g,t.tx,"E,NAV4\n".getBytes());Handler.flush();writeAck(g,0);}
-        g.callback.onCharacteristicChanged(g,t.tx,(surfaces?"A,1,NAV4S6\n":"A,1,NAV4S5\n").getBytes());Handler.flush();
-        t.check(t.link.ready()&&t.link.mapUpdates()&&t.link.mapSurfaces()==surfaces,"S5 and S6 negotiate distinct geometry capabilities");
+        g.callback.onCharacteristicChanged(g,t.tx,(sources?"A,1,NAV4S7\n":surfaces?"A,1,NAV4S6\n":"A,1,NAV4S5\n").getBytes());Handler.flush();
+        t.check(t.link.ready()&&t.link.mapUpdates()&&t.link.mapSurfaces()==surfaces&&t.link.mapLabelSources()==sources,"S5 and S6 negotiate distinct geometry capabilities");
         var p=new DeviceRoute.Point(0,0);var q=new DeviceRoute.Point(0,400);
         var route=new DeviceRoute.Frame(1,List.of(p,q),0,0,0);
         t.link.sendFocusIfNeeded(new Basemap.Focus(route,new DeviceRoute.Coordinate(30,120),1,5000,600),null);
@@ -386,22 +393,22 @@ public class BleLinkTests implements BleLink.Listener {
             t.link.offerBasemap(new Basemap.Scene(1,List.of(new Basemap.Primitive(8,p,q,p))));
             t.check(!t.link.sendMapChunkIfNeeded(1,null),"Legacy receiver never receives an unsupported waterway kind");
         }
-        t.link.offerBasemap(new Basemap.Scene(1,1,true,items,names));
+        t.link.offerBasemap(new Basemap.Scene(1,1,true,items,names,sources?3:1));
         t.check(t.link.sendMapChunkIfNeeded(1,null)&&g.lastWrite.value[4]==9,"Geometry transfers before annotations");
         writeAck(g,0);g.callback.onCharacteristicChanged(g,t.tx,"A,3,OK\n".getBytes());Handler.flush();
         t.link.sendNavigation(NavigationFrame.status(1),null,null);
         writeAck(g,0);g.callback.onCharacteristicChanged(g,t.tx,"A,4,OK\n".getBytes());Handler.flush();
-        t.check(t.link.sendMapChunkIfNeeded(1,null)&&g.lastWrite.value[4]==14&&g.lastWrite.value[23]==4,"Names follow priority navigation heartbeat");
+        t.check(t.link.sendMapChunkIfNeeded(1,null)&&g.lastWrite.value[4]==(sources?18:14)&&g.lastWrite.value[23]==(sources?3:4),"Names follow priority navigation heartbeat");
         t.link.offerBasemap(new Basemap.Scene(1,2,true,items,List.of()));
         writeAck(g,0);g.callback.onCharacteristicChanged(g,t.tx,"A,5,OK\n".getBytes());Handler.flush();
-        t.check(t.link.sendMapChunkIfNeeded(1,null)&&g.lastWrite.value[17]==1&&g.lastWrite.value[22]==4,"Finish old generation names before replacement");
+        t.check(t.link.sendMapChunkIfNeeded(1,null)&&g.lastWrite.value[17]==1&&g.lastWrite.value[22]==(sources?3:4),"Finish old generation names before replacement");
         writeAck(g,0);g.callback.onCharacteristicChanged(g,t.tx,"A,6,OK\n".getBytes());Handler.flush();
         var ack=BleLink.class.getDeclaredField("lastAckSequence");ack.setAccessible(true);
         t.check(ack.getInt(t.link)==4,"Label ACK is not navigation delivery");
         t.check(Diagnostics.mapUpdate==1&&Diagnostics.mapNames==names.size(),"Names are reported delivered only after the final label ACK");
         t.check(t.link.sendMapChunkIfNeeded(1,null)&&g.lastWrite.value[4]==9&&g.lastWrite.value[17]==2,"Newest geometry starts after label completion");
         writeAck(g,0);g.callback.onCharacteristicChanged(g,t.tx,"A,7,OK\n".getBytes());Handler.flush();
-        t.check(t.link.sendMapChunkIfNeeded(1,null)&&g.lastWrite.value[4]==14&&g.lastWrite.value[21]==0,"Empty replacement explicitly clears old names");
+        t.check(t.link.sendMapChunkIfNeeded(1,null)&&g.lastWrite.value[4]==(sources?18:14)&&g.lastWrite.value[21]==0,"Empty replacement explicitly clears old names");
         writeAck(g,0);g.callback.onCharacteristicChanged(g,t.tx,"A,8,OK\n".getBytes());Handler.flush();
         t.check(!t.link.sendMapChunkIfNeeded(1,null),"Completed annotations are not uploaded repeatedly");
         t.check(Diagnostics.mapUpdate==2&&Diagnostics.mapNames==0,"Empty-label replacement updates delivery counts");
@@ -411,7 +418,7 @@ public class BleLinkTests implements BleLink.Listener {
         t.check(!t.link.sendMapChunkIfNeeded(1,null),"STOP cancels queued geometry and names");
         t.link.disconnect();
     }
-    public static void main(String[] args) throws Exception {labelMap(false);labelMap(true);positions();details();subscriptionAndAck();errorsAndLateCallbacks();serviceChange();rediscovery();diagnosticsPriority();diagnosticsLifecycle();previewCompatibility();localMap();System.out.println("PASS: "+checks+" real BleLink callback checks (boundary doubles; no radio)");}
+    public static void main(String[] args) throws Exception {labelMap(false,false);labelMap(true,false);labelMap(true,true);positions();details();subscriptionAndAck();errorsAndLateCallbacks();serviceChange();rediscovery();diagnosticsPriority();diagnosticsLifecycle();previewCompatibility();localMap();System.out.println("PASS: "+checks+" real BleLink callback checks (boundary doubles; no radio)");}
 }
 '''
 

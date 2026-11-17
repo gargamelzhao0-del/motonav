@@ -40,7 +40,10 @@ uint64_t identity(const MapLabel &label){
 bool generic(const MapLabel &label){
     const char *names[]{"","","地标","加油站","停车场","餐饮","医疗","公交站","公园"};
     return label.kind>=2&&label.kind<9&&(!std::strcmp(label.name,names[label.kind])
-        ||(label.kind==8&&(!std::strcmp(label.name,"园区")||!std::strcmp(label.name,"自然保护区"))));
+        ||(label.kind==8&&(!std::strcmp(label.name,"园区")||!std::strcmp(label.name,"自然保护区")))
+        ||(label.kind==6&&(!std::strcmp(label.name,"医院")||!std::strcmp(label.name,"诊所")||!std::strcmp(label.name,"药房")))
+        ||(label.kind==7&&!std::strcmp(label.name,"车站"))
+        ||(label.kind==3&&!std::strcmp(label.name,"充电站")));
 }
 unsigned slot(uint64_t *keys,unsigned capacity,uint64_t key,uint32_t used){
     for(unsigned i=0;i<capacity;i++)if(keys[i]==key&&!(used&(1u<<i)))return i;
@@ -90,10 +93,11 @@ void update_map_annotations(MapAnnotations &view,const MapLabels &labels,const M
     const uint32_t now=lv_tick_get();
     bool icons[MapLabels::Capacity]{};
     int sizes[MapLabels::Capacity]{};
-    // Icons have an independent budget and survive when their caption cannot fit.
-    for(unsigned pass=0;pass<2;pass++)for(unsigned i=0;i<total&&view.visible_icons<std::min(options.icons,MapAnnotations::IconCapacity);i++){
+    // Place named landmarks first. Generic symbols use space left after captions.
+    auto place_icons=[&](bool unnamed){
+      for(unsigned pass=0;pass<2;pass++)for(unsigned i=0;i<total&&view.visible_icons<std::min(options.icons,MapAnnotations::IconCapacity);i++){
         auto &retained=view.retained[i];const auto &label=labels.items[i];
-        if(label.kind<2||retained.icon!=(pass==0))continue;
+        if(label.kind<2||generic(label)!=unnamed||retained.icon!=(pass==0))continue;
         const auto p=points[i];if(p.x<0||p.x>466||p.y<120||p.y>345)continue;
         int x=std::lround(p.x),y=std::lround(p.y);
         int size=y<195?12:y<265?15:18;
@@ -110,19 +114,26 @@ void update_map_annotations(MapAnnotations &view,const MapLabels &labels,const M
         lv_obj_set_pos(object,box.left,box.top);lv_obj_remove_flag(object,LV_OBJ_FLAG_HIDDEN);
         occupied[boxes++]={box.left-3,box.top-3,box.right+3,box.bottom+3};
         icon_used|=1u<<index;icons[i]=true;view.visible_icons++;retained.icon_size=size;
-    }
+      }
+    };
+    place_icons(false);
     bool texts[MapLabels::Capacity]{};unsigned road_names=0,place_names=0,poi_names=0;
     for(unsigned pass=0;pass<2;pass++)for(unsigned i=0;i<total&&view.visible<std::min(options.names,MapAnnotations::Capacity);i++){
         auto &retained=view.retained[i];const auto &label=labels.items[i];
         if(retained.text!=(pass==0))continue;
-        bool poi=label.kind>=2;if(poi&&(!icons[i]||generic(label)))continue;
-        if((label.kind==0&&road_names>=3)||(label.kind==1&&place_names>=1)||(poi&&poi_names>=2))continue;
+        bool poi=label.kind>=2;if(poi&&generic(label))continue;
+        if((label.kind==0&&road_names>=3)||(label.kind==1&&place_names>=3)||(poi&&poi_names>=4))continue;
         auto p=points[i];if(p.x<0||p.x>466||p.y<120||p.y>345)continue;
-        int x=std::lround(p.x),y=std::lround(p.y),width=view.widths[i],height=24,gap=poi?sizes[i]/2+5:7;
+        int x=std::lround(p.x),y=std::lround(p.y),width=view.widths[i],height=24,gap=icons[i]?sizes[i]/2+5:7;
+        const int far=30;
         const Box choices[]{{x+gap,y-height/2,x+gap+width-1,y+height/2-1},
             {x-gap-width,y-height/2,x-gap-1,y+height/2-1},
             {x-width/2,y-gap-height,x+(width+1)/2-1,y-gap-1},
-            {x-width/2,y+gap,x+(width+1)/2-1,y+gap+height-1}};
+            {x-width/2,y+gap,x+(width+1)/2-1,y+gap+height-1},
+            {x+far,y-height/2,x+far+width-1,y+height/2-1},
+            {x-far-width,y-height/2,x-far-1,y+height/2-1},
+            {x-width/2,y-far-height,x+(width+1)/2-1,y-far-1},
+            {x-width/2,y+far,x+(width+1)/2-1,y+far+height-1}};
         int choice=-1;
         if(retained.has_side&&available(choices[retained.side],retained.text)){
             choice=retained.side;retained.blocked=false;
@@ -131,7 +142,7 @@ void update_map_annotations(MapAnnotations &view,const MapLabels &labels,const M
                 if(!retained.blocked){retained.blocked=true;retained.blocked_at=now;}
                 if(uint32_t(now-retained.blocked_at)<350){view.layout_pending=true;continue;}
             }
-            for(int j=0;j<4;j++)if(available(choices[j],retained.text)){choice=j;break;}
+            for(int j=0;j<8;j++)if(available(choices[j],retained.text)){choice=j;break;}
         }
         if(choice<0)continue;
         unsigned index=slot(view.text_keys,MapAnnotations::Capacity,retained.key,text_used);
@@ -143,6 +154,7 @@ void update_map_annotations(MapAnnotations &view,const MapLabels &labels,const M
         retained.has_side=true;retained.blocked=false;view.visible++;
         if(label.kind==0)road_names++;else if(label.kind==1)place_names++;else poi_names++;
     }
+    place_icons(true);
     for(unsigned i=0;i<total;i++){view.retained[i].text=texts[i];view.retained[i].icon=icons[i];}
     for(unsigned i=0;i<MapAnnotations::Capacity;i++)if(!(text_used&(1u<<i)))lv_obj_add_flag(view.text[i],LV_OBJ_FLAG_HIDDEN);
     for(unsigned i=0;i<MapAnnotations::IconCapacity;i++)if(!(icon_used&(1u<<i)))lv_obj_add_flag(view.icon[i],LV_OBJ_FLAG_HIDDEN);

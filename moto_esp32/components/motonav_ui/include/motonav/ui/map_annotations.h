@@ -24,7 +24,7 @@ struct MapAnnotations {
     uint64_t text_keys[Capacity]{},icon_keys[IconCapacity]{};
 };
 struct MapAnnotationOptions {
-    unsigned names=6,icons=12;
+    unsigned names=8,icons=12;
     int top=140;
     bool current_road=true;
 };

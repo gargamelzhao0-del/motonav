@@ -25,11 +25,12 @@ public final class Basemap {
             if(lineKind(kind) && (c.x()!=0||c.y()!=0))throw new IllegalArgumentException("line tail");
         }
     }
-    public record Scene(int revision,int update,boolean complete,List<Primitive> items,List<Label> labels) {
+    public record Scene(int revision,int update,boolean complete,List<Primitive> items,List<Label> labels,int labelSources) {
+        public Scene(int revision,int update,boolean complete,List<Primitive> items,List<Label> labels){this(revision,update,complete,items,labels,1);}
         public Scene(int revision,List<Primitive> items){this(revision,1,true,items,List.of());}
         public Scene(int revision,int update,boolean complete,List<Primitive> items){this(revision,update,complete,items,List.of());}
         public Scene {
-            if(revision<=0||update<=0||items.size()>MAX_ITEMS||labels.size()>MAX_LABELS)throw new IllegalArgumentException("map scene");
+            if(revision<=0||update<=0||items.size()>MAX_ITEMS||labels.size()>MAX_LABELS||labelSources<1||labelSources>3)throw new IllegalArgumentException("map scene");
             items=List.copyOf(items);labels=List.copyOf(labels);
         }
     }

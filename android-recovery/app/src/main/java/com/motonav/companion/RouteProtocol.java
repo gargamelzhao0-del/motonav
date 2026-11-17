@@ -30,14 +30,20 @@ public final class RouteProtocol {
     public Command helloWithPosition() { return finish(begin(17,13),true); }
     public Command helloWithLabels() { return finish(begin(17,15),true); }
     public Command helloWithSurfaces() { return finish(begin(17,17),true); }
+    public Command helloWithLabelSources() { return finish(begin(17,19),true); }
     public Command labels(Basemap.Scene scene,int offset) {
+        return labels(scene,offset,false);
+    }
+    public Command labels(Basemap.Scene scene,int offset,boolean sources) {
+        if(!sources&&scene.labelSources()!=1)throw new IllegalArgumentException("unnegotiated label source");
         int total=scene.labels().size();
         if(offset<0||offset>total||offset==total&&total!=0)throw new IllegalArgumentException("label offset");
-        int count=Math.min(4,total-offset),length=28;
+        int count=Math.min(sources?3:4,total-offset),length=sources?29:28;
         for(int i=offset;i<offset+count;i++)length+=6+scene.labels().get(i).name().getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
         if(length>MAX_BYTES)throw new IllegalArgumentException("label frame size");
-        ByteBuffer b=begin(length,14).putInt(scene.revision()).putInt(scene.update())
+        ByteBuffer b=begin(length,sources?18:14).putInt(scene.revision()).putInt(scene.update())
                 .put((byte)total).put((byte)offset).put((byte)count);
+        if(sources)b.put((byte)scene.labelSources());
         for(int i=offset;i<offset+count;i++) {
             var label=scene.labels().get(i);byte[] name=label.name().getBytes(java.nio.charset.StandardCharsets.UTF_8);
             b.put((byte)label.kind()).putShort((short)label.point().x()).putShort((short)label.point().y())
