@@ -34,6 +34,13 @@ fallback, navigation priority and STOP cancellation. LVGL previews cover
 Chinese labels, icons, movement, collision avoidance, clearing and exact
 cached/uncached and RGB332-reference pixel equivalence.
 
+Visual inspection exposed a missing Traditional Chinese glyph in the real
+Whitehall name. The pinned OFL Noto font now supplies supported CJK basic
+ideographs and accented Latin through three additional bounded fallback
+chunks in flash. Original GB2312 glyphs and metrics remain unchanged. The
+renderer tests assert non-placeholder glyphs for traditional place-name
+characters and accented Latin, and all 12 UI checks pass with this extension.
+
 Local final test results, CI, release hashes, device installation, hardware FPS
 and user acceptance will be recorded after verification. No claim of complete
 map coverage, improved GPS accuracy or a sustained 40 FPS is made.

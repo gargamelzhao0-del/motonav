@@ -1,12 +1,13 @@
 """Generate bounded LVGL 4-bit fonts from the pinned OFL sources in fonts/README.md.
 
-Requires Pillow. Source TTFs are supplied locally; no network access during builds.
+Requires Pillow and fontTools. Source TTFs are supplied locally; no network access during builds.
 Generated sources are checked in so production needs neither Python nor font tools.
 """
 from pathlib import Path
 import argparse
 import hashlib
 from PIL import Image, ImageDraw, ImageFont
+from fontTools.ttLib import TTFont
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('source_directory', type=Path)
@@ -75,5 +76,15 @@ for high in range(0xa1,0xf8):
 generate('motonav_speed_66','Anton-Regular.ttf',66,' -0123456789')
 generate('motonav_distance_36','BarlowCondensed-Bold.ttf',36,ascii_chars)
 generate('motonav_small_14','BarlowCondensed-Bold.ttf',14,ascii_chars+'©')
-generate('motonav_ui_18_ext','NotoSansSC[wght].ttf',18,[c for c in cjk if ord(c)>0x7000],500)
+with TTFont(args.source_directory/'NotoSansSC[wght].ttf') as source_font:
+    supported=source_font.getBestCmap()
+    # Common Traditional Chinese and accented names are present in real OSM.
+    # Keep existing GB2312 fonts first, then bounded fallback chunks in flash.
+    extra=sorted({chr(n) for n in [*range(0x4e00,0xa000),*range(0xa0,0x250)]
+                  if n in supported}-cjk)
+chunks=[extra[i:i+5000] for i in range(0,len(extra),5000)]
+for i,characters in enumerate(chunks):
+    fallback=f'motonav_ui_18_extra_{i+1}' if i+1<len(chunks) else None
+    generate(f'motonav_ui_18_extra_{i}','NotoSansSC[wght].ttf',18,characters,500,fallback)
+generate('motonav_ui_18_ext','NotoSansSC[wght].ttf',18,[c for c in cjk if ord(c)>0x7000],500,'motonav_ui_18_extra_0')
 generate('motonav_ui_18','NotoSansSC[wght].ttf',18,[c for c in cjk if ord(c)<=0x7000],500,'motonav_ui_18_ext')

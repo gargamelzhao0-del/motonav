@@ -1,4 +1,5 @@
 #include "motonav/ui/map_annotations.h"
+#include "motonav/ui/fonts.h"
 #include "motonav/ui/navigation_ui.h"
 #include "motonav/ui/dashboard.h"
 #include "motonav/core/navigation_session.h"
@@ -134,6 +135,12 @@ static void exercise_label_cache(lv_display_t *display, const std::filesystem::p
 }
 #endif
 static void exercise_annotations(lv_display_t *display,const std::filesystem::path &directory) {
+    for(uint32_t cp:{0x5ef3u,0x81fau,0x7063u,0x00e9u}){
+        lv_font_glyph_dsc_t glyph{};
+        if(!lv_font_get_glyph_dsc(&motonav_ui_18,&glyph,cp,0)||glyph.is_placeholder){
+            std::cerr<<"Real map-name glyph is missing\n";std::abort();
+        }
+    }
     auto *previous=lv_screen_active();auto *screen=lv_obj_create(nullptr);
     lv_obj_set_style_bg_color(screen,lv_color_hex(0x283033),0);
     motonav::MapAnnotations view;motonav::create_map_annotations(screen,view);
