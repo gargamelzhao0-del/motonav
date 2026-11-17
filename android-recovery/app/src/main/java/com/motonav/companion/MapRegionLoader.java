@@ -8,7 +8,16 @@ import java.util.function.Consumer;
 /** Per-tile failure isolation. One bad tile cannot suppress its valid neighbors. */
 public final class MapRegionLoader {
     public record TileData(VectorTile.Decoded decoded,boolean stale) { }
-    public record Result(Basemap.Scene scene,MapQuality quality) { }
+    public record Result(Basemap.Scene scene,MapQuality quality) {
+        /** Equal coverage during a retry is only authoritative after every tile
+         * was attempted. Its early 192-item scene must not replace a retained
+         * 384-item result from the same one successfully loaded tile. */
+        public boolean mayReplace(int retainedTiles){
+            return quality.tilesLoaded()>0&&quality.tilesLoaded()>=retainedTiles
+                &&(retainedTiles==0||quality.tilesLoaded()>retainedTiles
+                    ||quality.tilesLoaded()+quality.tilesFailed()==quality.tilesRequired());
+        }
+    }
     public interface Source { TileData read(Basemap.Tile tile) throws IOException; }
     private MapRegionLoader() { }
     public static Result load(List<Basemap.Tile> tiles,LocalMapBuilder builder,int revision,int limit,

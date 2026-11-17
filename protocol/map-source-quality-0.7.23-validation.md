@@ -1,6 +1,7 @@
-# App map acquisition and information retention — Android 0.7.22
+# App map acquisition and information retention — Android 0.7.23
 
-Date: 2026-11-17 (Asia/Shanghai). App versionCode 30. Compatible with the
+Date: 2026-11-17 (Asia/Shanghai). Final App versionCode 31 (0.7.23), following
+the initial 0.7.22 implementation. Compatible with the
 installed ESP32 0.3.15 / NAV4S5; this change does not modify production firmware,
 GATT services, navigation validity or the position policy. COM21 was not reset
 or reflashed for this change.
@@ -49,7 +50,11 @@ with valid neighbors, reports missing/stale tiles, and checks cancellation
 before publication. `BasemapLoader` retries incomplete regions after 30 seconds.
 Its retained-scene watermark prevents the first cached tile of a retry from
 replacing a richer scene; identical scenes are not repeatedly uploaded. Retry
-time is set before callbacks can re-enter the request path.
+time is set before callbacks can re-enter the request path. A final review found
+that equal-coverage intermediate data (one cached tile, 192 primitives) could
+still replace a previous one-tile final result (up to 384). Version 0.7.23 adds
+an explicit publication policy: equal-coverage replacement waits until every
+tile has been attempted; failed/less-complete attempts keep the retained map.
 
 `LocalMapBuilder`, `MapDetailSelector` and `LocalMapLabels` retain these separate
 responsibilities:
@@ -94,9 +99,10 @@ still have priority over map transfers.
 
 - Full `android-recovery/tests/run.sh` passed, including Java/C++ protocol
   fixtures, corruption/expiry handling, updates, diagnostics and controller checks.
-- 28 targeted map-quality checks cover failed-neighbor isolation, stale fallback,
+- 31 targeted map-quality checks cover failed-neighbor isolation, stale fallback,
   corruption repair, cancellation, 120-triangle complete objects, duplicate
-  direction/winding, nearby distinct names, visible-label selection and headings.
+  direction/winding, nearby distinct names, visible-label selection, headings and
+  equal-coverage retry publication.
 - 389 geometry checks passed, including coverage, courtyard area and dense scenes.
 - 134 actual `BleLink` callback checks passed, including the final-ACK reporting
   boundary and zero-name replacement. These use platform doubles, not a radio.
@@ -130,7 +136,7 @@ fixture. No new hardware FPS result is claimed; changed geometry can change
 rendering cost even at the same primitive count. Full source/screen parity and
 the 40 FPS target remain unmet.
 
-Local evidence is in `moto_esp32/dist/map-quality-0.7.22/`: full-tests.log,
+Local evidence is in `moto_esp32/dist/map-quality-0.7.22/`: full-tests-final-0.7.23.log,
 actual-map-final.log, native-preview-new.log and the generated radio fixture.
 Release/CI status, signed-APK digest and signer verification are recorded with
 the delivered APK after the release workflow completes. Installation and real

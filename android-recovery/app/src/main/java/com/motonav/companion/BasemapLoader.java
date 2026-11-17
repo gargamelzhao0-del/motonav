@@ -76,9 +76,8 @@ final class BasemapLoader implements AutoCloseable {
         });
     }
     private void accept(int token,MapRegionLoader.Result result){
-        if(closed||token!=generation||result.quality().tilesLoaded()<loadedTileWatermark)return;
+        if(closed||token!=generation||!result.mayReplace(loadedTileWatermark))return;
         var next=result.scene();
-        if(result.quality().tilesLoaded()==0)return;
         loadedTileWatermark=result.quality().tilesLoaded();listener.quality(result.quality());
         // Retrying a missing neighbor must not repeatedly replace a rich map
         // with its first cached tile or retransmit an unchanged scene.

@@ -37,6 +37,14 @@ public final class MapQualityTests {
         check(!partial.scene().complete()&&partial.quality().tilesLoaded()==1&&partial.quality().tilesFailed()==1,"partial coverage is explicit");
         check(partial.quality().sourceFeatures()==6&&partial.quality().ignoredFeatures()==5,"unsupported provider layers remain visible in counts");
         check(progress.size()==2,"progress includes failed-tile outcome");
+        List<MapRegionLoader.Result> retryProgress=new ArrayList<>();
+        MapRegionLoader.load(tiles,new LocalMapBuilder(origin,c->c),1,384,t->{
+            if(t.equals(neighbor))throw new IOException("neighbor still unavailable");
+            return new MapRegionLoader.TileData(new VectorTile.Decoded(List.of(road(0)),Map.of("streets",1)),false);
+        },retryProgress::add,()->false);
+        check(!retryProgress.get(0).mayReplace(1),"first cached tile of a retry cannot replace richer equal-coverage data");
+        check(retryProgress.get(1).mayReplace(1),"finished retry can publish genuinely changed content at the same coverage");
+        check(!failedCoverageResult().mayReplace(1),"failed retry cannot clear retained geometry");
         var complete=MapRegionLoader.load(tiles,new LocalMapBuilder(origin,c->c),1,384,t->
             new MapRegionLoader.TileData(new VectorTile.Decoded(List.of(road(t.equals(tile)?0:-4096)),Map.of("streets",1)),false),null,()->false);
         check(complete.scene().complete()&&complete.quality().tilesLoaded()==2,"recovered tiles complete the region");
@@ -108,5 +116,9 @@ public final class MapQualityTests {
             Files.deleteIfExists(cached.resolveSibling(cached.getFileName()+".tmp"));Files.deleteIfExists(cached);Files.delete(cache);
         }
         System.out.println("PASS: "+checks+" map source, retention, cache, deduplication and complete-object checks");
+    }
+    private static MapRegionLoader.Result failedCoverageResult(){
+        return new MapRegionLoader.Result(new Basemap.Scene(1,1,false,List.of()),
+            new MapQuality(2,0,0,2,0,0,0,0,0,0,0,0,0,0,0,0));
     }
 }
