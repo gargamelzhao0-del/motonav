@@ -42,6 +42,7 @@ public:
             const auto &map=route_receiver_.basemap();
             result.basemap_revision=map.revision;result.basemap_count=map.count;
             result.basemap_generation=map.generation;result.basemap_complete=map.complete;
+            result.basemap_labels_generation=map.labels.generation;result.basemap_label_count=map.labels.count;
         }
         return result;
     }

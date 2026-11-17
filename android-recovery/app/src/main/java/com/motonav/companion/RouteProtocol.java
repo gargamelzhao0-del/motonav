@@ -28,6 +28,22 @@ public final class RouteProtocol {
     public Command helloWithMapUpdates() { return finish(begin(17,8),true); }
     public Command helloWithDetails() { return finish(begin(17,11),true); }
     public Command helloWithPosition() { return finish(begin(17,13),true); }
+    public Command helloWithLabels() { return finish(begin(17,15),true); }
+    public Command labels(Basemap.Scene scene,int offset) {
+        int total=scene.labels().size();
+        if(offset<0||offset>total||offset==total&&total!=0)throw new IllegalArgumentException("label offset");
+        int count=Math.min(4,total-offset),length=28;
+        for(int i=offset;i<offset+count;i++)length+=6+scene.labels().get(i).name().getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
+        if(length>MAX_BYTES)throw new IllegalArgumentException("label frame size");
+        ByteBuffer b=begin(length,14).putInt(scene.revision()).putInt(scene.update())
+                .put((byte)total).put((byte)offset).put((byte)count);
+        for(int i=offset;i<offset+count;i++) {
+            var label=scene.labels().get(i);byte[] name=label.name().getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            b.put((byte)label.kind()).putShort((short)label.point().x()).putShort((short)label.point().y())
+                    .put((byte)name.length).put(name);
+        }
+        return finish(b,false);
+    }
     public Command details(int revision,int navigationSequence,NavigationDetails details) {
         if(revision<=0||navigationSequence<=0||details==null)throw new IllegalArgumentException("details reference");
         byte[] current=details.currentRoad().getBytes(java.nio.charset.StandardCharsets.UTF_8);

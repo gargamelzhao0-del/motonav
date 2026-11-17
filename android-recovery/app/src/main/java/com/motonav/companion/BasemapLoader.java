@@ -60,12 +60,12 @@ final class BasemapLoader implements AutoCloseable {
                     loaded++;
                     if(progressive&&loaded<tiles.size()) {
                         var partial=builder.finish(requested,192);
-                        var next=new Basemap.Scene(requested,++update,false,partial.items());
-                        if(!next.items().isEmpty())main.post(()->{if(!closed&&token==generation)listener.loaded(next);});
+                        var next=new Basemap.Scene(requested,++update,false,partial.items(),partial.labels());
+                        if(!next.items().isEmpty()||!next.labels().isEmpty())main.post(()->{if(!closed&&token==generation)listener.loaded(next);});
                     }
                 }
                 var complete=builder.finish(requested,progressive?Basemap.MAX_ITEMS:192);
-                result=new Basemap.Scene(requested,++update,true,complete.items());
+                result=new Basemap.Scene(requested,++update,true,complete.items(),complete.labels());
             } catch(Exception | LinkageError ignored) { /* UI reports availability; never log coordinates. */ }
             Basemap.Scene completed=result;
             main.post(()->{

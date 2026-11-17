@@ -29,6 +29,7 @@ public:
         details_enabled_=false;details_={};navigation_sequence_=0;details_at_=0;
         positions_enabled_=false;position_at_=position_until_=0;
         position_history_.clear();
+        labels_enabled_=false;label_receiver_.clear();
     }
     const NavigationReceiver &navigation() const { return navigation_; }
     ReceiverStats stats() const { return stats_; }
@@ -65,6 +66,8 @@ private:
     bool updates_enabled_=false;
     bool details_enabled_=false;
     bool positions_enabled_=false;
+    bool labels_enabled_=false;
+    MapLabelReceiver label_receiver_;
     uint64_t position_at_=0,position_until_=0;
     MapPositionHistory position_history_;
     NavigationDetails details_;
@@ -93,9 +96,9 @@ private:
         if(NavigationReceiver::crc32(reinterpret_cast<const char *>(bytes_),expected_-4)!=crc
                 ||!seq||seq>INT_MAX||!session||session>INT_MAX)return false;
         const unsigned type=bytes_[4];
-        const bool hello=type==1||type==3||type==5||type==8||type==11||type==13;
-        const char *ack=hello?(type==13?"NAV4S4":type==11?"NAV4S3":type==8?"NAV4S2":type==5?"NAV4S":type==3?"NAV4P":"NAV4"):"OK";
-        if((hello && expected_!=17)||(!hello && type!=2 && type!=4 && type!=6 && type!=7 && type!=9 && type!=10 && type!=12))return false;
+        const bool hello=type==1||type==3||type==5||type==8||type==11||type==13||type==15;
+        const char *ack=hello?(type==15?"NAV4S5":type==13?"NAV4S4":type==11?"NAV4S3":type==8?"NAV4S2":type==5?"NAV4S":type==3?"NAV4P":"NAV4"):"OK";
+        if((hello && expected_!=17)||(!hello && type!=2 && type!=4 && type!=6 && type!=7 && type!=9 && type!=10 && type!=12 && type!=14))return false;
         if(navigation_.handshaken() && seq==sequence_ && session==session_ && crc==checksum_) {
             ++stats_.duplicates; std::snprintf(reply,sizeof(reply),"A,%lu,%s\n",static_cast<unsigned long>(seq),ack); return true;
         }
@@ -104,11 +107,16 @@ private:
             if(navigation_.handshaken()||seq!=1)return false;
             std::snprintf(body,sizeof(body),"H,3,%lu,%lu",static_cast<unsigned long>(seq),static_cast<unsigned long>(session));
             if(!core(body,now))return false;
-            scene_={}; plan_={}; preview_enabled_=type==3;basemap_enabled_=type==5||type==8||type==11||type==13;updates_enabled_=type==8||type==11||type==13;
-            details_enabled_=type==11||type==13;details_={};navigation_sequence_=0;details_at_=0;
-            positions_enabled_=type==13;position_at_=position_until_=0;
+            scene_={}; plan_={}; preview_enabled_=type==3;basemap_enabled_=type==5||type==8||type==11||type==13||type==15;updates_enabled_=type==8||type==11||type==13||type==15;
+            details_enabled_=type==11||type==13||type==15;details_={};navigation_sequence_=0;details_at_=0;
+            positions_enabled_=type==13||type==15;position_at_=position_until_=0;
+            labels_enabled_=type==15;label_receiver_.clear();
             position_history_.clear();
             map_={};staging_={};staged_=0;
+        } else if(type==14) {
+            if(!labels_enabled_||!navigation_.handshaken()||session!=session_||seq<=sequence_||expected_<28
+                    ||u32(13)!=plan_.revision||u32(13)!=map_.revision||u32(17)!=map_.generation)return false;
+            if(!label_receiver_.accept(bytes_,expected_,map_.revision,map_.generation,map_.labels))return false;
         } else if(type==10) {
             if(!details_enabled_||!navigation_.handshaken()||session!=session_||seq<=sequence_||expected_<31)return false;
             unsigned current=bytes_[25],next=bytes_[26];
@@ -146,7 +154,7 @@ private:
                 if(std::abs(px)>32000||std::abs(py)>32000)return false;
                 next.points[i]={static_cast<int16_t>(px),static_cast<int16_t>(py)};
             }
-            if(revision!=plan_.revision){map_={};staging_={};staged_=0;position_history_.clear();}
+            if(revision!=plan_.revision){map_={};staging_={};staged_=0;position_history_.clear();label_receiver_.clear();}
             plan_=next;plan_crc_=geometry_crc;
             position_at_=now;position_until_=quality?now+15000-age:0;
             if(quality)position_history_.remember({revision,static_cast<int16_t>(x),static_cast<int16_t>(y),
@@ -174,7 +182,12 @@ private:
                 item.c={static_cast<int16_t>(i16(p+10)),static_cast<int16_t>(i16(p+12))};
             }
             staged_+=count;
-            if(staged_==total){map_=staging_;}
+            if(staged_==total){
+                // Keep names from the same origin visible during replacement.
+                // New labels publish separately with this geometry generation.
+                if(map_.revision==revision)staging_.labels=map_.labels;
+                map_=staging_;label_receiver_.clear();
+            }
         } else if(type==4) {
             if(!preview_enabled_ || !navigation_.handshaken() || session!=session_ || seq<=sequence_ || expected_<31)return false;
             unsigned reason=bytes_[13],count=bytes_[14]; uint32_t revision=u32(15);
@@ -212,7 +225,7 @@ private:
             if(!core(body,now))return false;
             navigation_sequence_=seq;
             if(bytes_[13]!=Live||revision!=details_.revision)details_={};
-            if(bytes_[13]==Stopped || bytes_[13]==Arrived) { scene_={}; plan_={}; plan_crc_=0;map_={};staging_={};staged_=0;position_history_.clear(); }
+            if(bytes_[13]==Stopped || bytes_[13]==Arrived) { scene_={}; plan_={}; plan_crc_=0;map_={};staging_={};staged_=0;position_history_.clear();label_receiver_.clear(); }
             else if(bytes_[13]==Live)scene_=next;
             if(count) { route_revision_=revision; route_crc_=geometry_crc; }
         }

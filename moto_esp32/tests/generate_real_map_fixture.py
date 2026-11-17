@@ -1,9 +1,11 @@
 """Regenerate the test-only device geometry from the checked-in Java wire fixture."""
 from pathlib import Path
 import struct
+import json
 
 root = Path(__file__).resolve().parent
 features, route = [], []
+labels = []
 pose=(0,0,0)
 for row in (root / 'fixtures/nav4-real-map.frames').read_text(encoding='utf-8').splitlines():
     frame = bytes.fromhex(row)
@@ -15,6 +17,13 @@ for row in (root / 'fixtures/nav4-real-map.frames').read_text(encoding='utf-8').
             kind, reserved, *points = struct.unpack_from('<BB6h', frame, 27 + 14*i)
             assert reserved == 0
             features.append((kind, points))
+    elif frame[4] == 14:
+        at = 24
+        for i in range(frame[23]):
+            kind, x, y, length = struct.unpack_from('<BhhB', frame, at)
+            name = frame[at+6:at+6+length].decode('utf-8')
+            labels.append((kind, x, y, name))
+            at += 6 + length
 assert 300 <= len(features) <= 384 and len(route) >= 2
 lines = ['// Map data (c) OpenStreetMap contributors, ODbL. See tests/fixtures/REAL_MAP_SOURCE.md.',
          '// Generated from nav4-real-map.frames; test-only camera motion.', '#pragma once',
@@ -25,5 +34,10 @@ lines.extend(['};', 'static constexpr motonav::MapPoint RealMapRoute[]{'])
 lines.extend('    {%d,%d},' % p for p in route)
 lines.extend(['};', f'static constexpr motonav::MapPoint RealMapCamera{{{pose[0]},{pose[1]}}};',
               f'static constexpr float RealMapHeading={pose[2]*0.001745329252:.9f}f;', ''])
+assert len(labels) <= 24
+lines.append(f'static constexpr motonav::MapLabels RealMapLabels{{1,1,{len(labels)},{{')
+for kind, x, y, name in labels:
+    lines.append('    {%d,{%d,%d},%s},' % (kind, x, y, json.dumps(name, ensure_ascii=False)))
+lines.append('}};')
 (root / 'device/motonav_bench/real_map_fixture.h').write_text('\n'.join(lines), encoding='utf-8')
 print(f'Generated {len(features)} real primitives and {len(route)} test route points')

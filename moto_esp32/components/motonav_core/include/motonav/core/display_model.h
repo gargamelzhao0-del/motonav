@@ -18,6 +18,8 @@ struct ScreenSnapshot {
     uint32_t basemap_revision=0;
     uint16_t basemap_count=0;
     uint32_t basemap_generation=0;
+    uint32_t basemap_labels_generation=0;
+    uint8_t basemap_label_count=0;
     bool basemap_complete=true;
 };
 

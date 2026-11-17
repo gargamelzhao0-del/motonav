@@ -71,7 +71,7 @@ public final class BasemapTests {
             System.out.println("REAL TILE: features="+features.size()+" primitives="+scene.items().size()+" kinds="+scene.items().stream().map(Basemap.Primitive::kind).collect(java.util.stream.Collectors.groupingBy(k->k,java.util.stream.Collectors.counting())));
             check(scene.items().size()>50,"actual public tile produces map detail");
             if(args.length>2){
-                var radio=new RouteProtocol(123);var lines=new ArrayList<String>();lines.add(HexFormat.of().formatHex(radio.helloWithDetails().bytes()));
+                var radio=new RouteProtocol(123);var lines=new ArrayList<String>();lines.add(HexFormat.of().formatHex(radio.helloWithLabels().bytes()));
                 lines.add(HexFormat.of().formatHex(radio.snapshot(NavigationFrame.status(1),null,100000).bytes()));
                 // Route for visual QA only, following a real decoded street path.
                 var street=features.stream().filter(f->f.type()==2&&f.layer().equals("streets")).flatMap(f->f.paths().stream())
@@ -81,8 +81,12 @@ public final class BasemapTests {
                 var pose=points.get(nearest);var ahead=points.get(nearest+1);
                 int bearing=(int)Math.round(Math.toDegrees(Math.atan2(ahead.x()-pose.x(),ahead.y()-pose.y()))*10);
                 var view=new DeviceRoute.Frame(1,points,pose.x(),pose.y(),Math.floorMod(bearing,3600));
+                var annotationBuilder=new LocalMapBuilder(new Basemap.Focus(view,center,1,5000,600),c->c);
+                annotationBuilder.add(tile,features);
+                scene=new Basemap.Scene(1,1,true,scene.items(),annotationBuilder.finish(1).labels());
                 lines.add(HexFormat.of().formatHex(radio.focus(new Basemap.Focus(view,center,1,5000,600)).bytes()));
                 for(int i=0;i<scene.items().size();i+=19)lines.add(HexFormat.of().formatHex(radio.basemap(scene,i,true).bytes()));
+                for(int i=0;i<Math.max(1,scene.labels().size());i+=4)lines.add(HexFormat.of().formatHex(radio.labels(scene,i).bytes()));
                 var live=radio.snapshot(new NavigationFrame(2,3,120,4000,360,36,100000,100000),view,100000);
                 lines.add(HexFormat.of().formatHex(live.bytes()));
                 lines.add(HexFormat.of().formatHex(radio.details(1,live.sequence(),new NavigationDetails("测试道路","下一路段",686,-1)).bytes()));

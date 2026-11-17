@@ -429,3 +429,30 @@ static constexpr motonav::MapPoint RealMapRoute[]{
 };
 static constexpr motonav::MapPoint RealMapCamera{-64,136};
 static constexpr float RealMapHeading=1.106538746f;
+
+static constexpr motonav::MapLabels RealMapLabels{1,1,24,{
+    {0,{10,175},"Parliament Square"},
+    {0,{-3,177},"Broad Sanctuary"},
+    {2,{0,184},"Tyburn"},
+    {2,{21,189},"纳尔逊·曼德拉雕像"},
+    {2,{26,155},"St. Margaret´s Church"},
+    {0,{78,165},"St. Margaret Street"},
+    {1,{70,191},"Westminster"},
+    {0,{-82,113},"The Sanctuary"},
+    {2,{-81,112},"Royal Wedding 2011"},
+    {2,{-155,197},"Storey's Wine Bar"},
+    {0,{-160,74},"Great Smith Street"},
+    {0,{-161,278},"Birdcage Walk"},
+    {0,{-6,-27},"Way of the Monks"},
+    {5,{-61,7},"Cellarium Café & Terrace"},
+    {0,{110,-2},"Abingdon Street"},
+    {2,{-174,142},"Methodist Central Hall"},
+    {7,{86,344},"Westminster Station / Parliament Square"},
+    {7,{181,293},"威斯敏斯特"},
+    {5,{80,-29},"Jewel Tower Cafe"},
+    {2,{205,66},"威斯敏斯特宫"},
+    {7,{-156,-1},"Westminster Abbey"},
+    {1,{101,401},"白廳"},
+    {0,{-9,191},"Little George Street"},
+    {2,{-12,200},"亚伯拉罕 林肯"},
+}};

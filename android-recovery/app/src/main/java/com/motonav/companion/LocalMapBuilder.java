@@ -14,13 +14,16 @@ public final class LocalMapBuilder {
     private final PriorityQueue<Group> lines=new PriorityQueue<>(Comparator.comparingDouble(Group::score).reversed()),
             areas=new PriorityQueue<>(Comparator.comparingDouble(Group::score).reversed());
     private double focusX,focusY;
+    private LocalMapLabels labels;
     public LocalMapBuilder(DeviceRoute.Coordinate origin,Basemap.Coordinates conversion) {
         this.origin=origin;this.conversion=conversion;longitudeScale=111319.49079327358*Math.cos(Math.toRadians(origin.latitude()));
+        labels=new LocalMapLabels(0,0);
     }
     public LocalMapBuilder(Basemap.Focus focus,Basemap.Coordinates conversion) {
         this(focus.origin(),conversion);
         double heading=Math.toRadians(Math.max(0,focus.route().heading())/10.0);
         focusX=focus.route().x()+Math.sin(heading)*80;focusY=focus.route().y()+Math.cos(heading)*80;
+        labels=new LocalMapLabels(focusX,focusY);
     }
     private void keep(List<Basemap.Primitive> items,boolean road) {
         if(items.isEmpty()||items.size()>96)return;
@@ -45,6 +48,14 @@ public final class LocalMapBuilder {
     }
     public void add(Basemap.Tile tile,List<VectorTile.Feature> features) {
         for(var feature:features) {
+            if((!feature.name().isEmpty()||feature.layer().equals("pois")||feature.layer().equals("public_transport"))
+                    &&(feature.type()==1||feature.type()==2)) {
+                for(var path:feature.paths())if(!path.isEmpty()&&path.size()<=4096&&near(tile,feature.extent(),path)) {
+                    List<DeviceRoute.Point> points=new ArrayList<>();
+                    for(var p:path)points.add(point(tile,feature.extent(),p));
+                    labels.add(feature,points);
+                }
+            }
             int kind=kind(feature);if(kind<0)continue;
             for(int ring=0;ring<feature.paths().size();ring++) {
                 var path=feature.paths().get(ring);
@@ -98,7 +109,7 @@ public final class LocalMapBuilder {
         // remaining detail budget. Never cut a building or street in half to fit.
         List<Basemap.Primitive> selected=new ArrayList<>();
         select(lines,selected,limit/2);select(areas,selected,limit);
-        return new Basemap.Scene(revision,selected);
+        return new Basemap.Scene(revision,1,true,selected,labels.finish());
     }
     private static void select(PriorityQueue<Group> source,List<Basemap.Primitive> output,int limit) {
         List<Group> candidates=new ArrayList<>(source);candidates.sort(Comparator.comparingDouble(Group::score));

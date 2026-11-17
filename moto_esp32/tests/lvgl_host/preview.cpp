@@ -1,3 +1,4 @@
+#include "motonav/ui/map_annotations.h"
 #include "motonav/ui/navigation_ui.h"
 #include "motonav/ui/dashboard.h"
 #include "motonav/core/navigation_session.h"
@@ -132,6 +133,42 @@ static void exercise_label_cache(lv_display_t *display, const std::filesystem::p
     lv_screen_load(previous); lv_obj_delete(screen);
 }
 #endif
+static void exercise_annotations(lv_display_t *display,const std::filesystem::path &directory) {
+    auto *previous=lv_screen_active();auto *screen=lv_obj_create(nullptr);
+    lv_obj_set_style_bg_color(screen,lv_color_hex(0x283033),0);
+    motonav::MapAnnotations view;motonav::create_map_annotations(screen,view);
+    motonav::MapLabels labels;labels.generation=1;labels.count=5;
+    const motonav::MapLabel entries[]{
+        {0,{-130,100},"中山路"},{1,{-100,180},"东城区"},{3,{135,90},"加油站"},
+        {4,{-140,30},"停车场"},{6,{120,175},"人民医院"}};
+    for(unsigned i=0;i<labels.count;i++)labels.items[i]=entries[i];
+    const motonav::MapPoint route[]{{0,-200},{0,500}};
+    motonav::MapCamera camera{0,0,0,1};
+    auto update=[&](){motonav::update_map_annotations(view,labels,camera,route,2,true);lv_obj_update_layout(screen);};
+    lv_screen_load(screen);update();save(display,directory/"annotations.ppm");
+    if(view.visible<3||view.visible>8){std::cerr<<"Annotation layout lost useful names\n";std::abort();}
+    auto firstX=lv_obj_get_x(view.text[0]);auto original=pixels;
+    for(unsigned i=0;i<view.visible;i++){
+        lv_area_t a;lv_obj_get_coords(view.text[i],&a);
+        if(a.y1<140||a.y2>337||(a.x1<=239&&a.x2>=227)){std::cerr<<"Annotation obscures route/HUD\n";std::abort();}
+        for(unsigned j=0;j<i;j++){
+            lv_area_t b;lv_obj_get_coords(view.text[j],&b);
+            if(a.x1<=b.x2&&a.x2>=b.x1&&a.y1<=b.y2&&a.y2>=b.y1)std::abort();
+        }
+    }
+    update();save(display,directory/"annotations-static.ppm");
+    if(pixels!=original)std::abort();
+    camera.x=20;update();save(display,directory/"annotations-moving.ppm");
+    if(lv_obj_get_x(view.text[0])==firstX||pixels==original){std::cerr<<"Names failed to follow map\n";std::abort();}
+    auto prior_width=view.widths[0];labels.revision=2;
+    std::strcpy(labels.items[0].name,"中山西路");update();
+    if(view.widths[0]==prior_width){std::cerr<<"New origin reused old text dimensions\n";std::abort();}
+    labels={};update();save(display,directory/"annotations-cleared.ppm");
+    if(view.visible)std::abort();
+    for(unsigned i=0;i<motonav::MapAnnotations::Capacity;i++)if(lv_obj_is_visible(view.text[i])||lv_obj_is_visible(view.icon[i]))std::abort();
+    lv_screen_load(previous);lv_obj_delete(screen);
+    std::cout<<"PASS: map names, POI icons, collision avoidance, movement and clear\n";
+}
 int main(int argc, char **argv) {
     if (argc != 2) return 2;
     std::filesystem::path directory(argv[1]); std::filesystem::create_directories(directory);
@@ -203,6 +240,7 @@ int main(int argc, char **argv) {
     std::cout << "PASS: map-only automatic test restores normal display\n";
 #endif
     save(display, directory / "idle.ppm");
+    exercise_annotations(display,directory);
     auto *navigation_screen = lv_screen_active();
     auto normal_children = lv_obj_get_child_count(lv_screen_active());
     lv_obj_add_event_cb(lv_obj_get_child(lv_screen_active(),0), [](lv_event_t *) { ++rim_draws; }, LV_EVENT_DRAW_MAIN, nullptr);

@@ -6,6 +6,15 @@ import java.util.List;
 public final class Basemap {
     private Basemap() { }
     public static final int MAX_ITEMS=384;
+    public static final int MAX_LABELS=24;
+    /** 0 road, 1 place, 2 landmark, 3 fuel, 4 parking, 5 food, 6 medical, 7 transit, 8 park. */
+    public record Label(int kind,DeviceRoute.Point point,String name) {
+        public Label {
+            name=NavigationDetails.clean(name);
+            if(kind<0||kind>8||point==null||Math.abs((long)point.x())>2048
+                    ||Math.abs((long)point.y())>2048||name.isEmpty())throw new IllegalArgumentException("map label");
+        }
+    }
     public record Primitive(int kind,DeviceRoute.Point a,DeviceRoute.Point b,DeviceRoute.Point c) {
         public Primitive {
             if(kind<0||kind>5)throw new IllegalArgumentException("map kind");
@@ -14,9 +23,13 @@ public final class Basemap {
             if(kind<3 && (c.x()!=0||c.y()!=0))throw new IllegalArgumentException("line tail");
         }
     }
-    public record Scene(int revision,int update,boolean complete,List<Primitive> items) {
-        public Scene(int revision,List<Primitive> items){this(revision,1,true,items);}
-        public Scene { if(revision<=0||update<=0||items.size()>MAX_ITEMS)throw new IllegalArgumentException("map scene");items=List.copyOf(items); }
+    public record Scene(int revision,int update,boolean complete,List<Primitive> items,List<Label> labels) {
+        public Scene(int revision,List<Primitive> items){this(revision,1,true,items,List.of());}
+        public Scene(int revision,int update,boolean complete,List<Primitive> items){this(revision,update,complete,items,List.of());}
+        public Scene {
+            if(revision<=0||update<=0||items.size()>MAX_ITEMS||labels.size()>MAX_LABELS)throw new IllegalArgumentException("map scene");
+            items=List.copyOf(items);labels=List.copyOf(labels);
+        }
     }
     /** A measured map position is independent of turn-by-turn guidance readiness. */
     public record Position(int quality,int accuracyMeters,long measuredMs) {

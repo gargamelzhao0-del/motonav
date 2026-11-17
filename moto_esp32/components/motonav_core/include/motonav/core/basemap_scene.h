@@ -1,5 +1,6 @@
 #pragma once
 #include "motonav/core/route_scene.h"
+#include "motonav/core/map_labels.h"
 #include <cstddef>
 
 namespace motonav {
@@ -13,5 +14,6 @@ struct BasemapScene {
     bool complete=true;
     uint16_t count=0;
     MapPrimitive items[Capacity]{};
+    MapLabels labels{};
 };
 } // namespace motonav

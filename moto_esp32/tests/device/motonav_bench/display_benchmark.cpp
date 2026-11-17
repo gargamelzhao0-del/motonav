@@ -17,6 +17,7 @@ lv_display_t *display;
 lv_obj_t *normal_screen, *test_screen, *test_marker;
 Dashboard view;
 NavigationHud map_hud;
+MapAnnotations map_annotations;
 SnapshotReader snapshot;
 BenchmarkServices services;
 bool exit_requested = false, pending_autorun = false;
@@ -43,9 +44,10 @@ void benchmark_layout() {
         if (map_canvas) {
             lv_obj_set_pos(map_canvas, 0, 0);
             lv_obj_move_to_index(map_canvas, 1); // Above the rim, behind every HUD label.
+            create_map_annotations(map_canvas,map_annotations);
         }
     } else if (!map && map_canvas) {
-        lv_obj_delete(map_canvas); map_canvas = nullptr;
+        lv_obj_delete(map_canvas); map_canvas = nullptr;map_annotations={};
     }
     if(map&&!map_hud.root)create_navigation_hud(lv_screen_active(),map_hud);
     if(map_hud.root)lv_obj_set_flag(map_hud.root,LV_OBJ_FLAG_HIDDEN,!map);
@@ -113,6 +115,7 @@ void set_test(bool enabled) {
         test_screen = lv_obj_create(nullptr);
         view = {};
         map_hud = {};
+        map_annotations = {};
         create_dashboard(test_screen, view);
         lv_obj_t *screen = test_screen;
         test_marker = lv_obj_create(screen); lv_obj_remove_style_all(test_marker);
@@ -133,6 +136,7 @@ void set_test(bool enabled) {
         test_screen = map_canvas = test_marker = nullptr;
         view = {};
         map_hud = {};
+        map_annotations = {};
     }
     testing = enabled;
     exit_requested = false;
@@ -191,6 +195,7 @@ bool refresh(void *, const ScreenSnapshot &state) {
             if (!map_canvas) { set_label_text(view.title, "MAP MEMORY ERROR"); return true; }
             uint64_t begin = static_cast<uint64_t>(services.now_us());
             auto camera=render_map_benchmark(map_canvas, now - test_started);
+            render_map_benchmark_labels(map_annotations,camera);
             // The removable test exercises the production HUD, with an explicit
             // DISPLAY TEST marker and no synthetic input sent to the navigation service.
             ScreenSnapshot test{};test.linked=test.encrypted=test.subscribed=test.handshaken=true;

@@ -11,7 +11,7 @@
 namespace motonav {
 namespace {
 constexpr uint8_t Unit=242;
-constexpr size_t Slots=24,Width=256,Height=64,TextBytes=192;
+constexpr size_t Slots=40,Width=256,Height=64,TextBytes=192;
 struct Entry {
     lv_draw_label_dsc_t key{};
     char text[TextBytes]{};

@@ -18,3 +18,7 @@ selection and contains 383 primitives: 109 minor-road segments, 83 major-road
 segments, 161 building triangles and 30 park triangles. Run
 `python tests/generate_real_map_fixture.py` after regenerating the Java frames to
 update the removable device benchmark geometry. All motion remains synthetic.
+
+The 0.3.12 extract adds up to 24 real names/POIs from the same tile. Selection
+uses the test camera's forward view and spatial cells; the 383 geometry
+primitives are unchanged. The data remains ODbL and test-only.

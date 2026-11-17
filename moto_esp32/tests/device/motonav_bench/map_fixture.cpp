@@ -3,6 +3,9 @@
 #include <cmath>
 
 namespace motonav {
+void render_map_benchmark_labels(MapAnnotations &view,const MapCamera &camera) {
+    update_map_annotations(view,RealMapLabels,camera,RealMapRoute,sizeof(RealMapRoute)/sizeof(RealMapRoute[0]),true);
+}
 MapCamera render_map_benchmark(lv_obj_t *view, uint64_t elapsed_ms) {
     // Traverse the decoded road itself at the HUD's test speed (36 km/h).
     // Independent sine-wave camera motion made the fixed vehicle marker drift

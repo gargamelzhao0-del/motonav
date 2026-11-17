@@ -171,3 +171,47 @@ coordinate, not on any unmeasured camera position in an unknown focus frame.
 The gray style is a graphics choice, not a new wire quality value. History never
 makes navigation live, supplies speed, or creates turn instructions. Older apps
 without independently measured positions do not produce a historical marker.
+
+## NAV4S5: independent map annotations (0.7.20 / 0.3.12)
+
+HELLO type 15 negotiates `A,1,NAV4S5`; Android falls back through types 13, 11,
+8, 5, 3 and 1. GATT UUIDs and the 304-byte frame limit are unchanged.
+
+Type 14 has revision u32 at 13, map generation u32 at 17, total u8 at 21,
+offset u8 at 22 and count u8 at 23. Entries start at 24; each is kind u8,
+x/y i16, UTF-8 byte length u8 and that many name bytes. CRC32 is last.
+Length is 28 + sum(6 + name length). Each chunk carries at most four entries;
+a set has at most 24. Each name has 1–63 bytes, validated with the same UTF-8
+and control-character rules as HUD names. Coordinates are local metres in
+±2048, sharing the route origin. Kinds are road=0, place=1, landmark=2,
+fuel=3, parking=4, food=5, medical=6, transit=7, park=8.
+
+Only negotiated, authenticated, in-sequence packets matching the currently
+published geometry revision/generation are accepted. All entries in a chunk
+validate before staging. Offsets must be contiguous; publication is atomic
+after the complete set arrives. An empty set explicitly clears old names.
+Exact retransmissions are acknowledged without appending. A new geometry
+generation retains old names from the same origin until its annotation set
+arrives; new origins, STOP, arrival and session/security/subscription resets
+clear both. Labels never supply or renew guidance, position or speed.
+
+Android finishes each map's geometry and annotations before the next queued
+generation, yielding between chunks to priority navigation/position updates.
+Label ACKs are excluded from navigation diagnostics. Older receivers receive
+geometry only. STOP cancels queued geometry and annotations.
+
+The phone reads names, points and categories from the existing Shortbread
+tiles, including `street_labels`, `place_labels`, `pois`, `public_transport`
+and water labels. Names prefer Chinese when supplied, then local name,
+English name or road reference. A known unnamed service may display its
+recorded category, such as parking, without inventing a business name.
+Selection is bounded, removes duplicates and spreads detail across spatial
+cells. Source: [Shortbread schema](https://shortbread-tiles.org/schema/1.0/).
+No additional map service, bulk download or POI query is introduced.
+
+The independent UI annotation layer projects the same local coordinates as
+the map, uses a fixed eight-label pool and avoids the route, position marker,
+HUD, other labels and the circular border. Widths are measured on generation
+change; text masks are reused during movement. It never substitutes simulator
+POIs. Missing provider coverage remains missing, and unsupported font glyphs
+remain placeholders. See [validation](map-labels-0.3.12-validation.md).

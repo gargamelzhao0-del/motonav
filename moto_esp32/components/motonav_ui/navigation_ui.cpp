@@ -1,6 +1,7 @@
 #include "motonav/ui/navigation_ui.h"
 #include "motonav/ui/dashboard.h"
 #include "motonav/ui/navigation_hud.h"
+#include "motonav/ui/map_annotations.h"
 #include "motonav/graphics/route_map.h"
 #include <initializer_list>
 
@@ -11,6 +12,7 @@ SnapshotReader snapshot;
 UiExtension extension;
 Dashboard view;
 NavigationHud hud;
+MapAnnotations annotations;
 BasemapScene basemap;
 MapFeature features[BasemapScene::Capacity]{};
 bool local_layout=false;
@@ -50,12 +52,12 @@ void route_map(const ScreenSnapshot &state) {
     bool visible=state.linked && state.encrypted && state.handshaken && !state.pairing &&
         mode!=ScreenMode::Stopped && mode!=ScreenMode::Arrived && state.route.count>=2;
     if(!visible) {
-        if(map_view) { lv_obj_delete(map_view); map_view=nullptr; }
+        if(map_view) { lv_obj_delete(map_view); map_view=nullptr;annotations={}; }
         map_revision=0;basemap={}; map_failed=false; map_live=false;map_marker=-1; layout(false); return;
     }
     if(!map_view && !map_failed) {
         map_view=create_route_map(lv_obj_get_parent(view.top),466,466);
-        if(map_view) { lv_obj_set_pos(map_view,0,0); lv_obj_move_to_index(map_view,1); }
+        if(map_view) { lv_obj_set_pos(map_view,0,0); lv_obj_move_to_index(map_view,1);create_map_annotations(map_view,annotations); }
         else map_failed=true;
     }
     if(!map_view) { layout(false); return; }
@@ -69,11 +71,12 @@ void route_map(const ScreenSnapshot &state) {
     map_live=live;
     bool base_changed=false;
     if(basemap.revision&&basemap.revision!=r.revision){basemap={};base_changed=true;}
-    if(state.basemap_revision==r.revision&&(basemap.revision!=r.revision||basemap.generation!=state.basemap_generation)&&snapshot.read_map&&snapshot.read_map(snapshot.context,r.revision,basemap)) {
+    if(state.basemap_revision==r.revision&&(basemap.revision!=r.revision||basemap.generation!=state.basemap_generation||basemap.labels.generation!=state.basemap_labels_generation)&&snapshot.read_map&&snapshot.read_map(snapshot.context,r.revision,basemap)) {
         for(unsigned i=0;i<basemap.count;i++) {const auto &p=basemap.items[i];features[i]={p.kind,{p.a.x,p.a.y},{p.b.x,p.b.y},{p.c.x,p.c.y}};}
         base_changed=true;
     }
     if(!live&&!r.local_view) {
+        lv_obj_add_flag(annotations.root,LV_OBJ_FLAG_HIDDEN);
         if(map_revision==r.revision && !changed_mode)return;
         map_revision=r.revision;
         // Fit both normalized plans and legacy metre windows without implying a
@@ -93,10 +96,11 @@ void route_map(const ScreenSnapshot &state) {
             static_cast<int16_t>(std::lround((r.points[i].y-(bottom+top)*0.5f)*factor))};
         camera={0,(248-466*0.7f)/scale,0,scale};
         if(!render_route_map(map_view,camera,{points,r.count,nullptr,0,false})) {
-            lv_obj_delete(map_view);map_view=nullptr;map_failed=true;layout(false);
+            lv_obj_delete(map_view);map_view=nullptr;annotations={};map_failed=true;layout(false);
         }
         return;
     }
+    lv_obj_remove_flag(annotations.root,LV_OBJ_FLAG_HIDDEN);
     const int position_x=historical?r.last_position.x:r.x,position_y=historical?r.last_position.y:r.y;
     const int bearing=historical?r.last_position.heading:r.heading;
     float heading=bearing<0?0:static_cast<float>(bearing)*0.001745329252f;
@@ -128,8 +132,8 @@ void route_map(const ScreenSnapshot &state) {
         MapPoint points[64];
         for(unsigned i=0;i<r.count;i++)points[i]={r.points[i].x,r.points[i].y};
         if(!render_route_map(map_view,camera,{points,r.count,nullptr,0,marker!=0,features,basemap.count,r.local_view,static_cast<uint8_t>(live?0:historical?3:r.position_quality)})) {
-            lv_obj_delete(map_view); map_view=nullptr; map_failed=true; layout(false);
-        }
+            lv_obj_delete(map_view); map_view=nullptr;annotations={}; map_failed=true; layout(false);
+        }else update_map_annotations(annotations,basemap.labels,camera,points,r.count,marker!=0);
     }
 }
 void touch(lv_event_t *event) {

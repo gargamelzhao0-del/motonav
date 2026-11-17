@@ -87,6 +87,7 @@ void run() {
         auto ble = drivers::ble_runtime_status();
         ESP_LOGI("position", "waiting_reason=%u quality=%u accuracy_m=%u last_quality=%u last_age_ms=%lu",state.route.waiting_reason,state.route.position_quality,state.route.position_accuracy_m,
             state.route.last_position.quality,static_cast<unsigned long>(state.route.last_position.age_ms));
+        ESP_LOGI("map_labels", "count=%u generation=%lu",state.basemap_label_count,static_cast<unsigned long>(state.basemap_labels_generation));
         ESP_LOGI("motonav", "main_stack_min=%lu", static_cast<unsigned long>(uxTaskGetStackHighWaterMark(nullptr)));
         ESP_LOGI("motonav", "state=%d link=%d secure=%d protocol=%u route_points=%u route_revision=%lu rx=%lu dup=%lu rejected=%lu heap=%lu internal=%lu diag_rx=%u diag_writes=%lu diag_rejected=%lu ble_stack_min=%lu map_items=%u map_revision=%lu local=%d map_generation=%lu map_complete=%d",
             static_cast<int>(screen_mode(state)), state.linked, state.encrypted, state.protocol,

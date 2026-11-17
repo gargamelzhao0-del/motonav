@@ -8,7 +8,9 @@ import java.util.List;
 public final class VectorTile {
     private VectorTile() { }
     public record Point(int x,int y) { }
-    public record Feature(String layer,String kind,int type,int extent,List<List<Point>> paths) { }
+    public record Feature(String layer,String kind,int type,int extent,List<List<Point>> paths,String name) {
+        public Feature(String layer,String kind,int type,int extent,List<List<Point>> paths){this(layer,kind,type,extent,paths,"");}
+    }
     public static List<Feature> decode(byte[] bytes) {
         if(bytes.length>4*1024*1024)throw new IllegalArgumentException("tile size");
         Reader tile=new Reader(bytes,0,bytes.length);List<Feature> result=new ArrayList<>();int[] budget={250000};
@@ -30,7 +32,8 @@ public final class VectorTile {
                 default -> reader.skip(tag);
             }
         }
-        if(!List.of("streets","buildings","water_polygons","land","sites").contains(name))return;
+        if(!List.of("streets","buildings","water_polygons","land","sites","street_labels",
+                "place_labels","pois","public_transport","water_polygons_labels","water_lines_labels").contains(name))return;
         if(extent<256||extent>65536||version!=2)throw new IllegalArgumentException("tile schema");
         for(Reader feature:features) {
             int type=0;Reader tags=null,geometry=null;
@@ -38,15 +41,29 @@ public final class VectorTile {
                 int tag=feature.tag();
                 if(tag==18)tags=feature.message();else if(tag==24)type=feature.integer();else if(tag==34)geometry=feature.message();else feature.skip(tag);
             }
-            String kind="";
+            String kind="",localName="",englishName="",chineseName="",reference="",category="";
             if(tags!=null)while(tags.more()) {
                 int key=tags.integer(),value=tags.integer();
                 if(key>=keys.size()||value>=values.size())throw new IllegalArgumentException("tag index");
-                if(keys.get(key).equals("kind"))kind=values.get(value);
+                String text=values.get(value);
+                switch(keys.get(key)) {
+                    case "kind" -> kind=text;
+                    case "name" -> localName=text;
+                    case "name_zh","name:zh" -> chineseName=text;
+                    case "name_en" -> englishName=text;
+                    case "ref" -> reference=text;
+                    case "amenity","leisure","tourism","shop","historic","man_made" -> {
+                        if(category.isEmpty())category=text;
+                    }
+                    default -> { }
+                }
             }
-            if(geometry==null||(type!=2&&type!=3))continue;
+            if(kind.isEmpty())kind=category;
+            String label=!chineseName.isBlank()?chineseName:!localName.isBlank()?localName:
+                    !englishName.isBlank()?englishName:reference;
+            if(geometry==null||(type!=1&&type!=2&&type!=3))continue;
             List<List<Point>> paths=paths(geometry,type,extent,budget);
-            if(!paths.isEmpty())output.add(new Feature(name,kind,type,extent,paths));
+            if(!paths.isEmpty())output.add(new Feature(name,kind,type,extent,paths,NavigationDetails.clean(label)));
             if(output.size()>20000)throw new IllegalArgumentException("feature limit");
         }
     }
@@ -59,7 +76,7 @@ public final class VectorTile {
                 if(type!=3||count!=1||path==null||path.size()<3||closed)throw new IllegalArgumentException("close path");
                 closed=true;continue;
             }
-            if(id!=1&&id!=2 || id==1&&count!=1 || id==2&&(path==null||closed))throw new IllegalArgumentException("geometry order");
+            if(id!=1&&id!=2 || id==1&&count!=1&&type!=1 || id==2&&(type==1||path==null||closed))throw new IllegalArgumentException("geometry order");
             for(int i=0;i<count;i++) {
                 if(++points>200000||--budget[0]<0)throw new IllegalArgumentException("geometry limit");
                 int dx=data.integer(),dy=data.integer();
