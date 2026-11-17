@@ -5,7 +5,8 @@
 
 namespace motonav {
 // Local metres in the same origin/revision as RouteScene. Roads are lines;
-// buildings, water and parks are triangles, tessellated by the phone.
+// buildings, water, parks, land use and sites are triangles tessellated by the
+// phone. S6 adds land use=6, sites=7 and waterway centerlines=8.
 struct MapPrimitive { uint8_t kind=0; RoutePoint a{},b{},c{}; };
 struct BasemapScene {
     static constexpr size_t Capacity=384;

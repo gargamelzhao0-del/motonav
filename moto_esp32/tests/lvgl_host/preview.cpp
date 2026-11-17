@@ -9,7 +9,7 @@
 #if MOTONAV_DEVICE_TESTS
 #include "motonav/testing/display_benchmark.h"
 #include "../device/motonav_bench/map_fixture.h"
-#include "../device/motonav_bench/real_map_fixture.h"
+#include "../device/motonav_bench/map_fixture_data.h"
 #endif
 #include <array>
 #undef NDEBUG
@@ -271,6 +271,37 @@ static void exercise_building_edges(lv_display_t *display,const std::filesystem:
     lv_screen_load(previous);lv_obj_delete(screen);
     std::cout<<"PASS: contour cache update, no triangle seams and removed-map cleanup\n";
 }
+static void exercise_map_surfaces(lv_display_t *display,const std::filesystem::path &directory) {
+    auto *previous=lv_screen_active(),*screen=lv_obj_create(nullptr);lv_screen_load(screen);
+    auto *map=motonav::create_route_map(screen,466,466);
+    // Deliberately reverse painter order: backgrounds must not cover roads.
+    motonav::MapFeature features[]{
+        {0,{0,-100},{0,100},{0,0}}, {8,{-100,20},{100,20},{0,0}},
+        {7,{-100,-100},{100,-100},{0,150}}, {6,{-100,-100},{100,-100},{0,150}}};
+    motonav::MapGeometry geometry{nullptr,0,nullptr,0,false,features,1};
+    const motonav::MapCamera camera{0,0,0,1};
+    uint16_t colors[4]{};
+    for(unsigned i=0;i<4;i++) {
+        geometry.features=features+i;geometry.feature_version=i+1;
+        assert(motonav::render_route_map(map,camera,geometry));
+        save(display,directory/("surface-kind-"+std::to_string(features[i].kind)+".ppm"));
+        colors[i]=pixels[306*466+233];
+    }
+    assert(colors[0]!=colors[1]&&colors[1]!=colors[2]);
+#if !MOTONAV_PREVIEW_RGB332
+    assert(colors[2]!=colors[3]);
+#endif
+    for(unsigned i=0;i<3;i++) {
+        geometry.features=features+i;geometry.feature_count=4-i;geometry.feature_version=5+i;
+        assert(motonav::render_route_map(map,camera,geometry));
+        save(display,directory/("surface-overlap-"+std::to_string(i)+".ppm"));
+        assert(pixels[306*466+233]==colors[i]);
+    }
+    features[0].kind=9;geometry.features=features;geometry.feature_count=1;
+    assert(!motonav::render_route_map(map,camera,geometry));
+    lv_screen_load(previous);lv_obj_delete(screen);
+    std::cout<<"PASS: land/site/waterway colors and order-independent road visibility\n";
+}
 int main(int argc, char **argv) {
     if (argc != 2 && argc != 3) return 2;
     std::filesystem::path directory(argv[1]); std::filesystem::create_directories(directory);
@@ -346,6 +377,7 @@ int main(int argc, char **argv) {
     exercise_maneuver_ui(display,directory);
     exercise_route_split(display,directory);
     exercise_building_edges(display,directory);
+    exercise_map_surfaces(display,directory);
     auto *navigation_screen = lv_screen_active();
     auto normal_children = lv_obj_get_child_count(lv_screen_active());
     lv_obj_add_event_cb(lv_obj_get_child(lv_screen_active(),0), [](lv_event_t *) { ++rim_draws; }, LV_EVENT_DRAW_MAIN, nullptr);
@@ -417,10 +449,10 @@ int main(int argc, char **argv) {
             for(size_t i=0;i<row.size();i+=2)session.feed(static_cast<char>(std::stoul(row.substr(i,2),nullptr,16)),clock_ms,reply);
             if(reply[0]!='A')return 1;snapshot=session.snapshot(clock_ms);
             session.read_map(snapshot.basemap_revision,basemap);
-            if(snapshot.basemap_count>192&&snapshot.guidance.mode==motonav::Waiting&&!saw_live){save(display,directory/"real-map-waiting.ppm");require_label("等待定位");saw_wait=true;}
+            if(snapshot.basemap_count>(argc==3?0:192)&&snapshot.guidance.mode==motonav::Waiting&&!saw_live){save(display,directory/"real-map-waiting.ppm");require_label("等待定位");saw_wait=true;}
             if(snapshot.guidance.mode==motonav::Live){save(display,directory/"real-map-live.ppm");require_label("36");require_label("120");require_label("m");saw_live=true;}
             if(snapshot.details.revision){require_label("测试道路");require_label("11:26");}
-            if(saw_live&&snapshot.guidance.mode==motonav::Waiting){save(display,directory/"real-map-gps-lost.ppm");require_label("等待定位");if(basemap.count<300)return 1;
+            if(saw_live&&snapshot.guidance.mode==motonav::Waiting){save(display,directory/"real-map-gps-lost.ppm");require_label("等待定位");if(basemap.count<(argc==3?1:300))return 1;
         save(display,directory/"position-unavailable.ppm");auto without_position=pixels;
         snapshot.route.position_quality=1;snapshot.route.position_accuracy_m=550;
         save(display,directory/"position-approximate.ppm");

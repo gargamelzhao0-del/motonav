@@ -26,13 +26,15 @@ final class BasemapLoader implements AutoCloseable {
     private long retryAt;
     private Basemap.Scene scene;
     private int loadedTileWatermark;
+    private boolean surfaceCapability;
     BasemapLoader(Context context,Listener listener) {
         this.context=context.getApplicationContext();this.listener=listener;
         store=new MapTileStore(new java.io.File(context.getFilesDir(),"visible-map-tiles").toPath(),MapTileStore.TEMPLATE,
                 "MotoNav/"+BuildConfig.VERSION_NAME+" (https://github.com/gargamelzhao0-del/motonav)");
     }
-    void request(Basemap.Focus focus,boolean progressive,NavigationFrame navigation) {
+    void request(Basemap.Focus focus,boolean progressive,boolean surfaces,NavigationFrame navigation) {
         if(closed||focus==null)return;
+        if(surfaceCapability!=surfaces){clear();surfaceCapability=surfaces;}
         int requested=focus.route().revision();
         // Finish an in-flight region rather than cancelling it for every
         // speed/GPS-state fluctuation. Origin changes still cancel immediately.
@@ -56,7 +58,7 @@ final class BasemapLoader implements AutoCloseable {
                     if(value==null)throw new IllegalArgumentException("coordinate conversion failed");
                     return new DeviceRoute.Coordinate(value.latitude,value.longitude);
                 };
-                var builder=new LocalMapBuilder(focus.origin(),conversion,viewport);
+                var builder=new LocalMapBuilder(focus.origin(),conversion,viewport,surfaces);
                 var gps=Basemap.gpsOrigin(focus.origin(),conversion);
                 result=MapRegionLoader.load(Basemap.visibleTiles(gps,viewport),builder,requested,progressive?Basemap.MAX_ITEMS:192,
                     tile->{var read=store.read(tile);return new MapRegionLoader.TileData(VectorTile.decodeDetailed(read.bytes()),read.stale());},

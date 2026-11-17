@@ -77,3 +77,8 @@ java -m jdk.compiler/com.sun.tools.javac.Main -encoding UTF-8 -source 17 -target
 java -cp "$build" com.motonav.companion.MapLabelTests "$build/nav4-labels.frames"
 g++ -std=c++17 -Wall -Wextra -Werror -I../moto_esp32/components/motonav_core/include ../moto_esp32/tests/host/map_labels_test.cpp -o "$build/map-labels-test"
 "$build/map-labels-test" "$build/nav4-labels.frames"
+
+java -m jdk.compiler/com.sun.tools.javac.Main -encoding UTF-8 -source 17 -target 17 -cp "$build" -d "$build" tests/MapSurfaceTests.java
+java -cp "$build" com.motonav.companion.MapSurfaceTests "$build/nav4-surfaces.frames"
+g++ -std=c++17 -Wall -Wextra -Werror -I../moto_esp32/components/motonav_core/include ../moto_esp32/tests/host/map_surfaces_test.cpp -o "$build/map-surfaces-test"
+"$build/map-surfaces-test" "$build/nav4-surfaces.frames"

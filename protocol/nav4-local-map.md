@@ -1,4 +1,4 @@
-# Local navigation scene (Android 0.7.17 / firmware 0.3.8)
+# Local navigation scene (base NAV4S2 and negotiated extensions through NAV4S6)
 
 The default view is a fixed local metre camera, never a fit of the complete journey.
 Phone and route coordinates remain AMap GCJ-02. Public OSM Shortbread geometry is
@@ -215,3 +215,36 @@ HUD, other labels and the circular border. Widths are measured on generation
 change; text masks are reused during movement. It never substitutes simulator
 POIs. Missing provider coverage remains missing, and unsupported font glyphs
 remain placeholders. See [validation](map-labels-0.3.12-validation.md).
+
+
+## NAV4S6 real area and waterway categories (Android 0.7.25 / ESP32 0.3.16)
+
+HELLO type 17 (17 bytes) negotiates `A,1,NAV4S6`, including all NAV4S5
+capabilities. On `E,NAV4`, the sender resets the probe sequence and tries
+15, 13, 11, 8, 5, 3, 1 in order. No GATT UUID or service-table change is needed.
+
+Only a session that negotiated NAV4S6 may carry these additional geometry kinds:
+
+| Kind | Representation | Source meaning |
+| --- | --- | --- |
+| 6 | Triangle | Residential, commercial, industrial and other mapped land use |
+| 7 | Triangle | School, hospital, parking, construction and other mapped sites |
+| 8 | Line, third point (0, 0) | River, canal, stream or ditch centerline |
+
+The original kinds 0–5, chunk layouts, coordinate bounds, 304-byte maximum
+frame, 384-primitive scene and 24-label limits remain unchanged. Unknown kind 9
+or a nonzero line tail rejects the entire chunk before modifying staging data.
+Disconnect clears the new capability. The App rebuilds selection on a capability
+change and refuses to send a cached scene with new kinds to a legacy receiver.
+
+The renderer orders land use, water area, green area, sites, waterway lines,
+buildings and roads before the independent route/player overlays. Waterway
+width is a cartographic stroke, not a claimed surveyed riverbank width. Newly
+supported green categories reuse kind 5. Subway geometry is not relabeled as a
+driveable road. Whole-object selection keeps a bounded background budget and
+reuses spare capacity without splitting polygon footprints.
+
+Source counts cover the full downloaded tile region and can overlap; selected
+geometry covers the current local view. They are not a retention percentage.
+[Luxiao validation](map-surfaces-0.3.16-validation.md) records actual source
+omissions, fixed-scene comparisons and hardware performance separately.

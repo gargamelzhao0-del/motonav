@@ -29,7 +29,7 @@ public:
         details_enabled_=false;details_={};navigation_sequence_=0;details_at_=0;
         positions_enabled_=false;position_at_=position_until_=0;
         position_history_.clear();
-        labels_enabled_=false;label_receiver_.clear();
+        labels_enabled_=surfaces_enabled_=false;label_receiver_.clear();
     }
     const NavigationReceiver &navigation() const { return navigation_; }
     ReceiverStats stats() const { return stats_; }
@@ -67,6 +67,7 @@ private:
     bool details_enabled_=false;
     bool positions_enabled_=false;
     bool labels_enabled_=false;
+    bool surfaces_enabled_=false;
     MapLabelReceiver label_receiver_;
     uint64_t position_at_=0,position_until_=0;
     MapPositionHistory position_history_;
@@ -96,8 +97,8 @@ private:
         if(NavigationReceiver::crc32(reinterpret_cast<const char *>(bytes_),expected_-4)!=crc
                 ||!seq||seq>INT_MAX||!session||session>INT_MAX)return false;
         const unsigned type=bytes_[4];
-        const bool hello=type==1||type==3||type==5||type==8||type==11||type==13||type==15;
-        const char *ack=hello?(type==15?"NAV4S5":type==13?"NAV4S4":type==11?"NAV4S3":type==8?"NAV4S2":type==5?"NAV4S":type==3?"NAV4P":"NAV4"):"OK";
+        const bool hello=type==1||type==3||type==5||type==8||type==11||type==13||type==15||type==17;
+        const char *ack=hello?(type==17?"NAV4S6":type==15?"NAV4S5":type==13?"NAV4S4":type==11?"NAV4S3":type==8?"NAV4S2":type==5?"NAV4S":type==3?"NAV4P":"NAV4"):"OK";
         if((hello && expected_!=17)||(!hello && type!=2 && type!=4 && type!=6 && type!=7 && type!=9 && type!=10 && type!=12 && type!=14))return false;
         if(navigation_.handshaken() && seq==sequence_ && session==session_ && crc==checksum_) {
             ++stats_.duplicates; std::snprintf(reply,sizeof(reply),"A,%lu,%s\n",static_cast<unsigned long>(seq),ack); return true;
@@ -107,10 +108,10 @@ private:
             if(navigation_.handshaken()||seq!=1)return false;
             std::snprintf(body,sizeof(body),"H,3,%lu,%lu",static_cast<unsigned long>(seq),static_cast<unsigned long>(session));
             if(!core(body,now))return false;
-            scene_={}; plan_={}; preview_enabled_=type==3;basemap_enabled_=type==5||type==8||type==11||type==13||type==15;updates_enabled_=type==8||type==11||type==13||type==15;
-            details_enabled_=type==11||type==13||type==15;details_={};navigation_sequence_=0;details_at_=0;
-            positions_enabled_=type==13||type==15;position_at_=position_until_=0;
-            labels_enabled_=type==15;label_receiver_.clear();
+            scene_={}; plan_={}; preview_enabled_=type==3;basemap_enabled_=type==5||type==8||type==11||type==13||type==15||type==17;updates_enabled_=type==8||type==11||type==13||type==15||type==17;
+            details_enabled_=type==11||type==13||type==15||type==17;details_={};navigation_sequence_=0;details_at_=0;
+            positions_enabled_=type==13||type==15||type==17;position_at_=position_until_=0;
+            labels_enabled_=type==15||type==17;surfaces_enabled_=type==17;label_receiver_.clear();
             position_history_.clear();
             map_={};staging_={};staged_=0;
         } else if(type==14) {
@@ -170,9 +171,9 @@ private:
             // Validate the entire chunk before touching staging state.
             for(unsigned i=0;i<count;i++) {
                 size_t p=header+14*i;unsigned kind=bytes_[p];
-                if(kind>5||bytes_[p+1])return false;
+                if(kind>(surfaces_enabled_?8u:5u)||bytes_[p+1])return false;
                 for(unsigned j=0;j<6;j++)if(std::abs(i16(p+2+2*j))>2048)return false;
-                if(kind<3&&(i16(p+10)||i16(p+12)))return false;
+                if((kind<3||kind==8)&&(i16(p+10)||i16(p+12)))return false;
             }
             if(!offset){staging_={};staging_.revision=revision;staging_.generation=generation;staging_.complete=flags==1;staging_.count=total;staged_=0;}
             for(unsigned i=0;i<count;i++) {

@@ -39,7 +39,8 @@ uint64_t identity(const MapLabel &label){
 }
 bool generic(const MapLabel &label){
     const char *names[]{"","","地标","加油站","停车场","餐饮","医疗","公交站","公园"};
-    return label.kind>=2&&label.kind<9&&!std::strcmp(label.name,names[label.kind]);
+    return label.kind>=2&&label.kind<9&&(!std::strcmp(label.name,names[label.kind])
+        ||(label.kind==8&&(!std::strcmp(label.name,"园区")||!std::strcmp(label.name,"自然保护区"))));
 }
 unsigned slot(uint64_t *keys,unsigned capacity,uint64_t key,uint32_t used){
     for(unsigned i=0;i<capacity;i++)if(keys[i]==key&&!(used&(1u<<i)))return i;

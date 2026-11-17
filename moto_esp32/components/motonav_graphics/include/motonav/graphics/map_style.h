@@ -11,7 +11,8 @@ struct NavigationMapStyle {
     static constexpr uint32_t Route=0xb79aff,RouteEdge=0x51416c,Passed=0x61727c,PassedEdge=0x303d46;
     static constexpr uint32_t PlayerEdge=0x101a22,Player=0xf2f3e9,PlayerSide=0xc8d5df,Compass=0x6e8390;
     static constexpr uint32_t BuildingEdge=0x53616b;
-    static constexpr std::array<uint32_t,19> Palette{Ground,Water,Park,Building,RoadEdge,MajorRoad,
-        SecondaryRoad,MinorRoad,0x10191e,0x66757c,Route,RouteEdge,PlayerEdge,Player,PlayerSide,Compass,Passed,PassedEdge,BuildingEdge};
+    static constexpr uint32_t LandUse=0x323b41,Site=0x3b3c46;
+    static constexpr std::array<uint32_t,21> Palette{Ground,Water,Park,Building,RoadEdge,MajorRoad,
+        SecondaryRoad,MinorRoad,0x10191e,0x66757c,Route,RouteEdge,PlayerEdge,Player,PlayerSide,Compass,Passed,PassedEdge,BuildingEdge,LandUse,Site};
 };
 }

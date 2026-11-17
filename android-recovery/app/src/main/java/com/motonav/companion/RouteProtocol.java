@@ -29,6 +29,7 @@ public final class RouteProtocol {
     public Command helloWithDetails() { return finish(begin(17,11),true); }
     public Command helloWithPosition() { return finish(begin(17,13),true); }
     public Command helloWithLabels() { return finish(begin(17,15),true); }
+    public Command helloWithSurfaces() { return finish(begin(17,17),true); }
     public Command labels(Basemap.Scene scene,int offset) {
         int total=scene.labels().size();
         if(offset<0||offset>total||offset==total&&total!=0)throw new IllegalArgumentException("label offset");

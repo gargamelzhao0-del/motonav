@@ -7,6 +7,7 @@ param(
     [switch]$NoBluetoothDiagnostics,
     [switch]$DisplayBench,
     [switch]$MapBench,
+    [switch]$LuxiaoScene,
     [switch]$LegacyQspi,
     [switch]$HoldMap,
     [switch]$DrawTaskProfile,
@@ -20,6 +21,7 @@ if ($NavigationMetrics -and ($DeviceTests -or $DisplayBench -or $MapBench)) { th
 if ($DisplayBench -and $MapBench) { throw 'Choose one bench mode' }
 if ($HoldMap -and -not ($DisplayBench -or $MapBench)) { throw 'HoldMap requires an automatic benchmark' }
 if ($DrawTaskProfile -and -not ($DeviceTests -or $DisplayBench -or $MapBench)) { throw 'DrawTaskProfile requires device tests' }
+if ($LuxiaoScene -and -not ($DeviceTests -or $DisplayBench -or $MapBench)) { throw 'LuxiaoScene requires device tests' }
 if ($LegacyQspi) {
     if (-not $PSBoundParameters.ContainsKey('ColorMode')) { $ColorMode = 'RGB565' }
     if ($ColorMode -ne 'RGB565') { throw 'LegacyQspi requires RGB565' }
@@ -40,6 +42,7 @@ try {
     $directSetting = if ($LegacyQspi) { 'OFF' } else { 'ON' }
     $holdSetting = if ($HoldMap) { 'ON' } else { 'OFF' }
     $drawProfileSetting = if ($DrawTaskProfile) { 'ON' } else { 'OFF' }
-    idf.py -B $BuildDirectory "-DMOTONAV_PROFILE_DRAW_TASKS=$drawProfileSetting" "-DMOTONAV_BLE_DIAGNOSTICS=$diagnosticsSetting" "-DMOTONAV_NAV_METRICS=$metricsSetting" "-DMOTONAV_DEVICE_TESTS=$testSetting" "-DMOTONAV_AUTORUN_BENCH=$benchSetting" "-DMOTONAV_AUTORUN_MAP_BENCH=$mapBenchSetting" "-DMOTONAV_BENCH_SECONDS=$BenchSeconds" "-DMOTONAV_DISPLAY_ROWS=$DisplayRows" "-DMOTONAV_DIRECT_QSPI=$directSetting" "-DMOTONAV_COLOR_MODE=$ColorMode" "-DMOTONAV_HOLD_MAP_AFTER_BENCH=$holdSetting" build
+    $luxiaoSetting = if ($LuxiaoScene) { 'ON' } else { 'OFF' }
+    idf.py -B $BuildDirectory "-DMOTONAV_BENCH_LUXIAO=$luxiaoSetting" "-DMOTONAV_PROFILE_DRAW_TASKS=$drawProfileSetting" "-DMOTONAV_BLE_DIAGNOSTICS=$diagnosticsSetting" "-DMOTONAV_NAV_METRICS=$metricsSetting" "-DMOTONAV_DEVICE_TESTS=$testSetting" "-DMOTONAV_AUTORUN_BENCH=$benchSetting" "-DMOTONAV_AUTORUN_MAP_BENCH=$mapBenchSetting" "-DMOTONAV_BENCH_SECONDS=$BenchSeconds" "-DMOTONAV_DISPLAY_ROWS=$DisplayRows" "-DMOTONAV_DIRECT_QSPI=$directSetting" "-DMOTONAV_COLOR_MODE=$ColorMode" "-DMOTONAV_HOLD_MAP_AFTER_BENCH=$holdSetting" build
     if ($LASTEXITCODE -ne 0) { throw 'Firmware build failed' }
 } finally { Pop-Location }

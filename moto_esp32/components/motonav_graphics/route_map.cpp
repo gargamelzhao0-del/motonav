@@ -129,11 +129,11 @@ void paint(MapRaster &raster, MapScene &scene, int top, int bottom) {
         const auto &f=scene.features[scene.paint_order[i]];
         if(f.bottom<top||f.top>bottom+0.5f)continue;
         const unsigned kind=f.kind;
-        if(kind>=3)raster.polygon(scene.areas[f.shape],panel_color(kind==4?Style::Water:kind==5?Style::Park:Style::Building));
+        if(kind>=3&&kind!=8)raster.polygon(scene.areas[f.shape],panel_color(kind==4?Style::Water:kind==5?Style::Park:kind==6?Style::LandUse:kind==7?Style::Site:Style::Building));
         else {
-            contours(); // Above every building fill, below every road surface.
+            if(kind<3)contours(); // Above every building fill, below every road surface.
             if(kind==2)scene.edges[f.edge].paint(raster,panel_color(Style::RoadEdge));
-            scene.surfaces[f.shape].paint(raster,panel_color(kind==2?Style::MajorRoad:kind==1?Style::SecondaryRoad:Style::MinorRoad));
+            scene.surfaces[f.shape].paint(raster,panel_color(kind==8?Style::Water:kind==2?Style::MajorRoad:kind==1?Style::SecondaryRoad:Style::MinorRoad));
         }
       }
     }
@@ -312,7 +312,7 @@ bool render_route_map(lv_obj_t *view, const MapCamera &camera, const MapGeometry
         (geometry.feature_count&&!geometry.features)||
         (geometry.route_count && !geometry.route) || (geometry.road_count && !geometry.roads)) return false;
     for(size_t i=0;i<geometry.feature_count;i++) {
-        const auto &f=geometry.features[i];if(f.kind>5)return false;
+        const auto &f=geometry.features[i];if(f.kind>8)return false;
         for(auto p:{f.a,f.b,f.c})if(std::abs(int(p.x))>2048||std::abs(int(p.y))>2048)return false;
     }
     auto *scene = scene_for(lv_image_get_src(view));
@@ -340,10 +340,10 @@ bool render_route_map(lv_obj_t *view, const MapCamera &camera, const MapGeometry
     }
     for(size_t i=0;i<geometry.feature_count;i++) {
         const auto &f=geometry.features[i];MapScene::Feature next;next.kind=f.kind;
-        if(f.kind<3) {
+        if(f.kind<3||f.kind==8) {
             if(!projection.segment(f.a,f.b,a,b,20))continue;
             next.shape=scene->surface_count;
-            if(!scene->surfaces[next.shape].prepare_projected(projection,f.a,f.b,a,b,f.kind==2?6.5f:f.kind==1?5.0f:2.8f))continue;
+            if(!scene->surfaces[next.shape].prepare_projected(projection,f.a,f.b,a,b,f.kind==8?2.0f:f.kind==2?6.5f:f.kind==1?5.0f:2.8f))continue;
             scene->surface_count++;
             if(f.kind==2){next.edge=scene->edge_count++;scene->edges[next.edge].prepare_projected(projection,f.a,f.b,a,b,10);}
             next.top=static_cast<int16_t>(std::floor(std::min(a.y,b.y)-24));next.bottom=static_cast<int16_t>(std::ceil(std::max(a.y,b.y)+24));
@@ -358,7 +358,7 @@ bool render_route_map(lv_obj_t *view, const MapCamera &camera, const MapGeometry
         scene->features[scene->feature_count++]=next;
     }
     size_t ordered=0;
-    for(unsigned kind:{4u,5u,3u,0u,1u,2u})for(size_t i=0;i<scene->feature_count;i++)
+    for(unsigned kind:{6u,4u,5u,7u,8u,3u,0u,1u,2u})for(size_t i=0;i<scene->feature_count;i++)
         if(scene->features[i].kind==kind)scene->paint_order[ordered++]=static_cast<uint16_t>(i);
     scene->strips.reset();
     for(size_t i=0;i<scene->feature_count;i++){

@@ -11,6 +11,7 @@ public final class LocalMapBuilder {
     private final MapViewport viewport;
     private final MapDetailSelector selection;
     private final LocalMapLabels labels;
+    private final boolean surfaces;
     private int sourceFeatures,sourceRoads,sourceBuildings,sourceLabels,ignoredFeatures,oversizedGroups;
     public LocalMapBuilder(DeviceRoute.Coordinate origin,Basemap.Coordinates conversion) {
         this(origin,conversion,new MapViewport(0,0,0,false,0));
@@ -19,7 +20,11 @@ public final class LocalMapBuilder {
         this(focus.origin(),conversion,new MapViewport(focus.route().x(),focus.route().y(),focus.route().heading(),false,0));
     }
     public LocalMapBuilder(DeviceRoute.Coordinate origin,Basemap.Coordinates conversion,MapViewport viewport) {
+        this(origin,conversion,viewport,false);
+    }
+    public LocalMapBuilder(DeviceRoute.Coordinate origin,Basemap.Coordinates conversion,MapViewport viewport,boolean surfaces) {
         this.origin=origin;this.conversion=conversion;this.viewport=viewport;
+        this.surfaces=surfaces;
         longitudeScale=111319.49079327358*Math.cos(Math.toRadians(origin.latitude()));
         selection=new MapDetailSelector(viewport.detailView());
         labels=new LocalMapLabels(viewport.detailView());
@@ -35,7 +40,7 @@ public final class LocalMapBuilder {
             if(feature.layer().equals("streets"))sourceRoads++;
             if(feature.layer().equals("buildings"))for(var ring:feature.paths())if(tileArea(ring)>0)sourceBuildings++;
             if(LocalMapLabels.supported(feature))sourceLabels++;
-            if(kind(feature)<0&&!LocalMapLabels.supported(feature))ignoredFeatures++;
+            if(effectiveKind(feature)<0&&!LocalMapLabels.supported(feature))ignoredFeatures++;
             try{addFeature(tile,feature);}catch(IllegalArgumentException ignored){ignoredFeatures++;}
         }
     }
@@ -48,12 +53,12 @@ public final class LocalMapBuilder {
                     labels.add(feature,points);
                 }
             }
-            int kind=kind(feature);if(kind<0)return;
+            int kind=effectiveKind(feature);if(kind<0)return;
             for(int ring=0;ring<feature.paths().size();ring++) {
                 var path=feature.paths().get(ring);
                 if(feature.type()==3&&tileArea(path)<=0)continue;
                 if(path.size()<2||!near(tile,feature.extent(),path))continue;
-                if(kind<3) {
+                if(Basemap.lineKind(kind)) {
                     if(path.size()>4096){oversizedGroups++;continue;}
                     List<DeviceRoute.Point> road=new ArrayList<>();for(var p:path)road.add(point(tile,feature.extent(),p));
                     road=DeviceRoute.simplify(road,2);
@@ -67,7 +72,7 @@ public final class LocalMapBuilder {
                     }
                     // Long streets may extend across many cells. Split only
                     // at existing segment boundaries, never midway through a building.
-                    boolean pathContext=List.of("footway","path","cycleway","steps","bridleway").contains(feature.kind());
+                    boolean pathContext=kind<3&&List.of("footway","path","cycleway","steps","bridleway").contains(feature.kind());
                     for(int i=0;i<group.size();i+=16)selection.add(group.subList(i,Math.min(i+16,group.size())),pathContext?2.5:1);
                 } else if(path.size()<=4096) {
                     List<DeviceRoute.Point> points=ringPoints(tile,feature.extent(),path);
@@ -115,10 +120,24 @@ public final class LocalMapBuilder {
             };
             case "buildings" -> 3;
             case "ocean","water_polygons" -> 4;
-            case "land","sites" -> List.of("park","forest","wood","grass","grassland","garden","recreation_ground","scrub","meadow","heath","fell","village_green").contains(f.kind())?5:-1;
+            case "water_lines" -> List.of("river","canal","stream","ditch").contains(f.kind())?8:-1;
+            case "land" -> switch(f.kind()) {
+                case "park","forest","wood","grass","grassland","garden","recreation_ground","scrub","meadow","heath","fell","village_green",
+                     "orchard","vineyard","allotments","plant_nursery","golf_course","farmland","wet_meadow" -> 5;
+                case "residential","commercial","retail","industrial","garages","brownfield","railway","farmyard" -> 6;
+                case "playground","miniature_golf" -> 7;
+                default -> -1;
+            };
+            case "sites" -> switch(f.kind()) {
+                case "school","university","college","hospital","parking","bicycle_parking","motorcycle_parking",
+                     "sports_centre","prison","construction" -> 7;
+                case "park","garden" -> 5;
+                default -> -1;
+            };
             default -> -1;
         };
     }
+    private int effectiveKind(VectorTile.Feature feature){int value=kind(feature);return !surfaces&&value>5?-1:value;}
     private boolean near(Basemap.Tile tile,int extent,List<VectorTile.Point> path) {
         int x0=Integer.MAX_VALUE,y0=x0,x1=Integer.MIN_VALUE,y1=x1;
         for(var p:path){x0=Math.min(x0,p.x());x1=Math.max(x1,p.x());y0=Math.min(y0,p.y());y1=Math.max(y1,p.y());}

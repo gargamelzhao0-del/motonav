@@ -20,7 +20,7 @@ final class MapDetailSelector {
     int candidateItems(){return candidateItems;}
     int oversizedGroups(){return oversizedGroups;}
     int duplicateItems(){return duplicateItems;}
-    MapDetailSelector(MapViewport view){this.view=view;for(int i=0;i<4;i++)groups.add(new PriorityQueue<>(ORDER.reversed()));}
+    MapDetailSelector(MapViewport view){this.view=view;for(int i=0;i<5;i++)groups.add(new PriorityQueue<>(ORDER.reversed()));}
     void add(List<Basemap.Primitive> items) {
         add(items,1);
     }
@@ -33,16 +33,16 @@ final class MapDetailSelector {
         duplicateItems+=items.size()-unique.size();
         items=new ArrayList<>(unique);items.sort(PRIMITIVE_ORDER);
         if(items.size()>Basemap.MAX_ITEMS){oversizedGroups++;return;}
-        int kind=items.get(0).kind(),bucket=kind<3?0:kind==3?1:kind==4?2:3;
+        int kind=items.get(0).kind(),bucket=kind<3?0:kind==3?1:kind==4||kind==8?2:kind==5?3:4;
         double l=Double.POSITIVE_INFINITY,r=-l,b=l,t=-l;
-        for(var item:items)for(var p:item.kind()<3?List.of(item.a(),item.b()):List.of(item.a(),item.b(),item.c())) {
+        for(var item:items)for(var p:Basemap.lineKind(item.kind())?List.of(item.a(),item.b()):List.of(item.a(),item.b(),item.c())) {
             var q=view.project(p.x(),p.y());l=Math.min(l,q.x());r=Math.max(r,q.x());b=Math.min(b,q.y());t=Math.max(t,q.y());
         }
         // Keep offscreen neighbors for short camera movement; score and cells
         // are in screen space so far visible buildings are not all discarded.
         if(r< -100||l>566||t<30||b>566)return;
         double area=Math.max(0,Math.min(r,490)-Math.max(l,-24))*Math.max(0,Math.min(t,490)-Math.max(b,64));
-        if(kind>=3&&area<2)return;
+        if(!Basemap.lineKind(kind)&&area<2)return;
         double cx=Math.max(0,Math.min(465,(l+r)*.5)),cy=Math.max(0,Math.min(465,(b+t)*.5));
         double dx=Math.max(Math.max(l-233,233-r),0),dy=Math.max(Math.max(b-260,260-t),0);
         double score=(dx*dx+dy*dy+100)/Math.sqrt(Math.min(area,4096)+64);
@@ -59,12 +59,13 @@ final class MapDetailSelector {
     List<Basemap.Primitive> finish(int limit) {
         List<Basemap.Primitive> output=new ArrayList<>();Set<Group> chosen=new HashSet<>();
         // Background context cannot be crowded out by hundreds of buildings.
-        select(2,output,chosen,limit/8,limit/4);
+        select(4,output,chosen,limit/12,limit/6);
+        select(2,output,chosen,output.size()+limit/8,output.size()+limit/4);
         select(3,output,chosen,output.size()+limit/12,0);
         int context=output.size();select(0,output,chosen,Math.min(limit,context+limit*3/8),0);
         select(1,output,chosen,limit,0);
         // Spare capacity is reusable; never split a polygon merely to fill it.
-        select(0,output,chosen,limit,0);select(3,output,chosen,limit,0);select(2,output,chosen,limit,0);
+        select(0,output,chosen,limit,0);select(3,output,chosen,limit,0);select(2,output,chosen,limit,0);select(4,output,chosen,limit,0);
         return output;
     }
     private void select(int bucket,List<Basemap.Primitive> out,Set<Group> chosen,int limit,int firstAllowance) {
@@ -86,8 +87,8 @@ final class MapDetailSelector {
     private static final Comparator<Basemap.Primitive> PRIMITIVE_ORDER=Comparator.comparingInt(Basemap.Primitive::kind)
             .thenComparing(Basemap.Primitive::a,POINT_ORDER).thenComparing(Basemap.Primitive::b,POINT_ORDER).thenComparing(Basemap.Primitive::c,POINT_ORDER);
     private static Basemap.Primitive canonical(Basemap.Primitive item){
-        var points=new ArrayList<>(item.kind()<3?List.of(item.a(),item.b()):List.of(item.a(),item.b(),item.c()));
+        var points=new ArrayList<>(Basemap.lineKind(item.kind())?List.of(item.a(),item.b()):List.of(item.a(),item.b(),item.c()));
         points.sort(POINT_ORDER);
-        return new Basemap.Primitive(item.kind(),points.get(0),points.get(1),item.kind()<3?new DeviceRoute.Point(0,0):points.get(2));
+        return new Basemap.Primitive(item.kind(),points.get(0),points.get(1),Basemap.lineKind(item.kind())?new DeviceRoute.Point(0,0):points.get(2));
     }
 }

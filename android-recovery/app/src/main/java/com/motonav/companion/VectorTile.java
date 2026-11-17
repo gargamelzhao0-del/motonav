@@ -43,7 +43,7 @@ public final class VectorTile {
             }
         }
         layers.merge(name,features.size(),Integer::sum);
-        if(!List.of("streets","buildings","ocean","water_polygons","land","sites","street_labels",
+        if(!List.of("streets","buildings","ocean","water_polygons","water_lines","land","sites","street_labels",
                 "street_labels_points","street_polygons_labels","streets_polygons_labels",
                 "place_labels","pois","public_transport","water_polygons_labels","water_lines_labels").contains(name))return;
         if(extent<256||extent>65536||version!=2)throw new IllegalArgumentException("tile schema");

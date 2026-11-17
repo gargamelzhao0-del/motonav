@@ -1,5 +1,5 @@
 #include "map_fixture.h"
-#include "real_map_fixture.h"
+#include "map_fixture_data.h"
 #include "motonav/graphics/route_trace.h"
 #include <cmath>
 
@@ -11,17 +11,19 @@ MapCamera render_map_benchmark(lv_obj_t *view, uint64_t elapsed_ms) {
     // Traverse the decoded road itself at the HUD's test speed (36 km/h).
     // Independent sine-wave camera motion made the fixed vehicle marker drift
     // away from the displayed route, despite otherwise correct projection.
-    float lengths[22]{},total=0,start=0;
-    for(unsigned i=2;i<23;i++){
+    static_assert(FirstSegment<StartSegment&&StartSegment<EndSegment);
+    static_assert(EndSegment<sizeof(RealMapRoute)/sizeof(RealMapRoute[0]));
+    float lengths[EndSegment-FirstSegment]{},total=0,start=0;
+    for(unsigned i=FirstSegment;i<EndSegment;i++){
         float dx=RealMapRoute[i+1].x-RealMapRoute[i].x,dy=RealMapRoute[i+1].y-RealMapRoute[i].y;
-        lengths[i-2]=std::sqrt(dx*dx+dy*dy);total+=lengths[i-2];
-        if(i<9)start=total;
+        lengths[i-FirstSegment]=std::sqrt(dx*dx+dy*dy);total+=lengths[i-FirstSegment];
+        if(i<StartSegment)start=total;
     }
     float distance=std::fmod(start+float(elapsed_ms%1000000)*.01f,2*total);
     const bool reverse=distance>total;if(reverse)distance=2*total-distance;
     unsigned segment=0;
-    while(segment<20&&distance>lengths[segment])distance-=lengths[segment++];
-    const auto a=RealMapRoute[segment+2],b=RealMapRoute[segment+3];
+    while(segment<EndSegment-FirstSegment-1&&distance>lengths[segment])distance-=lengths[segment++];
+    const auto a=RealMapRoute[segment+FirstSegment],b=RealMapRoute[segment+FirstSegment+1];
     const float fraction=lengths[segment]>0?distance/lengths[segment]:0;
     const float dx=b.x-a.x,dy=b.y-a.y;
     MapCamera camera{a.x+dx*fraction,a.y+dy*fraction,std::atan2(reverse?-dx:dx,reverse?-dy:dy),
