@@ -1,0 +1,4 @@
+Decoded retained features=6392 layers={buildings=1, land=20, place_labels=9, pois=1331, public_transport=111, sites=62, street_labels=2280, streets=2559, water_lines_labels=3, water_polygons=15, water_polygons_labels=1}
+Building outer rings=1300 with holes skipped=27 holes within initial 900m bbox=19
+After radius/group/candidate filters, before final 384 budget={areas={3=1390, 4=14, 5=240}, lines={0=231, 1=91}}
+Final primitives={0=109, 1=83, 3=161, 5=30} labels=24

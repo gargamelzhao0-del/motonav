@@ -1,0 +1,77 @@
+{
+  "date": "2026-11-17",
+  "firmware": "0.3.12",
+  "android": "0.7.20",
+  "sourceCommit": "6443b4a6bbdbc14c7e8eb0f60fa19e558eb97108",
+  "simulatorNormalizedSha256": "5c7c2a794394b29079cba6abe2c53b82bb443badf84bf4981b1d34296fd59fda",
+  "cloudSimulatorTextCheck": {
+    "normalizedUtf16Length": 71831,
+    "fnv1a32Utf16": "e71917fc",
+    "ref": "main",
+    "matchedLocalNormalizedTextCheck": true
+  },
+  "realMapFixture": "moto_esp32/tests/fixtures/nav4-real-map.frames",
+  "tileSha256": "ab9c6c7141397dcdf316eb140a576716515c8f60618ab6c8b1d59bb5549ee85f",
+  "method": "Source audit, analytic projection, deterministic browser canvas captures, existing production-code host preview, offline Java selector replay, original game screenshot measurements.",
+  "limits": [
+    "Simulator and firmware image locations differ; no whole-image similarity score.",
+    "Real OSM map with synthetic test navigation; no user position capture.",
+    "GTA screenshot observations do not establish engine constants or frame timing.",
+    "No firmware changes or COM21 reset/flash in this audit."
+  ],
+  "files": {
+    ".gitattributes": {
+      "bytes": 64,
+      "sha256": "1abe764e8750446e4bf941d895f2d3584f5f00d5e57fb0cfd9f0d3ab59617394"
+    },
+    "firmware-0.3.12-real-map-live.png": {
+      "bytes": 43887,
+      "sha256": "35a9b60d059fbe3eba47fc79829fe88583be657f7822216edc32b9b76a167197"
+    },
+    "geometry-analysis.json": {
+      "bytes": 7288,
+      "sha256": "79bffaac5e9001103707c6f81885bae5fe6a6956aba7d025a8dd5b804d89eb07"
+    },
+    "gta-observations.json": {
+      "bytes": 1253,
+      "sha256": "792cb5a3e91c3927e761a0435d36c8f4769541c4d087a8828f20c747df6cd429"
+    },
+    "sim-auto-36.png": {
+      "bytes": 186025,
+      "sha256": "ccbb579522ea3c05d2d8dd5a8a7df9efa81fa276eb2f234e7b6e62750ecb59f8"
+    },
+    "sim-auto-60.png": {
+      "bytes": 215281,
+      "sha256": "b025dbf0613280fb3ac23f819af78d13029630e4de772b3a977fe55a3010a85c"
+    },
+    "sim-chase-60.png": {
+      "bytes": 214351,
+      "sha256": "2b61721665bcea69b7c96105790e5d1828468030863fc2dbb8ca39ab8dd9324a"
+    },
+    "sim-measurements.json": {
+      "bytes": 22122,
+      "sha256": "f6b75c135c9b4da7024c1cee065317ee3a096cda2b4e479913d1d859b7a442bf"
+    },
+    "sim-top-stopped.png": {
+      "bytes": 134249,
+      "sha256": "2250d8724a3e0d090702a99822c8badd01c81ffdc183fc6c822989f1df1613b9"
+    },
+    "sim-turn-18.png": {
+      "bytes": 152773,
+      "sha256": "1d7eb3dc1014a0ffaaffb9fe4bd40529d4141a7a5c5d608c1005eccc61681788"
+    },
+    "simulator-vs-current.png": {
+      "bytes": 242180,
+      "sha256": "75919ac3ffe4a0642c92e785d663b1b0934ff034623758fb5f8c39cb0225c3f8"
+    },
+    "tile-detail-audit.txt": {
+      "bytes": 469,
+      "sha256": "7d37f3e9a62d8eca1dc2d47d81eb0ce40efb8adf50ae25dd641a14474eed794c"
+    },
+    "viewport-and-stroke-analysis.png": {
+      "bytes": 175232,
+      "sha256": "56bec2aecdf669885e7d21c16613e40029f3e927e25f1de7eeacd3e0b99be5c4"
+    }
+  },
+  "textEncoding": "UTF-8 with LF; see directory .gitattributes"
+}

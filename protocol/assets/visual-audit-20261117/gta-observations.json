@@ -1,0 +1,49 @@
+{
+  "source": "https://thekoalition.com/2022/grand-theft-auto-v-online-next-gen-review-the-open-world-g-o-a-t",
+  "image": "https://thekoalition.com/images/2022/03/gta5-driving.png",
+  "resolution": [
+    3840,
+    2160
+  ],
+  "sha256": "b5814f43992ab7f6331cbde56b70ccf85e747d90a8a3411bb307411844114a37",
+  "colorThreshold": "200 < R, 155 < G < 230, B < 130; x 450..649",
+  "samples": [
+    {
+      "screenY": 1670,
+      "yellowRouteLeft": 527,
+      "yellowRouteRight": 536,
+      "thresholdPixels": 10
+    },
+    {
+      "screenY": 1700,
+      "yellowRouteLeft": 524,
+      "yellowRouteRight": 535,
+      "thresholdPixels": 12
+    },
+    {
+      "screenY": 1750,
+      "yellowRouteLeft": 520,
+      "yellowRouteRight": 534,
+      "thresholdPixels": 15
+    },
+    {
+      "screenY": 1800,
+      "yellowRouteLeft": 514,
+      "yellowRouteRight": 531,
+      "thresholdPixels": 18
+    },
+    {
+      "screenY": 1850,
+      "yellowRouteLeft": 511,
+      "yellowRouteRight": 530,
+      "thresholdPixels": 20
+    },
+    {
+      "screenY": 1880,
+      "yellowRouteLeft": 508,
+      "yellowRouteRight": 530,
+      "thresholdPixels": 23
+    }
+  ],
+  "limits": "One raster screenshot, indicative yellow-core widths only. Not engine constants or frame timing."
+}
