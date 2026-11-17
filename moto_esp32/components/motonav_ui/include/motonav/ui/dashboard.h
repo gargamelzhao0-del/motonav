@@ -7,7 +7,7 @@ namespace motonav {
 struct Dashboard {
     lv_obj_t *top = nullptr, *title = nullptr, *number = nullptr, *speed = nullptr;
     lv_obj_t *remaining = nullptr, *footer = nullptr, *arrow = nullptr;
-    lv_point_precise_t arrow_points[6]{};
+    lv_point_precise_t arrow_points[8]{};
     int last_icon = -1;
     float arrow_scale = 1;
 };

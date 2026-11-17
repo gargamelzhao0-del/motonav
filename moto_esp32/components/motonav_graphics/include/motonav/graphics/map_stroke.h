@@ -29,6 +29,8 @@ struct MapStroke {
         start=cap(screenA);end=cap(screenB);return true;
     }
     bool intersects_y(int top,int bottom)const{return body.intersects_y(top,bottom)||start.intersects_y(top,bottom)||end.intersects_y(top,bottom);}
-    void paint(MapRaster &raster,uint16_t color)const{raster.polygon(body,color);raster.ellipse(start,color);raster.ellipse(end,color);}
+    void paint(MapRaster &raster,uint16_t color,bool antialias=false)const{
+        raster.polygon(body,color,antialias);raster.ellipse(start,color,antialias);raster.ellipse(end,color,antialias);
+    }
 };
 }

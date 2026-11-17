@@ -1,13 +1,15 @@
 #pragma once
 #include "motonav/graphics/map_projection.h"
 #include "motonav/graphics/pixel_fill.h"
+#include "motonav/graphics/map_style.h"
 #include <algorithm>
 #include <array>
 #include <cstring>
 
 namespace motonav {
 // Opaque, bounded RGB565 scanlines for the map layer. No temporary draw tasks,
-// per-pixel blending, or allocation. UI text remains rendered by LVGL.
+// allocation, or full-frame AA. Optional edge coverage blends two pixels per
+// polygon scanline. UI text remains rendered by LVGL.
 class MapRaster {
 public:
     // A projected line shared by both stroke widths and every display strip.
@@ -140,7 +142,7 @@ public:
             }
         }
     }
-    void polygon(const PreparedPolygon &polygon,uint16_t color) {
+    void polygon(const PreparedPolygon &polygon,uint16_t color,bool antialias=false) {
         if(!valid_||!polygon.intersects_y(origin_y_,origin_y_+height_-1))return;
         const auto paint=prepare_color(color);
         int first=std::max<int>(origin_y_,polygon.top_),last=std::min<int>(origin_y_+height_-1,polygon.bottom_);
@@ -155,11 +157,12 @@ public:
             for(;y<=end;y++) {
                 float left=8192,right=-8192;
                 for(unsigned i=0;i<count;i++){float x=active[i]->intercept+y*active[i]->slope;left=std::min(left,x);right=std::max(right,x);}
-                span(y,ceil_int(left-.5f),floor_int(right-.5f),paint);
+                if(antialias)covered_span(y,left,right,paint);
+                else span(y,ceil_int(left-.5f),floor_int(right-.5f),paint);
             }
         }
     }
-    void ellipse(const PreparedEllipse &ellipse,uint16_t color) {
+    void ellipse(const PreparedEllipse &ellipse,uint16_t color,bool antialias=false) {
         if(!valid_||!ellipse.intersects_y(origin_y_,origin_y_+height_-1))return;
         const auto paint=prepare_color(color);
         int first=std::max<int>(origin_y_,ellipse.first_),last=std::min<int>(origin_y_+height_-1,ellipse.last_);
@@ -167,7 +170,8 @@ public:
             float dy=y+.5f-ellipse.center_.y;
             float half=std::sqrt(std::max(0.0f,ellipse.half_squared_*(1-dy*dy*ellipse.inverse_y_)));
             float center=ellipse.center_.x+ellipse.shear_*dy;
-            span(y,ceil_int(center-half-.5f),floor_int(center+half-.5f),paint);
+            if(antialias)covered_span(y,center-half,center+half,paint);
+            else span(y,ceil_int(center-half-.5f),floor_int(center+half-.5f),paint);
         }
     }
     void line(ProjectedPoint a, ProjectedPoint b, int width, uint16_t color) {
@@ -198,13 +202,11 @@ private:
     SpanColor prepare_color(uint16_t color) const {
         if(!navigation_style_)return {color,nullptr};
         if(cached_shades_&&cached_color_==color)return {color,cached_shades_};
-        constexpr uint32_t palette[]{0x283033,0x1e4560,0x2a4430,0x313b3f,0x3a4144,0xc4cacc,
-            0x929ca1,0x6c787e,0x10191e,0x66757c,0xb66dff,0x2a1440,0xe3cfff,0x12171c,0xf2f3e9,0x899398};
+        constexpr auto palette=NavigationMapStyle::Palette;
         static constexpr auto table=[] {
-            std::array<std::array<uint32_t,514>,16> result{};
-            constexpr uint32_t rgb[]{0x283033,0x1e4560,0x2a4430,0x313b3f,0x3a4144,0xc4cacc,
-                0x929ca1,0x6c787e,0x10191e,0x66757c,0xb66dff,0x2a1440,0xe3cfff,0x12171c,0xf2f3e9,0x899398};
-            for(unsigned c=0;c<16;c++)for(unsigned light=0;light<=256;light++)for(unsigned row=0;row<2;row++){
+            std::array<std::array<uint32_t,514>,18> result{};
+            constexpr auto rgb=NavigationMapStyle::Palette;
+            for(unsigned c=0;c<18;c++)for(unsigned light=0;light<=256;light++)for(unsigned row=0;row<2;row++){
                 const unsigned packed=((rgb[c]>>8)&0xf800)|((rgb[c]>>5)&0x7e0)|((rgb[c]>>3)&31);
                 uint32_t pair=0;
                 for(unsigned column=0;column<2;column++){
@@ -218,7 +220,7 @@ private:
             }
             return result;
         }();
-        for(unsigned i=0;i<16;i++){
+        for(unsigned i=0;i<18;i++){
             const auto rgb565=rgb(palette[i]);
             if(color==static_cast<uint16_t>((rgb565>>8)|(rgb565<<8))){cached_color_=color;cached_shades_=table[i].data();return {color,cached_shades_};}
         }
@@ -230,16 +232,13 @@ private:
         if (first>last) return;
         auto *row=pixels_+static_cast<size_t>(y-origin_y_)*stride_;
         if(navigation_style_) {
-            unsigned light=256;
-            if(y<160)light=96+static_cast<unsigned>(y);
-            if(y<70)light=light*(32+static_cast<unsigned>(y)*224/70)/256;
-            if(y>=330)light=y<391?256-static_cast<unsigned>(y-330)*159/61:97-static_cast<unsigned>(y-391)*66/75;
+            const unsigned light=row_light(y);
             const auto &edge=ring_edges()[y];
             if(first>=edge[0]&&last<466-edge[0]) {
                 shaded_span(row,first,last,y,color,light);return;
             }
             const int cuts[]{0,edge[2],edge[1],edge[0],466-edge[0],466-edge[1],466-edge[2],466};
-            constexpr unsigned factors[]{58,90,134,256,134,90,58};
+            constexpr unsigned factors[]{180,204,230,256,230,204,180};
             for(unsigned i=0;i<7;i++) {
                 int a=std::max(first,cuts[i]),b=std::min(last,cuts[i+1]-1);
                 if(a<=b)shaded_span(row,a,b,y,color,light*factors[i]/256);
@@ -248,6 +247,45 @@ private:
         }
         first-=origin_x_; last-=origin_x_;
         fill_rgb565(row+first, static_cast<size_t>(last-first+1), color.value);
+    }
+    static unsigned row_light(int y) {
+        if(y<140)return 166+static_cast<unsigned>(y)*90/140;
+        if(y<340)return 256;
+        if(y<415)return 256-static_cast<unsigned>(y-340)*150/75;
+        return 106-static_cast<unsigned>(y-415)*42/51;
+    }
+    // Coverage is evaluated only for the two edge pixels of a scanline. The
+    // interior keeps the opaque span fast path, with no full-frame AA buffer.
+    void covered_span(int y,float left,float right,SpanColor color) {
+        if(right<=left)return;
+        int first=floor_int(left),last=floor_int(right);
+        if(first==last){blend_edge(y,first,color,right-left);return;}
+        span(y,first+1,last-1,color);
+        blend_edge(y,first,color,1-(left-first));
+        blend_edge(y,last,color,right-last);
+    }
+    void blend_edge(int y,int x,SpanColor color,float coverage) {
+        if(y<origin_y_||y>=origin_y_+height_||x<origin_x_||x>=origin_x_+width_)return;
+        unsigned alpha=static_cast<unsigned>(std::clamp(coverage*256+.5f,0.0f,256.0f));
+        if(!alpha)return;
+        uint16_t source=color.value;
+        if(navigation_style_) {
+            unsigned light=row_light(y),factor=256;
+            const auto &edge=ring_edges()[y];
+            if(x<edge[2]||x>=466-edge[2])factor=180;
+            else if(x<edge[1]||x>=466-edge[1])factor=204;
+            else if(x<edge[0]||x>=466-edge[0])factor=230;
+            light=light*factor/256;
+            if(color.shades)source=static_cast<uint16_t>(color.shades[light*2+(y&1)]>>(16*(x&1)));
+            else source=dim(source,light,(y&1)?((x&1)?96:224):((x&1)?160:32));
+        }
+        auto &pixel=pixels_[static_cast<size_t>(y-origin_y_)*stride_+x-origin_x_];
+        unsigned s=(source>>8)|(source<<8),d=(pixel>>8)|(pixel<<8),inverse=256-alpha;
+        unsigned r=(((s>>11)&31)*alpha+((d>>11)&31)*inverse+128)>>8;
+        unsigned g=(((s>>5)&63)*alpha+((d>>5)&63)*inverse+128)>>8;
+        unsigned b=((s&31)*alpha+(d&31)*inverse+128)>>8;
+        uint16_t packed=static_cast<uint16_t>((r<<11)|(g<<5)|b);
+        pixel=static_cast<uint16_t>((packed>>8)|(packed<<8));
     }
     void shaded_span(uint16_t *row,int first,int last,int y,SpanColor color,unsigned light) {
         if(light==256){fill_rgb565(row+first-origin_x_,last-first+1,color.value);return;}

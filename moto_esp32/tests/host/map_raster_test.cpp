@@ -81,6 +81,28 @@ int main() {
     for (int y=0;y<101;++y) for(int x=0;x<173;++x) assert(clipped[y*173+x]==whole[(y+41)*466+x+19]);
     assert(!MapRaster(clipped.data(),clipped.size(),173,101,173,-1,41).valid());
     assert(!MapRaster(clipped.data(),clipped.size(),173,101,173,300,41).valid());
+    // An analytic fractional rectangle has 75% edge coverage and opaque
+    // interior. This checks blending independently of the strip comparison.
+    raster.clear(0);ProjectedPoint fractional[]{{10.25f,10},{20.75f,10},{20.75f,20},{10.25f,20}};
+    raster.polygon(MapRaster::PreparedPolygon(fractional,4),0xffff,true);
+    uint16_t edge=static_cast<uint16_t>((23<<11)|(47<<5)|23);
+    edge=static_cast<uint16_t>((edge<<8)|(edge>>8));
+    assert(storage[guard+12*stride+10]==edge&&storage[guard+12*stride+20]==edge);
+    assert(storage[guard+12*stride+11]==0xffff&&storage[guard+12*stride+9]==0);
+    auto paintAA=[&](MapRaster &target){
+        target.navigation_style(true);target.clear(0x1234);
+        for(int i=0;i<30;i++){
+            ProjectedPoint triangle[]{{-15.75f+i*13.1f,8.25f},{460.75f,430.25f-i*9.2f},{155.5f,480.25f}};
+            target.polygon(MapRaster::PreparedPolygon(triangle,3),0xffff,true);
+            target.ellipse(MapRaster::PreparedEllipse({i*17.25f,23.5f+i*15.8f},{8.25f,1.75f},{3.5f,13.25f}),0x1f00,true);
+        }
+    };
+    paintAA(full);
+    for(int y=0;y<466;y+=16){MapRaster strip(strips.data()+y*466,strips.size()-y*466,466,std::min(16,466-y),466,0,y);paintAA(strip);}
+    assert(whole==strips);paintAA(tile);
+    for(int y=0;y<101;y++)for(int x=0;x<173;x++)assert(clipped[y*173+x]==whole[(y+41)*466+x+19]);
+    for(int i=0;i<guard;i++)assert(storage[i]==sentinel&&storage[guard+stride*h+i]==sentinel);
+    std::cout<<"PASS: edge coverage, color blending, clipping and antialiased strip equivalence\n";
     std::cout << "PASS: RGB565 raster geometry, stride, guards and 2000 clipped shapes\n";
     std::cout << "PASS: prepared geometry, full-screen and strip rendering are pixel-identical, including clipped tiles\n";
 }

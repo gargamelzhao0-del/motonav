@@ -1,6 +1,7 @@
 #include "motonav/graphics/route_map.h"
 #include "motonav/graphics/map_raster.h"
 #include "motonav/graphics/map_stroke.h"
+#include "motonav/graphics/map_strip_index.h"
 #include "round_map_damage.h"
 #include "src/draw/lv_image_decoder_private.h"
 #include "src/draw/lv_draw_private.h"
@@ -23,13 +24,13 @@ static_assert(LV_DRAW_SW_DRAW_UNIT_CNT == 1, "Map strip decoder requires one sof
 constexpr int StripRows = 16;
 constexpr size_t StripPixels = 466 * StripRows;
 using Segment = MapRaster::PreparedLine;
+using Style = NavigationMapStyle;
 static_assert(sizeof(Segment) == 20, "Keep the prepared geometry cache bounded");
 struct MapScene {
     lv_image_dsc_t image{};
-    Segment roads[64]{}, route[63]{};
-    Segment highlights[48]{};
-    struct StrokePair { MapStroke body,edge; } route_surfaces[63]{};
-    size_t highlight_count=0;
+    Segment roads[64]{}, route[64]{};
+    struct StrokePair { MapStroke body,edge; } route_surfaces[64]{};
+    bool route_passed[64]{};
     float player_y=326;
     struct Feature {
         int16_t top=0,bottom=0;
@@ -42,6 +43,7 @@ struct MapScene {
     MapStroke surfaces[384]{},edges[384]{};
     uint16_t area_count=0,surface_count=0,edge_count=0;
     uint16_t paint_order[384]{};
+    MapStripIndex strips;
     size_t feature_count=0;
     bool compass=false;
     size_t road_count = 0, route_count = 0;
@@ -82,9 +84,9 @@ void player(MapRaster &raster, float x, float y) {
     ProjectedPoint outline[]{{x,y-17},{x-13,y+14},{x+13,y+14}};
     ProjectedPoint left[]{{x,y-14},{x-10.5f,y+11},{x,y+5}};
     ProjectedPoint right[]{{x,y-14},{x+10.5f,y+11},{x,y+5}};
-    raster.polygon(outline,3,panel_color(0x12171c));
-    raster.polygon(left,3,panel_color(0xf2f3e9));
-    raster.polygon(right,3,panel_color(0xf2f3e9));
+    raster.polygon(MapRaster::PreparedPolygon(outline,3),panel_color(Style::PlayerEdge),true);
+    raster.polygon(MapRaster::PreparedPolygon(left,3),panel_color(Style::Player),true);
+    raster.polygon(MapRaster::PreparedPolygon(right,3),panel_color(Style::PlayerSide),true);
 }
 void position_dot(MapRaster &raster,float x,float y,uint8_t style) {
     const auto color=panel_color(style==1?0xffc265:style==2?0x77caff:0xaab0b4);
@@ -105,18 +107,22 @@ void line(MapRaster &raster, const Segment &segment, int width, uint32_t color, 
 void paint(MapRaster &raster, MapScene &scene, int top, int bottom) {
     const uint64_t begin = scene.clock_us ? scene.clock_us() : 0;
     raster.navigation_style(scene.compass);
-    raster.clear(panel_color(0x283033));
+    raster.clear(panel_color(Style::Ground));
     // Resolve painter order and bounds once per camera update. Each strip visits
     // the compact list once, instead of scanning all PSRAM geometry six times.
-    for(size_t i=0;i<scene.feature_count;i++) {
+    for(size_t block=0;block<(scene.feature_count+31)/32;block++) {
+      uint32_t mask=scene.strips.word(block,top,bottom);
+      while(mask) {
+        size_t i=block*32+static_cast<unsigned>(__builtin_ctz(mask));mask&=mask-1;
         const auto &f=scene.features[scene.paint_order[i]];
         if(f.bottom<top||f.top>bottom+0.5f)continue;
         const unsigned kind=f.kind;
-        if(kind>=3)raster.polygon(scene.areas[f.shape],panel_color(kind==4?0x1e4560:kind==5?0x2a4430:0x313b3f));
+        if(kind>=3)raster.polygon(scene.areas[f.shape],panel_color(kind==4?Style::Water:kind==5?Style::Park:Style::Building));
         else {
-            if(kind==2)scene.edges[f.edge].paint(raster,panel_color(0x3a4144));
-            scene.surfaces[f.shape].paint(raster,panel_color(kind==2?0xc4cacc:kind==1?0x929ca1:0x6c787e));
+            if(kind==2)scene.edges[f.edge].paint(raster,panel_color(Style::RoadEdge));
+            scene.surfaces[f.shape].paint(raster,panel_color(kind==2?Style::MajorRoad:kind==1?Style::SecondaryRoad:Style::MinorRoad));
         }
+      }
     }
     for (size_t i=0; i<scene.road_count; ++i) {
         line(raster, scene.roads[i], 8, 0x10191e, top, bottom);
@@ -124,11 +130,12 @@ void paint(MapRaster &raster, MapScene &scene, int top, int bottom) {
     }
     for (int pass=0; pass<2; ++pass)
         for (size_t i=0; i<scene.route_count; ++i) {
+            const bool past=scene.route_passed[i];
+            const uint32_t color=past?(pass?Style::Passed:Style::PassedEdge):(pass?Style::Route:Style::RouteEdge);
             if(scene.compass){const auto &stroke=pass?scene.route_surfaces[i].body:scene.route_surfaces[i].edge;
-                if(stroke.intersects_y(top,bottom))stroke.paint(raster,panel_color(pass?0xb66dff:0x2a1440));}
-            else line(raster, scene.route[i], pass ? 7 : 12, pass ? 0xb66dff : 0x2a1440, top, bottom);
+                if(stroke.intersects_y(top,bottom))stroke.paint(raster,panel_color(color),true);}
+            else line(raster, scene.route[i], past?(pass?4:8):(pass?7:12),color,top,bottom);
         }
-    for(size_t i=0;i<scene.highlight_count;i++)line(raster,scene.highlights[i],3,0xe3cfff,top,bottom);
     if(scene.show_position&&scene.player_y+20>=top&&scene.player_y-20<=bottom+1){
         if(scene.position_style)position_dot(raster,scene.image.header.w/2,scene.player_y,scene.position_style);
         else player(raster, scene.image.header.w/2, scene.player_y);
@@ -142,7 +149,7 @@ void paint(MapRaster &raster, MapScene &scene, int top, int bottom) {
                                   {233+std::sin(angle)*220,233-std::cos(angle)*220});
             }return result;
         }();
-        for(unsigned i=0;i<ticks.size();i++)line(raster,ticks[i],i%6?1:2,0x899398,top,bottom);
+        for(unsigned i=0;i<ticks.size();i+=3)line(raster,ticks[i],i%6?1:2,Style::Compass,top,bottom);
     }
     if (scene.clock_us) {
         scene.stats.elapsed_us += scene.clock_us() - begin;
@@ -286,6 +293,8 @@ lv_obj_t *create_route_map(lv_obj_t *parent, int width, int height) {
 
 bool render_route_map(lv_obj_t *view, const MapCamera &camera, const MapGeometry &geometry) {
     if (!view || geometry.route_count > 64 || geometry.road_count > 64 ||geometry.feature_count>384||geometry.position_style>3||
+        !std::isfinite(geometry.route_progress)||geometry.route_progress < -1||
+        (geometry.route_progress>=0&&(geometry.route_count<2||geometry.route_progress>geometry.route_count-1))||
         (geometry.feature_count&&!geometry.features)||
         (geometry.route_count && !geometry.route) || (geometry.road_count && !geometry.roads)) return false;
     for(size_t i=0;i<geometry.feature_count;i++) {
@@ -300,7 +309,6 @@ bool render_route_map(lv_obj_t *view, const MapCamera &camera, const MapGeometry
     scene->show_position=geometry.show_position;
     scene->position_style=geometry.position_style;
     scene->player_y=scene->image.header.h*camera.anchor_y;
-    scene->highlight_count=0;
     scene->area_count=scene->surface_count=scene->edge_count=0;
     scene->feature_count=0;scene->compass=geometry.compass;
     ProjectedPoint a, b;
@@ -326,26 +334,34 @@ bool render_route_map(lv_obj_t *view, const MapCamera &camera, const MapGeometry
     size_t ordered=0;
     for(unsigned kind:{4u,5u,3u,0u,1u,2u})for(size_t i=0;i<scene->feature_count;i++)
         if(scene->features[i].kind==kind)scene->paint_order[ordered++]=static_cast<uint16_t>(i);
+    scene->strips.reset();
+    for(size_t i=0;i<scene->feature_count;i++){
+        const auto &f=scene->features[scene->paint_order[i]];scene->strips.add(i,f.top,f.bottom);
+    }
     for (size_t i=0; i<geometry.road_count; ++i) {
         if (projection.segment(geometry.roads[i].a, geometry.roads[i].b, a, b))
             scene->roads[scene->road_count++] = Segment(a, b);
     }
-    for (size_t i=1; i<geometry.route_count; ++i) {
-        if (projection.segment(geometry.route[i-1], geometry.route[i], a, b,geometry.compass?20:8)) {
+    auto route_part=[&](MapPoint start,MapPoint end,bool passed) {
+        if(start.x==end.x&&start.y==end.y)return;
+        if (projection.segment(start,end,a,b,geometry.compass?20:8)) {
             const size_t index=scene->route_count++;
             scene->route[index] = Segment(a, b);
+            scene->route_passed[index]=passed;
             if(geometry.compass) {
-                scene->route_surfaces[index].body.prepare_projected(projection,geometry.route[i-1],geometry.route[i],a,b,8);
-                scene->route_surfaces[index].edge.prepare_projected(projection,geometry.route[i-1],geometry.route[i],a,b,13);
-            }
-            if(geometry.compass) {
-                float dx=b.x-a.x,dy=b.y-a.y,length=std::sqrt(dx*dx+dy*dy);
-                if(length>0.01f)for(float d=10;d<length&&scene->highlight_count<48;d+=35) {
-                    float first=d/length,last=std::min(length,d+5)/length;
-                    scene->highlights[scene->highlight_count++]=Segment({a.x+dx*first,a.y+dy*first},{a.x+dx*last,a.y+dy*last});
-                }
+                scene->route_surfaces[index].body.prepare_projected(projection,start,end,a,b,passed?4.5f:8);
+                scene->route_surfaces[index].edge.prepare_projected(projection,start,end,a,b,passed?8:13);
             }
         }
+    };
+    for(size_t i=1;i<geometry.route_count;i++) {
+        const auto start=geometry.route[i-1],end=geometry.route[i];
+        const float fraction=geometry.route_progress-float(i-1);
+        if(fraction>0&&fraction<1) {
+            MapPoint split{static_cast<int16_t>(std::lround(start.x+(end.x-start.x)*fraction)),
+                           static_cast<int16_t>(std::lround(start.y+(end.y-start.y)*fraction))};
+            route_part(start,split,true);route_part(split,end,false);
+        }else route_part(start,end,fraction>=1);
     }
     if (scene->image.header.w == 466 && scene->image.header.h == 466 &&
         lv_obj_get_x(view) == 0 && lv_obj_get_y(view) == 0 &&

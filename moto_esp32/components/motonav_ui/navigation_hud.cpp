@@ -34,9 +34,9 @@ lv_obj_t *text(lv_obj_t *parent,int x,int y,int width,const lv_font_t *font,uint
 void create_navigation_hud(lv_obj_t *parent,NavigationHud &hud) {
     hud.root=lv_obj_create(parent);lv_obj_remove_style_all(hud.root);lv_obj_set_size(hud.root,466,466);
     lv_obj_remove_flag(hud.root,static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_SCROLLABLE|LV_OBJ_FLAG_CLICKABLE));
-    auto *card=lv_obj_create(hud.root);lv_obj_remove_style_all(card);lv_obj_set_pos(card,126,44);lv_obj_set_size(card,214,64);
+    auto *card=hud.card=lv_obj_create(hud.root);lv_obj_remove_style_all(card);lv_obj_set_pos(card,126,44);lv_obj_set_size(card,214,64);
     lv_obj_set_style_bg_color(card,lv_color_hex(0x060909),0);lv_obj_set_style_bg_opa(card,LV_OPA_COVER,0);
-    auto *icon=lv_obj_create(hud.root);lv_obj_remove_style_all(icon);lv_obj_set_pos(icon,126,44);lv_obj_set_size(icon,58,64);
+    auto *icon=hud.icon_background=lv_obj_create(hud.root);lv_obj_remove_style_all(icon);lv_obj_set_pos(icon,126,44);lv_obj_set_size(icon,58,64);
     lv_obj_set_style_bg_color(icon,lv_color_hex(0x2b2716),0);lv_obj_set_style_bg_opa(icon,LV_OPA_COVER,0);
     hud.distance=text(hud.root,196,43,137,&motonav_distance_36,0xffffff);
     lv_obj_set_style_text_align(hud.distance,LV_TEXT_ALIGN_LEFT,0);
@@ -72,14 +72,32 @@ void create_navigation_hud(lv_obj_t *parent,NavigationHud &hud) {
     }
     lv_obj_add_flag(hud.root,LV_OBJ_FLAG_HIDDEN);
 }
-void update_navigation_hud(NavigationHud &hud,const ScreenSnapshot &state,float heading) {
+void update_navigation_hud(NavigationHud &hud,const ScreenSnapshot &state,float heading,ManeuverEmphasis emphasis) {
     const bool live=screen_mode(state)==ScreenMode::Live&&!state.route.overview;
+    if(!live)emphasis=ManeuverEmphasis::Normal;
+    const bool approach=emphasis!=ManeuverEmphasis::Normal,immediate=emphasis==ManeuverEmphasis::Immediate;
+    if(hud.emphasis!=emphasis) {
+        hud.emphasis=emphasis;hud.icon=-1;
+        lv_obj_set_pos(hud.card,approach?110:126,approach?40:44);lv_obj_set_size(hud.card,approach?246:214,approach?80:64);
+        lv_obj_set_pos(hud.icon_background,approach?110:126,approach?40:44);lv_obj_set_size(hud.icon_background,approach?70:58,approach?80:64);
+        lv_obj_set_pos(hud.arrow,approach?114:129,approach?45:49);
+        lv_obj_set_pos(hud.distance,approach?192:196,approach?40:43);lv_obj_set_width(hud.distance,approach?157:137);
+        lv_obj_set_pos(hud.maneuver,approach?192:196,approach?93:84);lv_obj_set_width(hud.maneuver,approach?157:137);
+        lv_obj_set_y(hud.unit,approach?64:67);lv_obj_set_y(hud.status,approach?124:112);
+        lv_obj_set_pos(hud.progress,approach?180:184,approach?117:105);
+        const uint32_t color=immediate?0xff944d:0xf0c850;
+        lv_obj_set_style_line_color(hud.arrow,lv_color_hex(color),0);
+        lv_obj_set_style_bg_color(hud.progress,lv_color_hex(color),0);
+        lv_obj_set_style_text_color(hud.distance,lv_color_hex(immediate?0xffbd78:0xffffff),0);
+        lv_obj_set_flag(hud.time,LV_OBJ_FLAG_HIDDEN,immediate);lv_obj_set_flag(hud.remaining,LV_OBJ_FLAG_HIDDEN,immediate);
+    }
     char value[128];int icon=live?state.guidance.icon:0;
     const bool details=live&&state.details.revision==state.route.revision&&state.details.revision;
     if(hud.live!=live){hud.live=live;lv_obj_set_style_text_font(hud.distance,live?&motonav_distance_36:&motonav_ui_16,0);}
     if(hud.icon!=icon) {
         hud.icon=icon;auto shape=arrow_shape(icon);lv_obj_set_flag(hud.arrow,LV_OBJ_FLAG_HIDDEN,!shape.count);
-        for(unsigned i=0;i<shape.count;i++)hud.points[i]={static_cast<lv_value_precise_t>(shape.points[i].x*.33f),static_cast<lv_value_precise_t>(shape.points[i].y*.33f)};
+        const float scale=approach?.42f:.33f;
+        for(unsigned i=0;i<shape.count;i++)hud.points[i]={static_cast<lv_value_precise_t>(shape.points[i].x*scale),static_cast<lv_value_precise_t>(shape.points[i].y*scale)};
         if(shape.count)lv_line_set_points(hud.arrow,hud.points,shape.count);
     }
     if(live) {
@@ -109,12 +127,12 @@ void update_navigation_hud(NavigationHud &hud,const ScreenSnapshot &state,float 
             }
         }else hud.road_name[0]=0;
     }
-    lv_obj_set_flag(hud.current_road,LV_OBJ_FLAG_HIDDEN,!details||!state.details.current_road[0]||std::strcmp(hud.road_name,road));
-    lv_obj_set_flag(hud.road_accent,LV_OBJ_FLAG_HIDDEN,!details||!state.details.current_road[0]);
+    lv_obj_set_flag(hud.current_road,LV_OBJ_FLAG_HIDDEN,immediate||!details||!state.details.current_road[0]||std::strcmp(hud.road_name,road));
+    lv_obj_set_flag(hud.road_accent,LV_OBJ_FLAG_HIDDEN,immediate||!details||!state.details.current_road[0]);
     if(details&&state.details.speed_limit>0)std::snprintf(value,sizeof(value),"%d",state.details.speed_limit);
     else std::snprintf(value,sizeof(value),"--");
     set_label_text(hud.speed_limit,value);
-    lv_obj_set_width(hud.progress,live&&state.guidance.turn_m>=0&&state.guidance.turn_m<400?156*(400-state.guidance.turn_m)/400:0);
+    lv_obj_set_width(hud.progress,live&&state.guidance.turn_m>=0&&state.guidance.turn_m<400?(approach?176:156)*(400-state.guidance.turn_m)/400:0);
     int meters=live?state.guidance.remaining_m:state.route.total_m,seconds=live?state.guidance.remaining_s:state.route.total_s;
     format_distance(value,meters);set_label_text(hud.remaining,value);
     if(details&&state.details.eta_minute>=0){std::snprintf(value,sizeof(value),"%02d:%02d",state.details.eta_minute/60,state.details.eta_minute%60);set_label_text(hud.time,value);}

@@ -1,10 +1,11 @@
 #include "map_fixture.h"
 #include "real_map_fixture.h"
+#include "motonav/graphics/route_trace.h"
 #include <cmath>
 
 namespace motonav {
-void render_map_benchmark_labels(MapAnnotations &view,const MapCamera &camera) {
-    update_map_annotations(view,RealMapLabels,camera,RealMapRoute,sizeof(RealMapRoute)/sizeof(RealMapRoute[0]),true);
+void render_map_benchmark_labels(MapAnnotations &view,const MapCamera &camera,MapAnnotationOptions options) {
+    update_map_annotations(view,RealMapLabels,camera,RealMapRoute,sizeof(RealMapRoute)/sizeof(RealMapRoute[0]),true,options);
 }
 MapCamera render_map_benchmark(lv_obj_t *view, uint64_t elapsed_ms) {
     // Traverse the decoded road itself at the HUD's test speed (36 km/h).
@@ -24,9 +25,11 @@ MapCamera render_map_benchmark(lv_obj_t *view, uint64_t elapsed_ms) {
     const float fraction=lengths[segment]>0?distance/lengths[segment]:0;
     const float dx=b.x-a.x,dy=b.y-a.y;
     MapCamera camera{a.x+dx*fraction,a.y+dy*fraction,std::atan2(reverse?-dx:dx,reverse?-dy:dy),
-        .88f,.872664626f,306.0f/466};
+        .88f,.610865238f,298.0f/466};
+    static const RouteTrace trace=[] {RouteTrace value;value.prepare(RealMapRoute,sizeof(RealMapRoute)/sizeof(RealMapRoute[0]));return value;}();
+    auto progress=trace.locate(camera.x,camera.y);
     render_route_map(view,camera,{RealMapRoute,sizeof(RealMapRoute)/sizeof(RealMapRoute[0]),nullptr,0,true,
-        RealMapFeatures,sizeof(RealMapFeatures)/sizeof(RealMapFeatures[0]),true});
+        RealMapFeatures,sizeof(RealMapFeatures)/sizeof(RealMapFeatures[0]),true,0,progress.valid?progress.index:-1});
     return camera;
 }
 } // namespace motonav

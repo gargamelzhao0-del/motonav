@@ -84,7 +84,7 @@ int main() {
     format_distance(text, 50000000); assert(std::string(text) == "50000 km");
     for (int icon = 0; icon <= 255; ++icon) {
         ArrowShape shape = arrow_shape(icon);
-        assert(shape.count <= 6);
+        assert(shape.count <= ArrowShape::Capacity);
         for (unsigned i = 0; i < shape.count; ++i) {
             assert(shape.points[i].x >= 0 && shape.points[i].x <= 160);
             assert(shape.points[i].y >= 0 && shape.points[i].y <= 140);
@@ -95,6 +95,7 @@ int main() {
     assert(arrow_shape(6).points[2].x < 80 && arrow_shape(7).points[2].x > 80);
     assert(arrow_shape(65).points[2].x < 80 && arrow_shape(66).points[2].x > 80);
     assert(arrow_shape(9).points[1].y < arrow_shape(9).points[0].y);
+    for(int icon:{8,11,12,17,18,19,21,22,23,24,25,26,27,28})assert(arrow_shape(icon).count>=5);
     assert(arrow_shape(47).count == 0 && std::string(maneuver(47)) == "CHECK PHONE MAP");
 
     NavigationReceiver r;

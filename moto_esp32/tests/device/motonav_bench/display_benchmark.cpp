@@ -21,6 +21,7 @@ MapAnnotations map_annotations;
 SnapshotReader snapshot;
 BenchmarkServices services;
 bool exit_requested = false, pending_autorun = false;
+uint64_t autorun_requested_at=0;
 bool may_test_display(const ScreenSnapshot &state) {
     return !state.pairing && screen_mode(state) != ScreenMode::Live;
 }
@@ -69,9 +70,10 @@ void benchmark_layout() {
     }
     view.last_icon = -1;
     lv_obj_set_flag(view.title,LV_OBJ_FLAG_HIDDEN,map);lv_obj_set_flag(view.footer,LV_OBJ_FLAG_HIDDEN,map);
+    lv_obj_set_align(view.top,LV_ALIGN_TOP_LEFT);
     lv_obj_set_pos(view.top,map?101:63,map?114:52);lv_obj_set_width(view.top,map?264:340);
     lv_obj_set_style_text_font(view.top,map?&motonav_small_14:&lv_font_montserrat_16,0);
-    if(map){lv_obj_set_pos(view.number,292,335);lv_obj_set_width(view.number,85);lv_obj_set_style_text_font(view.number,&motonav_small_14,0);}
+    if(map){lv_obj_set_align(view.number,LV_ALIGN_TOP_LEFT);lv_obj_set_pos(view.number,292,335);lv_obj_set_width(view.number,85);lv_obj_set_style_text_font(view.number,&motonav_small_14,0);}
 }
 
 uint64_t milliseconds() { return services.now_us() / 1000; }
@@ -166,7 +168,9 @@ void touch(lv_event_t *event) {
     gesture(nullptr, lv_event_get_code(event) == LV_EVENT_LONG_PRESSED ? UiGesture::Hold : UiGesture::Tap, snapshot());
 }
 bool refresh(void *, const ScreenSnapshot &state) {
-    if (pending_autorun) {
+    // UI creation also calls refresh on the small main-task stack. Start the
+    // optional heavy fixture after control passes to the LVGL timer/task.
+    if (pending_autorun && milliseconds()-autorun_requested_at>=50) {
         pending_autorun = false;
         if (may_test_display(state)) { automatic_test = true; set_test(true); }
     }
@@ -201,7 +205,14 @@ bool refresh(void *, const ScreenSnapshot &state) {
             uint64_t begin = static_cast<uint64_t>(services.now_us());
             auto camera=render_map_benchmark(map_canvas, now - test_started);
             uint64_t geometry_end=static_cast<uint64_t>(services.now_us());
-            render_map_benchmark_labels(map_annotations,camera);
+            // Preserve the normal annotation budget during timing. The held
+            // visual demo subsequently cycles the three maneuver layouts.
+            const unsigned phase=now-test_started>=MOTONAV_BENCH_SECONDS*1000ULL?
+                ((now-test_started-MOTONAV_BENCH_SECONDS*1000ULL)/8000)%3:0;
+            const auto emphasis=phase==2?ManeuverEmphasis::Immediate:phase==1?ManeuverEmphasis::Approach:ManeuverEmphasis::Normal;
+            lv_obj_set_y(view.top,phase?137:114);
+            render_map_benchmark_labels(map_annotations,camera,
+                {phase==2?2u:phase==1?3u:6u,phase==2?4u:phase==1?6u:12u,phase?155:140,phase!=2});
             uint64_t annotations_end=static_cast<uint64_t>(services.now_us());
             // The removable test exercises the production HUD, with an explicit
             // DISPLAY TEST marker and no synthetic input sent to the navigation service.
@@ -209,10 +220,10 @@ bool refresh(void *, const ScreenSnapshot &state) {
             test.details.revision=1;test.details.eta_minute=686;
             std::snprintf(test.details.current_road,sizeof(test.details.current_road),"测试道路");
             std::snprintf(test.details.next_road,sizeof(test.details.next_road),"下一路段");
-            test.has_guidance=test.stream_fresh=true;test.guidance={Live,3,120,4000,360,36};
+            test.has_guidance=test.stream_fresh=true;test.guidance={Live,3,phase==2?40:phase==1?120:320,4000,360,36};
             test.route.local_view=true;test.route.revision=test.basemap_revision=1;
             test.basemap_count=384;test.basemap_complete=true;
-            update_navigation_hud(map_hud,test,camera.heading);
+            update_navigation_hud(map_hud,test,camera.heading,emphasis);
             uint64_t duration = static_cast<uint64_t>(services.now_us()) - begin;
             if (now - test_started >= 2500) {
                 map_render_us += duration; ++map_frames;
@@ -261,6 +272,7 @@ UiExtension make_display_benchmark(lv_display_t *target, SnapshotReader reader, 
     normal_screen = lv_display_get_screen_active(display);
 #if MOTONAV_AUTORUN_BENCH || MOTONAV_AUTORUN_MAP_BENCH
     pending_autorun = true;
+    autorun_requested_at=milliseconds();
 #endif
 #if MOTONAV_AUTORUN_MAP_BENCH
     workload = Workload::Map;

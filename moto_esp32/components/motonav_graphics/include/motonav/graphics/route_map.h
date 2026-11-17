@@ -14,6 +14,9 @@ struct MapGeometry {
     size_t feature_count=0;
     bool compass=false;
     uint8_t position_style=0; // 0 heading arrow, 1 approximate, 2 precise, 3 historical dot.
+    // Optional visual split: segment index + fraction, -1 means unknown.
+    // The caller owns position validity; this does not change guidance/progress.
+    float route_progress=-1;
 };
 // All functions below require the LVGL thread or the caller's display lock.
 // Image owns a bounded scene; fallback decoding lazily allocates a strip buffer.

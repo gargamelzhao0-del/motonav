@@ -1,6 +1,8 @@
 #include "motonav/ui/map_annotations.h"
 #include "motonav/ui/fonts.h"
 #include "motonav/ui/navigation_ui.h"
+#include "motonav/ui/navigation_hud.h"
+#include "motonav/graphics/route_map.h"
 #include "motonav/ui/dashboard.h"
 #include "motonav/core/navigation_session.h"
 #include "../../components/motonav_ui/map_caption.h"
@@ -10,6 +12,8 @@
 #include "../device/motonav_bench/real_map_fixture.h"
 #endif
 #include <array>
+#undef NDEBUG
+#include <cassert>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -190,12 +194,64 @@ static void exercise_annotations(lv_display_t *display,const std::filesystem::pa
     auto prior_width=view.widths[0];labels.revision=2;
     std::strcpy(labels.items[0].name,"中山西路");update();
     if(view.widths[0]==prior_width){std::cerr<<"New origin reused old text dimensions\n";std::abort();}
+    labels={};labels.revision=3;labels.generation=1;labels.count=1;
+    labels.items[0]={0,{-80,100},"中山路"};camera={0,0,0,1};
+    update();assert(view.retained[0].text&&view.retained[0].side==0);
+    const motonav::MapPoint obstructed[]{{-50,-200},{-50,500}};
+    motonav::update_map_annotations(view,labels,camera,obstructed,2,true);
+    assert(!view.retained[0].text&&view.layout_pending&&view.retained[0].side==0);
+    advance_host_clock(100);update();assert(view.retained[0].text&&view.retained[0].side==0);
+    motonav::update_map_annotations(view,labels,camera,obstructed,2,true);
+    advance_host_clock(400);motonav::update_map_annotations(view,labels,camera,obstructed,2,true);
+    assert(view.retained[0].text&&view.retained[0].side==1&&!view.layout_pending);
+    motonav::update_map_annotations(view,labels,camera,route,2,true,{0,0});assert(!view.visible&&!view.visible_icons);
     labels={};update();save(display,directory/"annotations-cleared.ppm");
     if(view.visible)std::abort();
     for(auto *text:view.text)if(lv_obj_is_visible(text))std::abort();
     for(auto *icon:view.icon)if(lv_obj_is_visible(icon))std::abort();
     lv_screen_load(previous);lv_obj_delete(screen);
     std::cout<<"PASS: map names, POI icons, collision avoidance, movement and clear\n";
+}
+static void exercise_maneuver_ui(lv_display_t *display,const std::filesystem::path &directory) {
+    auto *previous=lv_screen_active(),*screen=lv_obj_create(nullptr);
+    lv_obj_set_style_bg_color(screen,lv_color_hex(0x283033),0);
+    motonav::NavigationHud hud;motonav::create_navigation_hud(screen,hud);
+    lv_obj_remove_flag(hud.root,LV_OBJ_FLAG_HIDDEN);lv_screen_load(screen);
+    motonav::ScreenSnapshot state;state.linked=state.encrypted=state.subscribed=state.handshaken=true;
+    state.has_guidance=state.stream_fresh=true;state.route.local_view=true;state.route.revision=1;
+    state.basemap_revision=1;state.basemap_count=1;state.guidance={motonav::Live,3,320,4000,360,36};
+    motonav::NavigationPresentation policy;
+    auto update=[&](){motonav::update_navigation_hud(hud,state,0,policy.update(state));};
+    update();save(display,directory/"hud-normal.ppm");const auto normal_width=lv_obj_get_width(hud.card);
+    assert(lv_obj_is_visible(hud.arrow)&&lv_obj_is_visible(hud.remaining));
+    state.guidance.turn_m=120;update();save(display,directory/"hud-approach.ppm");
+    assert(lv_obj_get_width(hud.card)>normal_width&&lv_obj_is_visible(hud.remaining));
+    state.guidance.turn_m=40;update();save(display,directory/"hud-immediate.ppm");
+    assert(!lv_obj_is_visible(hud.remaining)&&lv_obj_is_visible(hud.speed));
+    state.guidance.icon=8;update();save(display,directory/"hud-uturn.ppm");assert(lv_obj_is_visible(hud.arrow));
+    state.guidance.icon=11;update();save(display,directory/"hud-roundabout.ppm");assert(lv_obj_is_visible(hud.arrow));
+    state.source_expired=true;update();save(display,directory/"hud-expired.ppm");
+    assert(!lv_obj_is_visible(hud.arrow)&&lv_obj_is_visible(hud.remaining)&&lv_obj_get_width(hud.card)==normal_width);
+    lv_screen_load(previous);lv_obj_delete(screen);
+    std::cout<<"PASS: maneuver layout, U-turn/roundabout symbols and expired guidance reset\n";
+}
+static void exercise_route_split(lv_display_t *display,const std::filesystem::path &directory) {
+    auto *previous=lv_screen_active(),*screen=lv_obj_create(nullptr);lv_screen_load(screen);
+    auto *map=motonav::create_route_map(screen,466,466);
+    const motonav::MapPoint points[]{{0,-100},{0,200}};
+    const motonav::MapCamera camera{0,0,0,1,0,.6f};
+    motonav::MapGeometry geometry{points,2,nullptr,0,false};geometry.route_progress=1.0f/3;
+    assert(motonav::render_route_map(map,camera,geometry));save(display,directory/"route-passed.ppm");
+    auto past=pixels[330*466+233],future=pixels[200*466+233];assert(past!=future);
+    geometry.route_progress=-1;assert(motonav::render_route_map(map,camera,geometry));
+    save(display,directory/"route-progress-unknown.ppm");
+    assert(pixels[330*466+233]==future&&pixels[200*466+233]==future);
+    geometry.route_progress=2;assert(!motonav::render_route_map(map,camera,geometry));
+    motonav::MapPoint maximum[64];for(int i=0;i<64;i++)maximum[i]={0,static_cast<int16_t>(-300+i*10)};
+    geometry.route=maximum;geometry.route_count=64;geometry.route_progress=31.5f;
+    assert(motonav::render_route_map(map,camera,geometry));save(display,directory/"route-maximum-split.ppm");
+    lv_screen_load(previous);lv_obj_delete(screen);
+    std::cout<<"PASS: passed/future route rendering, unknown progress and maximum split capacity\n";
 }
 int main(int argc, char **argv) {
     if (argc != 2) return 2;
@@ -269,6 +325,8 @@ int main(int argc, char **argv) {
 #endif
     save(display, directory / "idle.ppm");
     exercise_annotations(display,directory);
+    exercise_maneuver_ui(display,directory);
+    exercise_route_split(display,directory);
     auto *navigation_screen = lv_screen_active();
     auto normal_children = lv_obj_get_child_count(lv_screen_active());
     lv_obj_add_event_cb(lv_obj_get_child(lv_screen_active(),0), [](lv_event_t *) { ++rim_draws; }, LV_EVENT_DRAW_MAIN, nullptr);

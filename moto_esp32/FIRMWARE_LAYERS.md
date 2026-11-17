@@ -1,4 +1,4 @@
-# 固件分层与接口（0.3.14）
+# 固件分层与接口（0.3.15）
 
 本文件描述当前已实现的结构。主程序只组装模块；板级实现由独立 ESP-IDF 组件管理，应用不直接调用 BSP、NimBLE 或 LCD/I²C 接口。NAV3 协议保持兼容；NAV4 接收器和路线状态属于核心层，正式 UI 通过图形接口渲染路线。
 
@@ -24,6 +24,7 @@ moto_esp32/
 │   ├── motonav_diagnostics/          可选 DIAG1 解码、有界队列、USB 串口输出
 │   ├── motonav_platform/             NVS 初始化、设备名、版本、时钟、内存
 │   ├── motonav_core/                 纯 C++ 协议、会话、显示状态模型
+│   │   └── .../navigation_presentation.h 转向阶段及退出迟滞，不生成导航指令
 │   ├── motonav_ui/                   导航页面、仪表控件、可选页面扩展接口
 │   │   ├── navigation_hud.*         转向、速度、道路与状态提示
 │   │   ├── map_annotations.*        独立名称/地标投影和避让
@@ -34,6 +35,11 @@ moto_esp32/
 │       ├── route_map.cpp             LVGL 接入、PSRAM 场景缓存与绘制顺序
 │       └── include/motonav/graphics/
 │           ├── map_projection.h      相机、近裁面和中心线裁剪
+│           ├── map_camera_profile.h  局部导航视角和缩放预设
+│           ├── map_camera_motion.h   独立位置/朝向/缩放过渡，不外推位置
+│           ├── route_trace.h         有界局部路线匹配，拒绝远离和歧义
+│           ├── map_strip_index.h     720 字节绘制顺序条带索引
+│           ├── map_style.h           地理类别的语义颜色与着色缓存调色板
 │           ├── map_stroke.h          道路表面投影、接头/端帽
 │           └── map_raster.h          准备好的面/椭圆 → RGB565 条带
 ├── tests/

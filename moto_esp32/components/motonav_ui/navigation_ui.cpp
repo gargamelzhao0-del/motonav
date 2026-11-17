@@ -3,6 +3,9 @@
 #include "motonav/ui/navigation_hud.h"
 #include "motonav/ui/map_annotations.h"
 #include "motonav/graphics/route_map.h"
+#include "motonav/graphics/map_camera_motion.h"
+#include "motonav/graphics/map_camera_profile.h"
+#include "motonav/core/navigation_presentation.h"
 #include <initializer_list>
 
 namespace motonav {
@@ -22,8 +25,13 @@ lv_obj_t *map_view=nullptr;
 bool map_layout=false;
 bool map_live=false;
 int map_marker=-1;
-uint32_t map_revision=0,transition_at=0;
-MapCamera camera{},from_camera{},target_camera{};
+uint32_t map_revision=0;
+MapCamera camera{};
+MapCameraMotion camera_motion;
+RouteTrace route_trace;
+NavigationPresentation presentation;
+ManeuverEmphasis map_emphasis=ManeuverEmphasis::Normal;
+bool protected_road=false;
 bool map_failed=false;
 void layout(bool enabled) {
     if(enabled==map_layout)return;
@@ -47,13 +55,14 @@ void layout(bool enabled) {
         lv_obj_set_style_radius(label,enabled?6:0,0);
     }
 }
-void route_map(const ScreenSnapshot &state) {
+void route_map(const ScreenSnapshot &state,ManeuverEmphasis emphasis) {
     const auto mode=screen_mode(state);
     bool visible=state.linked && state.encrypted && state.handshaken && !state.pairing &&
         mode!=ScreenMode::Stopped && mode!=ScreenMode::Arrived && state.route.count>=2;
     if(!visible) {
         if(map_view) { lv_obj_delete(map_view); map_view=nullptr;annotations={}; }
-        map_revision=0;basemap={}; map_failed=false; map_live=false;map_marker=-1; layout(false); return;
+        map_revision=0;basemap={};camera_motion={};route_trace={};
+        map_failed=false; map_live=false;map_marker=-1; layout(false); return;
     }
     if(!map_view && !map_failed) {
         map_view=create_route_map(lv_obj_get_parent(view.top),466,466);
@@ -103,37 +112,35 @@ void route_map(const ScreenSnapshot &state) {
     lv_obj_remove_flag(annotations.root,LV_OBJ_FLAG_HIDDEN);
     const int position_x=historical?r.last_position.x:r.x,position_y=historical?r.last_position.y:r.y;
     const int bearing=historical?r.last_position.heading:r.heading;
-    float heading=bearing<0?0:static_cast<float>(bearing)*0.001745329252f;
-    bool changed=base_changed||marker_changed;
-    const float speed=live?std::max(0,state.guidance.speed_kmh):0;
-    // Waiting preview uses a fixed framing preset, never a simulated speed/fix.
-    const float zoom=live?0.85f+std::clamp((speed-12)/68,0.0f,1.0f)*1.6f:1.13f;
-    const float scale=r.local_view?1/zoom:1.0f;
-    const float tilt=r.local_view?0.872664626f*(live?std::clamp((speed-6)/16,0.0f,1.0f):1.0f):0;
-    const float anchor=r.local_view?(270+36*tilt/0.872664626f)/466:0.7f;
+    float heading=bearing<0?camera.heading:static_cast<float>(bearing)*0.001745329252f;
+    const bool road=live&&emphasis!=ManeuverEmphasis::Immediate&&state.details.revision==r.revision&&state.details.current_road[0];
+    bool changed=base_changed||marker_changed||emphasis!=map_emphasis||road!=protected_road;
+    map_emphasis=emphasis;protected_road=road;
     uint32_t now=lv_tick_get();
-    if(map_revision!=r.revision || changed_mode) {
-        map_revision=r.revision; camera={static_cast<float>(position_x),static_cast<float>(position_y),heading,scale,tilt,anchor};
-        from_camera=target_camera=camera; transition_at=now; changed=true;
-    } else if(target_camera.x!=position_x || target_camera.y!=position_y || std::abs(target_camera.heading-heading)>0.0001f||target_camera.perspective!=tilt||target_camera.scale!=scale) {
-        from_camera=camera; target_camera={static_cast<float>(position_x),static_cast<float>(position_y),heading,scale,tilt,anchor}; transition_at=now;
-    }
-    float fraction=std::min(1.0f,static_cast<float>(now-transition_at)/900);
-    float turn=std::remainder(target_camera.heading-from_camera.heading,6.283185307f);
-    MapCamera next{from_camera.x+(target_camera.x-from_camera.x)*fraction,
-        from_camera.y+(target_camera.y-from_camera.y)*fraction,from_camera.heading+turn*fraction,
-        from_camera.scale+(target_camera.scale-from_camera.scale)*fraction,
-        from_camera.perspective+(target_camera.perspective-from_camera.perspective)*fraction,
-        from_camera.anchor_y+(target_camera.anchor_y-from_camera.anchor_y)*fraction};
-    next.heading=std::remainder(next.heading,6.283185307f);
+    MapPoint points[64];
+    for(unsigned i=0;i<r.count;i++)points[i]={r.points[i].x,r.points[i].y};
+    const bool reset=map_revision!=r.revision||changed_mode||marker_changed;
+    if(reset){route_trace.prepare(points,r.count);changed=true;}
+    map_revision=r.revision;
+    // Bearing becomes unstable near standstill. Hold the already displayed
+    // heading without manufacturing a new position or extending its validity.
+    if(live&&!reset&&state.guidance.speed_kmh>=0&&state.guidance.speed_kmh<4)heading=camera.heading;
+    MapCamera target=map_camera_profile(r.local_view,live,state.guidance.speed_kmh);
+    target.x=position_x;target.y=position_y;target.heading=heading;
+    MapCamera next=camera_motion.update(target,now,reset,route_trace,live&&r.local_view);
+    const auto progress=live&&r.local_view?route_trace.locate(next.x,next.y):RouteTrace::Cursor{};
     changed=changed||std::abs(next.x-camera.x)>0.001f||std::abs(next.y-camera.y)>0.001f||std::abs(next.heading-camera.heading)>0.0001f||std::abs(next.perspective-camera.perspective)>0.0001f||std::abs(next.scale-camera.scale)>0.0001f||std::abs(next.anchor_y-camera.anchor_y)>0.0001f;
     camera=next;
     if(changed) {
-        MapPoint points[64];
-        for(unsigned i=0;i<r.count;i++)points[i]={r.points[i].x,r.points[i].y};
-        if(!render_route_map(map_view,camera,{points,r.count,nullptr,0,marker!=0,features,basemap.count,r.local_view,static_cast<uint8_t>(live?0:historical?3:r.position_quality)})) {
+        if(!render_route_map(map_view,camera,{points,r.count,nullptr,0,marker!=0,features,basemap.count,r.local_view,
+                static_cast<uint8_t>(live?0:historical?3:r.position_quality),progress.valid?progress.index:-1})) {
             lv_obj_delete(map_view); map_view=nullptr;annotations={}; map_failed=true; layout(false);
-        }else update_map_annotations(annotations,basemap.labels,camera,points,r.count,marker!=0);
+        }
+    }
+    if(map_view&&(changed||annotations.layout_pending)) {
+        const bool approach=emphasis!=ManeuverEmphasis::Normal,immediate=emphasis==ManeuverEmphasis::Immediate;
+        update_map_annotations(annotations,basemap.labels,camera,points,r.count,marker!=0,
+            {immediate?2u:approach?3u:6u,immediate?4u:approach?6u:12u,approach?155:140,road});
     }
 }
 void touch(lv_event_t *event) {
@@ -144,7 +151,8 @@ void refresh(lv_timer_t *) {
     ScreenSnapshot state = snapshot();
     if (extension.refresh && extension.refresh(extension.context, state)) return;
     ScreenMode mode = screen_mode(state);
-    route_map(state);
+    const auto emphasis=presentation.update(state);
+    route_map(state,emphasis);
     bool local=map_layout&&state.route.local_view;
     if(local!=local_layout) {
         local_layout=local;
@@ -152,7 +160,7 @@ void refresh(lv_timer_t *) {
         for(auto *object:{view.top,view.title,view.number,view.speed,view.remaining,view.footer,view.arrow})lv_obj_set_flag(object,LV_OBJ_FLAG_HIDDEN,local);
         view.last_icon=-1;
     }
-    if(local){update_navigation_hud(hud,state,camera.heading);return;}
+    if(local){update_navigation_hud(hud,state,camera.heading,emphasis);return;}
     set_label_text(view.top, state.linked ? (state.encrypted ? "PHONE CONNECTED" : "PHONE CONNECTING") : name);
     const bool overview=map_layout && mode!=ScreenMode::Live;
     lv_obj_set_flag(view.number,LV_OBJ_FLAG_HIDDEN,overview);

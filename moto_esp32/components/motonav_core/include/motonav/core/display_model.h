@@ -57,9 +57,17 @@ inline const char *maneuver(int icon) {
 }
 
 struct Point { int x, y; };
-struct ArrowShape { Point points[6]{}; unsigned count = 0; };
+struct ArrowShape { static constexpr unsigned Capacity=8;Point points[Capacity]{}; unsigned count = 0; };
 
 inline ArrowShape arrow_shape(int icon) {
+    if(icon==21||icon==25)icon=2;
+    else if(icon==22||icon==26)icon=3;
+    else if(icon==23||icon==27)icon=9;
+    else if(icon==24||icon==28)icon=8;
+    if(icon==8||icon==19)return {{{110,125},{110,35},{50,35},{50,100},{25,75},{50,100},{75,75}},7};
+    // Generic entry/exit symbols show a roundabout without inventing an exit.
+    if(icon==11||icon==12||icon==17||icon==18)
+        return {{{80,125},{80,100},{45,80},{45,45},{80,25},{115,45},{115,80},{80,100}},8};
     ArrowShape result;
     if (icon == 9) return {{{80,125},{80,20},{45,55},{80,20},{115,55}},5};
     bool right = icon == 3 || icon == 5 || icon == 7 || icon == 66;
