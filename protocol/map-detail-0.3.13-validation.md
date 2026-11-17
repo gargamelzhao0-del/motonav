@@ -81,6 +81,63 @@ assertion or watchdog was observed in these captures. The 40 FPS target is
 still unmet. The new data extract is a different workload and is recorded
 separately when validated; it must not replace the identical-input comparison.
 
+## Final delivery checks
+
+Firmware source: `b95adaf80d577c45f437435935d105cb7ea51e41` on
+`codex/ble-diagnostics`. Android tag `android-v0.7.21` points to
+`68a28d8d4804af9640bfb2c4164b9dcef0023747`; the subsequent firmware commit only
+changes the Android test fixture generator, not the released app behavior.
+
+- [Source CI](https://github.com/gargamelzhao0-del/motonav/actions/runs/44021894840)
+  passed both jobs: Android checks/build/lint and firmware host checks, a clean
+  production export without tests, optional benchmark compilation and LVGL tests.
+- The [Android release workflow](https://github.com/gargamelzhao0-del/motonav/actions/runs/44021646223)
+  passed. The downloaded APK independently passed local apksigner v2/v3
+  verification, aapt package/version inspection, and size/SHA-256 checks.
+- Final local firmware host checks and all 12 LVGL checks passed on the updated
+  fixture. `verify_production.py` confirmed no test component or simulation in
+  the normal image. A source export without `tests/` is included in the delivery.
+
+| Artifact | Bytes | SHA-256 |
+| --- | ---: | --- |
+| MotoNav-0.7.21.apk, version code 29 | 105779997 | `64d8837296dafa8e67cfde42fc264c29d63ed00a66b70692b44b92ac479a9c81` |
+| Normal firmware motonav.bin | 4781744 | `fcc0f0b4c864683840841a225063d1b07fbb2c32e18817bce22469a8f6d7b5b6` |
+| Firmware source-b95adaf.zip | 5254147 | `69abae1f7252dbd5f122ee32c74088e41f2f7c6d20e396c50f31e4f801dc5c6d` |
+
+APK signer remains
+`af9e2f4cb0997fe77ae884e9d7797a7c6b933c1bfdebc3993386ae418aeacde1`.
+The [signed update](https://github.com/gargamelzhao0-del/motonav/releases/download/android-v0.7.21/MotoNav-0.7.21.apk)
+can cover the existing stable installation. Map Key, preferences and pairing
+are retained. The APK is also copied into the user's original `motonav/apk/`.
+
+The new 384-primitive, 24-label extract was measured on COM21 with dispatch
+profiling off: minimum **18**, mean **23 FPS**, 36 samples over 40557 ms after
+warm-up. Preparation averaged 5024 us (geometry 4362, annotations 402, HUD 259),
+rendering 35062 us and overlapping DMA 19703 us. The continued hold animation
+reached minimum **16**, mean **22 FPS** at 75 samples. Its lowest observed free
+internal heap was about 24.8 KB. These figures are a different data workload
+from the 383-primitive comparison above and remain below 40 FPS.
+
+![Host preview with the new real-map selection](assets/map-detail-0.3.13/real-map-live.png)
+
+This is a native 466x466 host rendering of the public London tile with synthetic
+guidance. It is neither a photograph of COM21 nor the user's position. Data:
+© OpenStreetMap contributors, ODbL; see the fixture source notes.
+
+After the visual test hold, COM21 received the verified normal image at 0x10000
+on 2026-11-17 around 13:14 Asia/Shanghai. USB identity was checked as 303A:1001,
+serial C4:9E:7E:0C:51:C8, BLE MotoNav-51CA. The write preserved bootloader,
+partition table and NVS. Boot reports firmware 0.3.13, `device_tests=0`,
+`ble_diagnostics=1`, free internal heap 26655 bytes and main-task stack minimum
+3408 bytes while idle. The capture contains no panic/assert/watchdog. A passive
+one-hour serial diagnostic logger was started without resetting the device.
+
+User confirmation of this new visual test and the updated real phone map is
+still pending at delivery; normal boot and synthetic measurements do not
+establish real-riding navigation performance or complete simulator parity.
+
 Local detailed evidence: `moto_esp32/dist/map-integration/0.3.13/`.
-Final release hashes, normal-image boot verification, new-extract measurements
-and visual feedback are appended after delivery checks finish.
+Normal image, ELF, source archive, manifest, flash log, monitor metadata and
+validation results: `moto_esp32/dist/release-0.3.13/`. Firmware/protocol changes
+are synchronized to the user's original checkout after baseline and conflict
+checks. Android source remains in the isolated checkout.
