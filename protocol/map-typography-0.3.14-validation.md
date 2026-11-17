@@ -47,6 +47,65 @@ photograph of COM21. Map data: © OpenStreetMap contributors, ODbL; see
 
 ![Identical-input host preview, 0.3.13 left and 0.3.14 right](assets/map-typography-0.3.14/before-after.png)
 
+## COM21 measurement
+
+Source commit: `4c3477e9133c56532f3ebbe5149f184f4c6da2f7`. COM21 identity was
+checked as USB 303A:1001, serial C4:9E:7E:0C:51:C8, BLE MotoNav-51CA. Only the
+application at 0x10000 was flashed, with esptool hash verification; bootloader,
+partition table and NVS were preserved. The old passive logger had ended
+naturally before the port was opened.
+
+Same 384-primitive / 24-label fixture, RGB565, 40 MHz QSPI, double 64-row DMA,
+style cache enabled, draw-task profiling disabled:
+
+| Measurement | 0.3.13 | 0.3.14 |
+| --- | ---: | ---: |
+| Timed min / mean FPS | 18 / 23 | 21 / 23 |
+| Timed interval after warm-up | 40557 ms | 40528 ms |
+| Prepare mean | 5024 us | 5147 us |
+| Geometry / annotations / HUD | 4362 / 402 / 259 us | 4402 / 470 / 274 us |
+| Render mean | 35062 us | 34757 us |
+| Overlapping DMA mean | 19703 us | 19617 us |
+
+The continued 0.3.14 hold reached 125 samples at about 145 s uptime: minimum
+19, mean 23 FPS. The complete capture lasts 150 s and contains no panic,
+assertion or watchdog. Lowest sampled free internal heap was 24459 bytes.
+This is a typography/layout change with broadly similar average rendering
+cost, not evidence of a sustained FPS gain. DMA overlaps rendering and must
+not be added to render time. The complex-map 40 FPS goal remains unmet.
+
+The normal image passed `verify_production.py`, excluding the test component
+and simulated map. The delivery also contains a source export without `tests/`.
+
+| Normal artifact | Bytes | SHA-256 |
+| --- | ---: | --- |
+| motonav.bin | 4151440 | `a9fbbe5b28a6d788d4bccc7b3c4d470b7902f6d0f9640cb3a16d0c608f7ac357` |
+| source-4c3477e.zip | 4764910 | `7bea88f53709ba1e459b6938b155bc0a3075fdab71bae5a740d395e5af132279` |
+
 Detailed local logs and previews are under
-`moto_esp32/dist/map-integration/0.3.14/`. Hardware measurements and final normal
-image validation will be appended after the COM21 test.
+`moto_esp32/dist/map-integration/0.3.14/`. Artifacts and manifest are under
+`moto_esp32/dist/release-0.3.14/`.
+
+## Normal-device delivery
+
+The normal image was written and hash-verified on COM21 at 0x10000 around
+14:24 Asia/Shanghai on 2026-11-17, preserving pairing/NVS. The 30 s boot capture
+reports firmware 0.3.14, `device_tests=0`, `ble_diagnostics=1`, free internal
+heap 26579 bytes and main-task stack minimum 3416 bytes. It contains no
+panic/assert/watchdog. Bluetooth was disconnected during this boot capture;
+this is not a phone-navigation acceptance run. A passive one-hour diagnostic
+logger was started at 14:25 without resetting the device.
+
+Physical legibility and real-phone map feedback remain pending; host previews
+and boot logs do not establish either. Android 0.7.21 does not need reinstalling.
+Firmware/protocol synchronization checks the original checkout against baseline
+`2c4a317`, backs up changed files, and verifies each copied file. Five superseded
+18 px generated font files are removed only after their original bytes match
+that baseline. Original Android source files are not changed.
+
+[Source CI](https://github.com/gargamelzhao0-del/motonav/actions/runs/44030382337)
+passed both jobs on `4c3477e`: Android checks/build/lint, firmware dependency
+boundaries and host tests, a clean production build after removing `tests/`,
+optional device-benchmark compilation, and all LVGL checks. This CI does not
+publish a new phone release. The delivery includes the CI result and measured
+normal-image SHA-256 in its validation records.
